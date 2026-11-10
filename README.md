@@ -33,15 +33,34 @@ beet update                                         # re-read changed tags, drop
 | Paths | `paths:` with `default`/`singleton`/`comp`/query keys, `replace:` rules, `asciify_paths`, `max_filename_length`, unique-path suffixes, empty-dir pruning |
 | Commands | `import ls modify rm mv update write stats fields config` |
 | Tags | MP3, FLAC, M4A/ALAC, Ogg/Opus, WavPack, APE, AIFF, WAV via lofty |
+| Release preferences | `match.preferred.countries` / `media` (regex lists, earlier = better) and `original_year`, as in beets |
+| Plugins | enabled with `plugins:`; import hooks + subcommands. **fetchart** (folder image, then Cover Art Archive; `beet fetchart [-f]`), **lyrics** (LRCLIB, plain or synced; `beet lyrics [-p] [-f]`) |
+| Album art | `artpath` follows the album on `mv`/`modify`/`update`, is copied on `mv -c -d`, and is deleted by `rm -d` |
+
+## Example config
+
+```yaml
+directory: ~/Music
+plugins: fetchart lyrics
+match:
+    preferred:
+        countries: ['GB|UK', US]
+        media: [CD, Digital Media|File]
+        original_year: yes
+fetchart:
+    maxwidth: 1200      # use Cover Art Archive's 1200px thumbnail
+lyrics:
+    synced: no
+```
 
 ## Not yet
 
-Plugins (fetchart, lyrics, replaygain, …), import resume/incremental state,
-"as Tracks" / "Group albums" prompt choices, preferred countries/media for
-tie-breaking, album art, `%sunique`, reading or writing beets' own `library.db`.
+More plugins (embedart, replaygain, duplicates, web), import resume/incremental
+state, "as Tracks" / "Group albums" prompt choices, image resizing, `%sunique`,
+reading or writing beets' own `library.db`.
 
 ## Layout
 
 `model` (typed fields + flex attrs) · `library` (SQLite) · `query` · `template` ·
 `paths` · `media` (lofty tags) · `mb` (MusicBrainz) · `autotag` · `importer` ·
-`commands` · `ui`.
+`commands` · `ui` · `plugins/` (`fetchart`, `lyrics`).

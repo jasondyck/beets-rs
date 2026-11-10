@@ -445,6 +445,14 @@ impl Record {
         }
     }
 
+    /// A path-typed field other than `path` (e.g. an album's `artpath`).
+    pub fn path_field(&self, name: &str) -> &Path {
+        match self.values.get(name) {
+            Some(Value::Path(p)) => p,
+            _ => Path::new(""),
+        }
+    }
+
     pub fn set_path(&mut self, p: impl Into<PathBuf>) {
         self.values.insert("path", Value::Path(p.into()));
     }

@@ -48,6 +48,21 @@ impl Distance {
         self.add(key, string_dist(a, b));
     }
 
+    /// Penalty by position in a preference list: the first option is free,
+    /// later ones cost more, and a value matching none costs 1.0. Options are
+    /// case-insensitive regexes, so `GB|UK` works as in beets.
+    pub fn add_priority(&mut self, key: &str, value: &str, options: &[String]) {
+        let unit = 1.0 / options.len().max(1) as f64;
+        for (i, opt) in options.iter().enumerate() {
+            let hit = Regex::new(&format!("(?i)^(?:{opt})$")).is_ok_and(|re| re.is_match(value));
+            if hit {
+                self.add(key, i as f64 * unit);
+                return;
+            }
+        }
+        self.add(key, 1.0);
+    }
+
     pub fn add_bool(&mut self, key: &str, mismatch: bool) {
         self.add(key, if mismatch { 1.0 } else { 0.0 });
     }
@@ -283,7 +298,25 @@ pub fn album_distance(
         let years = [info.year, info.original_year];
         d.add_bool("year", !years.contains(&cur.year));
     }
+    if cfg.bool("match.preferred.original_year") && info.original_year > 0 && info.year > 0 {
+        // Prefer the original release over later reissues.
+        let this_year = chrono::Datelike::year(&chrono::Local::now()) as i64;
+        let span = (this_year - info.original_year).max(1) as f64;
+        d.add("year", (info.year - info.original_year).abs() as f64 / span);
+    }
+    let countries = cfg.list("match.preferred.countries");
+    let media = cfg.list("match.preferred.media");
     let likely_str = |f: &str| likely(items, f).0;
+    let cur_media = likely_str("media");
+    if !cur_media.is_empty() && !info.media.is_empty() {
+        d.add_string("media", &cur_media, &info.media);
+    } else if !media.is_empty() {
+        let first = info.media.split('/').next().unwrap_or("");
+        d.add_priority("media", first, &media);
+    }
+    if likely_str("country").is_empty() && !countries.is_empty() {
+        d.add_priority("country", &info.country, &countries);
+    }
     for (key, field, value) in [
         ("country", "country", &info.country),
         ("label", "label", &info.label),
@@ -637,6 +670,43 @@ mod tests {
         assert_eq!(m.extra_tracks, vec![2]);
         assert!(m.distance.keys().contains(&"missing tracks".to_string()));
         assert!(recommend(&cfg, &[&m.distance]) <= Recommendation::Medium);
+    }
+
+    #[test]
+    fn preferences_break_ties() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("config.yaml");
+        std::fs::write(
+            &file,
+            "match:\n  preferred:\n    countries: ['GB|UK', US]\n    media: [CD]\n    original_year: yes\n",
+        )
+        .unwrap();
+        let cfg = Config::load(Some(&file)).unwrap();
+        let items = vec![
+            item("Alpha", 1, 200.0),
+            item("Beta", 2, 180.0),
+            item("Gamma", 3, 240.0),
+        ];
+        let mk = |country: &str, media: &str, year: i64| {
+            let mut i = info();
+            i.country = country.into();
+            i.media = media.into();
+            i.year = year;
+            i.original_year = 2000;
+            match_album(&cfg, &items, i).distance.distance()
+        };
+        let uk_cd = mk("UK", "CD", 2000);
+        let us_cd = mk("US", "CD", 2000);
+        let jp_cd = mk("JP", "CD", 2000);
+        let uk_vinyl = mk("UK", "12\" Vinyl", 2000);
+        let uk_reissue = mk("UK", "CD", 2016);
+        assert!(uk_cd < us_cd && us_cd < jp_cd, "{uk_cd} {us_cd} {jp_cd}");
+        assert!(uk_cd < uk_vinyl);
+        assert!(uk_cd < uk_reissue);
+        // Preferences nudge but don't sink an otherwise perfect match.
+        let strong = cfg.f64("match.strong_rec_thresh");
+        assert_eq!(uk_cd, 0.0);
+        assert!(jp_cd <= strong, "{jp_cd}");
     }
 
     #[test]

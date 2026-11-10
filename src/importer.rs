@@ -8,6 +8,7 @@ use crate::mb::MusicBrainz;
 use crate::media;
 use crate::model::{Album, Item, Value, format_duration};
 use crate::paths::PathFormatter;
+use crate::plugins::{self, Plugin, PluginCtx};
 use crate::ui::{self, Choice};
 use anyhow::{Context, Result, bail};
 use regex::Regex;
@@ -79,6 +80,7 @@ pub struct Importer<'a> {
     opts: ImportOptions,
     pub stats: Stats,
     roots: Vec<PathBuf>,
+    plugins: &'a [Box<dyn Plugin>],
 }
 
 static DISC_DIR: LazyLock<Regex> =
@@ -215,7 +217,12 @@ fn len_str(secs: Option<f64>) -> String {
 }
 
 impl<'a> Importer<'a> {
-    pub fn new(cfg: &'a Config, lib: &'a Library, opts: ImportOptions) -> Result<Self> {
+    pub fn new(
+        cfg: &'a Config,
+        lib: &'a Library,
+        opts: ImportOptions,
+        plugins: &'a [Box<dyn Plugin>],
+    ) -> Result<Self> {
         Ok(Importer {
             cfg,
             lib,
@@ -224,6 +231,7 @@ impl<'a> Importer<'a> {
             opts,
             stats: Stats::default(),
             roots: vec![],
+            plugins,
         })
     }
 
@@ -345,7 +353,7 @@ impl<'a> Importer<'a> {
             }
             return Ok(true);
         }
-        self.finalize_album(items, m.is_some())?;
+        self.finalize_album(items, m.is_some(), &dir)?;
         Ok(true)
     }
 
@@ -679,24 +687,47 @@ impl<'a> Importer<'a> {
     }
 
     /// Place files, write tags and store the album + items in the library.
-    fn finalize_album(&mut self, mut items: Vec<Item>, tagged: bool) -> Result<()> {
+    fn finalize_album(
+        &mut self,
+        mut items: Vec<Item>,
+        tagged: bool,
+        source_dir: &Path,
+    ) -> Result<()> {
         let added = now();
         for i in &mut items {
             i.set("added", Value::Float(added));
         }
         let n = items.len();
         let lib = self.lib;
-        lib.transaction(|lib| {
+        let mut album = lib.transaction(|lib| {
             let album = lib.add_album(&mut items)?;
             for item in &mut items {
                 self.place_and_write(item, Some(&album), tagged)?;
                 lib.store(item)?;
             }
-            Ok(())
+            Ok(album)
         })?;
+        let ctx = self.plugin_ctx();
+        let op = self.opts.op;
+        plugins::each(self.plugins, |p| {
+            p.album_imported(&ctx, &mut album, &mut items, source_dir, op)
+        });
+        if op == FileOp::Move
+            && let Some(root) = self.roots.last()
+        {
+            prune_dirs(source_dir, root);
+        }
         self.stats.albums += 1;
         self.stats.items += n;
         Ok(())
+    }
+
+    fn plugin_ctx(&self) -> PluginCtx<'a> {
+        PluginCtx {
+            cfg: self.cfg,
+            lib: self.lib,
+            write: self.opts.write,
+        }
     }
 
     fn place_and_write(&self, item: &mut Item, album: Option<&Album>, tagged: bool) -> Result<()> {
@@ -770,6 +801,8 @@ impl<'a> Importer<'a> {
         item.set_int("album_id", 0);
         self.place_and_write(&mut item, None, tagged)?;
         self.lib.add(&mut item)?;
+        let ctx = self.plugin_ctx();
+        plugins::each(self.plugins, |p| p.item_imported(&ctx, &mut item));
         self.stats.items += 1;
         Ok(true)
     }

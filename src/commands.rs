@@ -8,6 +8,7 @@ use crate::model::{
     ALBUM_FIELDS, Album, ITEM_FIELDS, Item, Kind, Record, album_item_shared_fields,
 };
 use crate::paths::PathFormatter;
+use crate::plugins::{self, PluginCtx};
 use crate::query::Query;
 use crate::template::{Context, Template};
 use crate::ui;
@@ -15,7 +16,7 @@ use crate::{Cli, Cmd};
 use anyhow::{Result, bail};
 use regex::Regex;
 use serde_yaml::Value as Y;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 
 pub fn run(cli: Cli) -> Result<()> {
@@ -50,6 +51,7 @@ pub fn run(cli: Cli) -> Result<()> {
     }
 
     let lib = Library::open(&cfg.library_path())?;
+    let plugins = plugins::load(&cfg)?;
     match cli.cmd {
         Cmd::Import {
             copy,
@@ -87,7 +89,7 @@ pub fn run(cli: Cli) -> Result<()> {
             opts.singletons |= singletons;
             opts.search_ids = search_id;
             opts.pretend = pretend;
-            let mut imp = Importer::new(&cfg, &lib, opts)?;
+            let mut imp = Importer::new(&cfg, &lib, opts, &plugins)?;
             imp.run(&paths)?;
             let s = &imp.stats;
             println!();
@@ -138,6 +140,12 @@ pub fn run(cli: Cli) -> Result<()> {
         } => update(&cfg, &lib, pretend, !nomove, &query),
         Cmd::Write { pretend, query } => write(&lib, pretend, &query),
         Cmd::Stats { exact, query } => stats(&lib, exact, &query),
+        Cmd::Fetchart { force, query } => fetchart(&cfg, &lib, force, &query),
+        Cmd::Lyrics {
+            print,
+            force,
+            query,
+        } => lyrics(&cfg, &lib, print, force, &query),
         Cmd::Fields | Cmd::Config { .. } => unreachable!(),
     }
 }
@@ -314,6 +322,7 @@ fn modify(
     }
     let fmt = PathFormatter::new(cfg)?;
     let in_lib = |i: &Item| i.path().starts_with(cfg.directory());
+    let mut albums_touched: HashSet<i64> = HashSet::new();
     lib.transaction(|lib| {
         for obj in &mut changed {
             lib.store(obj)?;
@@ -340,10 +349,17 @@ fn modify(
                     eprintln!("warning: {e:#}");
                 }
                 lib.store(item)?;
+                albums_touched.insert(item.int("album_id"));
             }
         }
         Ok(())
-    })
+    })?;
+    if mv {
+        for id in albums_touched {
+            sync_art(cfg, lib, id)?;
+        }
+    }
+    Ok(())
 }
 
 fn remove(
@@ -395,7 +411,17 @@ fn remove(
             touched_albums.insert(i.int("album_id"));
             lib.remove(i)?;
         }
+        let delete_art = |a: &Album| {
+            let art = a.path_field("artpath");
+            if delete && art.is_file() {
+                std::fs::remove_file(art).ok();
+                if let Some(p) = art.parent() {
+                    importer::prune_dirs(p, &libdir);
+                }
+            }
+        };
         for a in &albums {
+            delete_art(a);
             lib.remove(a)?;
         }
         // Drop albums left with no items.
@@ -403,6 +429,7 @@ fn remove(
             if let Some(a) = lib.get_album(id)?
                 && lib.album_items(id)?.is_empty()
             {
+                delete_art(&a);
                 lib.remove(&a)?;
             }
         }
@@ -434,8 +461,15 @@ fn move_cmd(
         lib.items(&Query::parse(Kind::Item, q)?)?
     };
     let mut n = 0;
+    // Album id -> directory its items ended up in, to bring the art along.
+    let mut album_dirs: HashMap<i64, PathBuf> = HashMap::new();
     for mut item in items {
         let album = lib.get_album(item.int("album_id"))?;
+        if let Some(dir) = fmt.destination(&item, album.as_ref(), Some(lib)).parent()
+            && item.int("album_id") != 0
+        {
+            album_dirs.insert(item.int("album_id"), dir.to_path_buf());
+        }
         let target = fmt.destination(&item, album.as_ref(), Some(lib));
         if target == item.path() {
             continue;
@@ -457,6 +491,22 @@ fn move_cmd(
         }
     }
     if !pretend {
+        for (id, dir) in album_dirs {
+            if copy {
+                // Exported copies get a copy of the art; the library keeps its own.
+                if let Some(a) = lib.get_album(id)? {
+                    let art = a.path_field("artpath");
+                    if art.is_file() {
+                        let target = dir.join(art.file_name().unwrap_or_default());
+                        if target != art && !target.exists() {
+                            importer::copy_file(art, &target)?;
+                        }
+                    }
+                }
+            } else {
+                sync_art(&cfg, lib, id)?;
+            }
+        }
         println!("{} {n} item(s).", if copy { "Copied" } else { "Moved" });
     }
     Ok(())
@@ -521,6 +571,9 @@ fn update(cfg: &Config, lib: &Library, pretend: bool, mv: bool, q: &[String]) ->
             }
             lib.store(&new)?;
             touched_albums.insert(new.int("album_id"));
+            if mv {
+                sync_art(cfg, lib, new.int("album_id"))?;
+            }
         }
     }
     // Refresh album-level fields from their items, and drop empty albums.
@@ -541,6 +594,90 @@ fn update(cfg: &Config, lib: &Library, pretend: bool, mv: bool, q: &[String]) ->
         }
     }
     println!("Updated {updated} item(s), removed {removed}.");
+    Ok(())
+}
+
+/// Keep an album's art next to its items after they move.
+fn sync_art(cfg: &Config, lib: &Library, album_id: i64) -> Result<()> {
+    let Some(mut album) = lib.get_album(album_id)? else {
+        return Ok(());
+    };
+    let art = album.path_field("artpath").to_path_buf();
+    if !art.is_file() {
+        return Ok(());
+    }
+    let items = lib.album_items(album_id)?;
+    let Some(dir) = plugins::fetchart::album_dir(&items) else {
+        return Ok(());
+    };
+    let dest = dir.join(art.file_name().unwrap_or_default());
+    if dest == art {
+        return Ok(());
+    }
+    if dest.exists() {
+        eprintln!("warning: not moving art, {} exists", dest.display());
+        return Ok(());
+    }
+    importer::move_file(&art, &dest)?;
+    if let Some(p) = art.parent() {
+        importer::prune_dirs(p, &cfg.directory());
+    }
+    album.set("artpath", crate::model::Value::Path(dest));
+    lib.store(&album)
+}
+
+fn require_plugin(cfg: &Config, name: &str) -> Result<()> {
+    if !plugins::enabled(cfg, name) {
+        bail!("the {name} plugin is not enabled; add it to `plugins:` in your config");
+    }
+    Ok(())
+}
+
+fn fetchart(cfg: &Config, lib: &Library, force: bool, q: &[String]) -> Result<()> {
+    require_plugin(cfg, "fetchart")?;
+    let fa = plugins::fetchart::FetchArt::new(cfg);
+    let ctx = PluginCtx {
+        cfg,
+        lib,
+        write: cfg.bool("import.write"),
+    };
+    let t = Template::parse(&cfg.str("format_album"));
+    for mut album in lib.albums(&Query::parse(Kind::Album, q)?)? {
+        let items = lib.album_items(album.id.unwrap())?;
+        let label = format_record(&t, &album);
+        match fa.fetch_for_album(&ctx, &mut album, &items, None, FileOp::Copy, force) {
+            Ok(Some(p)) => println!("{label}: found art: {}", p.display()),
+            Ok(None) if !force && album.path_field("artpath").is_file() => {
+                println!("{label}: has album art")
+            }
+            Ok(None) => println!("{label}: no art found"),
+            Err(e) => eprintln!("warning: {label}: {e:#}"),
+        }
+    }
+    Ok(())
+}
+
+fn lyrics(cfg: &Config, lib: &Library, print: bool, force: bool, q: &[String]) -> Result<()> {
+    require_plugin(cfg, "lyrics")?;
+    let ly = plugins::lyrics::Lyrics::new(cfg);
+    let ctx = PluginCtx {
+        cfg,
+        lib,
+        write: cfg.bool("import.write"),
+    };
+    let t = Template::parse(&cfg.str("format_item"));
+    for mut item in lib.items(&Query::parse(Kind::Item, q)?)? {
+        if let Err(e) = ly.fetch_item(&ctx, &mut item, force) {
+            eprintln!("warning: {}: {e:#}", format_record(&t, &item));
+        }
+        if print && !item.str("lyrics").is_empty() {
+            println!(
+                "\n{}\n\n{}\n",
+                ui::bold(&format_record(&t, &item)),
+                item.str("lyrics")
+            );
+        }
+    }
     Ok(())
 }
 

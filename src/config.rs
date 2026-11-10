@@ -75,8 +75,26 @@ match:
         track_index: 1.0
         track_length: 2.0
         track_id: 5.0
+    preferred:
+        countries: []
+        media: []
+        original_year: no
     track_length_grace: 10
     track_length_max: 30
+
+plugins: []
+
+fetchart:
+    auto: yes
+    sources: filesystem coverart
+    cover_names: cover front art album folder
+    art_filename: cover
+    maxwidth: 0
+
+lyrics:
+    auto: yes
+    force: no
+    synced: no
 
 musicbrainz:
     host: musicbrainz.org
@@ -254,6 +272,23 @@ impl Config {
         }
     }
 
+    /// A list given either as a YAML sequence or a space-separated string
+    /// (beets accepts both, e.g. `plugins: fetchart lyrics`).
+    pub fn list(&self, key: &str) -> Vec<String> {
+        match self.get(key) {
+            Some(Y::Sequence(seq)) => seq
+                .iter()
+                .filter_map(|v| match v {
+                    Y::String(s) => Some(s.clone()),
+                    Y::Number(n) => Some(n.to_string()),
+                    _ => None,
+                })
+                .collect(),
+            Some(Y::String(s)) => s.split_whitespace().map(String::from).collect(),
+            _ => vec![],
+        }
+    }
+
     pub fn directory(&self) -> PathBuf {
         let d = expand_tilde(&self.str("directory"));
         if d.is_absolute() {
@@ -299,5 +334,7 @@ mod tests {
         assert!(paths.iter().any(|(k, _)| k == "default"));
         assert_eq!(c.library_path(), dir.path().join("library.db"));
         assert_eq!(c.f64("match.strong_rec_thresh"), 0.04);
+        assert!(c.list("plugins").is_empty());
+        assert_eq!(c.list("fetchart.sources"), vec!["filesystem", "coverart"]);
     }
 }

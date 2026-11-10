@@ -7,6 +7,7 @@ mod mb;
 mod media;
 mod model;
 mod paths;
+mod plugins;
 mod query;
 mod template;
 mod ui;
@@ -161,6 +162,25 @@ pub enum Cmd {
     },
     /// List available fields
     Fields,
+    /// Fetch album art (plugin: fetchart)
+    Fetchart {
+        /// Re-fetch even if the album already has art
+        #[arg(short = 'f', long)]
+        force: bool,
+        #[arg(allow_hyphen_values = true)]
+        query: Vec<String>,
+    },
+    /// Fetch lyrics (plugin: lyrics)
+    Lyrics {
+        /// Print the lyrics
+        #[arg(short = 'p', long)]
+        print: bool,
+        /// Re-fetch even if the item already has lyrics
+        #[arg(short = 'f', long)]
+        force: bool,
+        #[arg(allow_hyphen_values = true)]
+        query: Vec<String>,
+    },
     /// Show the effective configuration
     Config {
         /// Print the config file path

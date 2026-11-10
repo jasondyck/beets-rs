@@ -45,7 +45,6 @@ const TEXT_KEYS: &[(&str, ItemKey)] = &[
     ("composer", ItemKey::Composer),
     ("grouping", ItemKey::ContentGroup),
     ("disctitle", ItemKey::SetSubtitle),
-    ("lyrics", ItemKey::Lyrics),
     ("isrc", ItemKey::Isrc),
     ("mb_trackid", ItemKey::MusicBrainzRecordingId),
     ("mb_releasetrackid", ItemKey::MusicBrainzTrackId),
@@ -184,6 +183,13 @@ pub fn read(path: &Path) -> Result<Item> {
                 item.set_str(field, v);
             }
         }
+        // ID3v2 only knows USLT, which lofty calls UnsyncLyrics.
+        if let Some(l) = tag
+            .get_string(ItemKey::Lyrics)
+            .or_else(|| tag.get_string(ItemKey::UnsyncLyrics))
+        {
+            item.set_str("lyrics", l);
+        }
         // ID3 keeps the label in TPUB, which lofty reads back as Publisher.
         if item.str("label").is_empty()
             && let Some(v) = tag.get_string(ItemKey::Publisher)
@@ -265,6 +271,12 @@ pub fn write_to(item: &Item, path: &Path) -> Result<()> {
     for (field, key) in TEXT_KEYS {
         set_text(tag, *key, item.str(field));
     }
+    let lyrics = item.str("lyrics");
+    tag.remove_key(ItemKey::Lyrics);
+    tag.remove_key(ItemKey::UnsyncLyrics);
+    if !lyrics.is_empty() && !tag.insert_text(ItemKey::Lyrics, lyrics.to_string()) {
+        tag.insert_text(ItemKey::UnsyncLyrics, lyrics.to_string());
+    }
     let num = |tag: &mut Tag, key: ItemKey, v: i64| {
         if v > 0 {
             tag.insert_text(key, v.to_string());
@@ -315,5 +327,40 @@ mod tests {
         assert_eq!(parse_date("2003-05-12T00:00"), (2003, 5, 12));
         assert_eq!(parse_date("1999"), (1999, 0, 0));
         assert_eq!(date_string(1999, 3, 0).unwrap(), "1999-03");
+    }
+}
+
+#[cfg(test)]
+mod roundtrip {
+    use super::*;
+
+    /// Needs ffmpeg to make a real file; skipped when it's missing.
+    fn make(ext: &str) -> Option<(tempfile::TempDir, std::path::PathBuf)> {
+        let d = tempfile::tempdir().unwrap();
+        let p = d.path().join(format!("t.{ext}"));
+        let ok = std::process::Command::new("ffmpeg")
+            .args(["-loglevel", "error", "-f", "lavfi", "-i", "sine=duration=1"])
+            .arg(&p)
+            .status()
+            .is_ok_and(|s| s.success());
+        ok.then_some((d, p))
+    }
+
+    #[test]
+    fn writes_and_reads_back_all_tag_fields() {
+        for ext in ["mp3", "flac", "m4a", "ogg"] {
+            let Some((_d, p)) = make(ext) else { return };
+            let mut item = read(&p).unwrap();
+            item.set_str("title", "T");
+            item.set_str("lyrics", "line one\nline two");
+            item.set_str("label", "Lbl");
+            item.set_int("track", 3);
+            item.set_int("year", 2001);
+            write(&item).unwrap();
+            let back = read(&p).unwrap();
+            for f in ["title", "lyrics", "label", "track", "year"] {
+                assert_eq!(back.formatted(f), item.formatted(f), "{ext}: {f}");
+            }
+        }
     }
 }
