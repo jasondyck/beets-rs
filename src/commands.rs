@@ -13,7 +13,7 @@ use crate::query::Query;
 use crate::template::{Context, Template};
 use crate::ui;
 use crate::{Cli, Cmd};
-use anyhow::{Result, bail};
+use anyhow::{Context as _, Result, bail};
 use regex::Regex;
 use serde_yaml::Value as Y;
 use std::collections::{HashMap, HashSet};
@@ -141,6 +141,14 @@ pub fn run(cli: Cli) -> Result<()> {
         Cmd::Write { pretend, query } => write(&lib, pretend, &query),
         Cmd::Stats { exact, query } => stats(&lib, exact, &query),
         Cmd::Fetchart { force, query } => fetchart(&cfg, &lib, force, &query),
+        Cmd::Embedart { file, yes, query } => embedart(&cfg, &lib, file, yes, &query),
+        Cmd::Extractart {
+            output,
+            name,
+            associate,
+            query,
+        } => extractart(&cfg, &lib, output, name, associate, &query),
+        Cmd::Clearart { yes, query } => clearart(&cfg, &lib, yes, &query),
         Cmd::Lyrics {
             print,
             force,
@@ -654,6 +662,145 @@ fn fetchart(cfg: &Config, lib: &Library, force: bool, q: &[String]) -> Result<()
             Err(e) => eprintln!("warning: {label}: {e:#}"),
         }
     }
+    Ok(())
+}
+
+fn embedart(
+    cfg: &Config,
+    lib: &Library,
+    file: Option<PathBuf>,
+    yes: bool,
+    q: &[String],
+) -> Result<()> {
+    require_plugin(cfg, "embedart")?;
+    let ea = plugins::embedart::EmbedArt::new(cfg);
+    let ctx = PluginCtx {
+        cfg,
+        lib,
+        write: true,
+    };
+    let items = lib.items(&Query::parse(Kind::Item, q)?)?;
+    if items.is_empty() {
+        println!("No matching items.");
+        return Ok(());
+    }
+    let what = match &file {
+        Some(f) => format!("Embed {} into {} file(s)", f.display(), items.len()),
+        None => format!("Embed album art into {} file(s)", items.len()),
+    };
+    if !yes && !ui::yes_no(&what) {
+        return Ok(());
+    }
+    let mut n = 0;
+    match file {
+        Some(f) => {
+            let image = std::fs::read(&f).with_context(|| format!("reading {}", f.display()))?;
+            for mut item in items {
+                match ea.embed_item(&ctx, &mut item, &image) {
+                    Ok(true) => n += 1,
+                    Ok(false) => {}
+                    Err(e) => eprintln!("warning: {}: {e:#}", item.path().display()),
+                }
+            }
+        }
+        None => {
+            // Group by album so each album's art file is read once.
+            let mut by_album: HashMap<i64, Vec<Item>> = HashMap::new();
+            for item in items {
+                by_album.entry(item.int("album_id")).or_default().push(item);
+            }
+            for (id, mut items) in by_album {
+                let Some(mut album) = lib.get_album(id)? else {
+                    continue;
+                };
+                if !album.path_field("artpath").is_file() {
+                    let t = Template::parse(&cfg.str("format_album"));
+                    println!("{}: no album art file", format_record(&t, &album));
+                    continue;
+                }
+                n += ea.embed_album(&ctx, &mut album, &mut items)?;
+            }
+        }
+    }
+    println!("Embedded art in {n} file(s).");
+    Ok(())
+}
+
+fn extractart(
+    cfg: &Config,
+    lib: &Library,
+    output: Option<PathBuf>,
+    name: Option<String>,
+    associate: bool,
+    q: &[String],
+) -> Result<()> {
+    require_plugin(cfg, "embedart")?;
+    if associate {
+        let name = name.unwrap_or_else(|| cfg.str("fetchart.art_filename"));
+        let t = Template::parse(&cfg.str("format_album"));
+        for mut album in lib.albums(&Query::parse(Kind::Album, q)?)? {
+            let items = lib.album_items(album.id.unwrap())?;
+            let label = format_record(&t, &album);
+            let found = items
+                .iter()
+                .find_map(|i| media::extract_art(i.path()).ok().flatten());
+            let (Some((data, ext)), Some(dir)) = (found, plugins::fetchart::album_dir(&items))
+            else {
+                println!("{label}: no embedded art");
+                continue;
+            };
+            let dest = dir.join(format!("{name}.{ext}"));
+            std::fs::write(&dest, data).with_context(|| format!("writing {}", dest.display()))?;
+            album.set("artpath", crate::model::Value::Path(dest.clone()));
+            lib.store(&album)?;
+            println!("{label}: {}", dest.display());
+        }
+        return Ok(());
+    }
+    // Without -a: first matching item with art, written to -o (beets behaviour).
+    let items = lib.items(&Query::parse(Kind::Item, q)?)?;
+    for item in items {
+        if let Some((data, ext)) = media::extract_art(item.path())? {
+            let base = output.unwrap_or_else(|| PathBuf::from("cover"));
+            let mut dest = base.into_os_string();
+            dest.push(format!(".{ext}"));
+            let dest = PathBuf::from(dest);
+            std::fs::write(&dest, data).with_context(|| format!("writing {}", dest.display()))?;
+            println!(
+                "Extracted art from {} to {}",
+                item.path().display(),
+                dest.display()
+            );
+            return Ok(());
+        }
+    }
+    println!("No embedded art found.");
+    Ok(())
+}
+
+fn clearart(cfg: &Config, lib: &Library, yes: bool, q: &[String]) -> Result<()> {
+    require_plugin(cfg, "embedart")?;
+    let items = lib.items(&Query::parse(Kind::Item, q)?)?;
+    if items.is_empty() {
+        println!("No matching items.");
+        return Ok(());
+    }
+    if !yes && !ui::yes_no(&format!("Remove embedded art from {} file(s)", items.len())) {
+        return Ok(());
+    }
+    let mut n = 0;
+    for mut item in items {
+        match media::clear_art(item.path()) {
+            Ok(true) => {
+                media::refresh_mtime(&mut item);
+                lib.store(&item)?;
+                n += 1;
+            }
+            Ok(false) => {}
+            Err(e) => eprintln!("warning: {}: {e:#}", item.path().display()),
+        }
+    }
+    println!("Cleared art from {n} file(s).");
     Ok(())
 }
 

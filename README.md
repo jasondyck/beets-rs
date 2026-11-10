@@ -34,14 +34,14 @@ beet update                                         # re-read changed tags, drop
 | Commands | `import ls modify rm mv update write stats fields config` |
 | Tags | MP3, FLAC, M4A/ALAC, Ogg/Opus, WavPack, APE, AIFF, WAV via lofty |
 | Release preferences | `match.preferred.countries` / `media` (regex lists, earlier = better) and `original_year`, as in beets |
-| Plugins | enabled with `plugins:`; import hooks + subcommands. **fetchart** (folder image, then Cover Art Archive; `beet fetchart [-f]`), **lyrics** (LRCLIB, plain or synced; `beet lyrics [-p] [-f]`) |
+| Plugins | enabled with `plugins:`; import hooks + subcommands. **fetchart** (folder image, then Cover Art Archive; `beet fetchart [-f]`), **lyrics** (LRCLIB, plain or synced; `beet lyrics [-p] [-f]`), **embedart** (embeds the album art on import, always after fetchart; `beet embedart [-f IMAGE] [-y]`, `beet extractart [-o PATH] [-a] [-n NAME]`, `beet clearart [-y]`; options `ifempty`, `remove_art_file`) |
 | Album art | `artpath` follows the album on `mv`/`modify`/`update`, is copied on `mv -c -d`, and is deleted by `rm -d` |
 
 ## Example config
 
 ```yaml
 directory: ~/Music
-plugins: fetchart lyrics
+plugins: fetchart embedart lyrics
 match:
     preferred:
         countries: ['GB|UK', US]
@@ -55,7 +55,7 @@ lyrics:
 
 ## Not yet
 
-More plugins (embedart, replaygain, duplicates, web), import resume/incremental
+More plugins (replaygain, duplicates, web), import resume/incremental
 state, "as Tracks" / "Group albums" prompt choices, image resizing, `%sunique`,
 reading or writing beets' own `library.db`.
 
@@ -63,4 +63,4 @@ reading or writing beets' own `library.db`.
 
 `model` (typed fields + flex attrs) · `library` (SQLite) · `query` · `template` ·
 `paths` · `media` (lofty tags) · `mb` (MusicBrainz) · `autotag` · `importer` ·
-`commands` · `ui` · `plugins/` (`fetchart`, `lyrics`).
+`commands` · `ui` · `plugins/` (`fetchart`, `embedart`, `lyrics`).

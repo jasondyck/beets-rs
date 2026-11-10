@@ -4,6 +4,7 @@ use crate::model::{Item, Value};
 use anyhow::{Context, Result};
 use lofty::config::WriteOptions;
 use lofty::file::{AudioFile, FileType, TaggedFile, TaggedFileExt};
+use lofty::picture::{MimeType, Picture, PictureType};
 use lofty::prelude::{Accessor, ItemKey};
 use lofty::tag::Tag;
 use std::path::Path;
@@ -232,6 +233,12 @@ pub fn read(path: &Path) -> Result<Item> {
 /// mistake our own write for an external change.
 pub fn write_item(item: &mut Item) -> Result<()> {
     write(item)?;
+    refresh_mtime(item);
+    Ok(())
+}
+
+/// Record the file's current mtime on the item.
+pub fn refresh_mtime(item: &mut Item) {
     if let Ok(m) = std::fs::metadata(item.path()).and_then(|m| m.modified()) {
         let ts = m
             .duration_since(std::time::UNIX_EPOCH)
@@ -239,7 +246,89 @@ pub fn write_item(item: &mut Item) -> Result<()> {
             .unwrap_or(0.0);
         item.set("mtime", Value::Float(ts));
     }
-    Ok(())
+}
+
+/// Open a file and make sure it has a primary tag to edit.
+fn open_for_edit(path: &Path) -> Result<TaggedFile> {
+    let mut file =
+        lofty::read_from_path(path).with_context(|| format!("reading {}", path.display()))?;
+    let tag_type = file.primary_tag_type();
+    if file.tag(tag_type).is_none() {
+        file.insert_tag(Tag::new(tag_type));
+    }
+    Ok(file)
+}
+
+fn save(file: &TaggedFile, path: &Path) -> Result<()> {
+    file.save_to_path(path, WriteOptions::default())
+        .with_context(|| format!("writing tags to {}", path.display()))
+}
+
+/// Embed an image as the front cover, replacing any existing front cover.
+pub fn embed_art(path: &Path, image: &[u8]) -> Result<()> {
+    let mut pic = Picture::from_reader(&mut &image[..])
+        .map_err(|e| anyhow::anyhow!("not a usable image: {e}"))?;
+    pic.set_pic_type(PictureType::CoverFront);
+    let mut file = open_for_edit(path)?;
+    let tag = file.primary_tag_mut().unwrap();
+    if tag.tag_type() == lofty::tag::TagType::Mp4Ilst {
+        // MP4 cover atoms carry no picture type, so every one counts as "the" cover.
+        while tag.picture_count() > 0 {
+            tag.remove_picture(0);
+        }
+    } else {
+        tag.remove_picture_type(PictureType::CoverFront);
+    }
+    tag.push_picture(pic);
+    save(&file, path)
+}
+
+/// Whether any tag in the file carries a picture.
+pub fn has_art(path: &Path) -> Result<bool> {
+    let file =
+        lofty::read_from_path(path).with_context(|| format!("reading {}", path.display()))?;
+    Ok(file.tags().iter().any(|t| t.picture_count() > 0))
+}
+
+/// The embedded front cover (or else the first picture) and a file extension for it.
+pub fn extract_art(path: &Path) -> Result<Option<(Vec<u8>, &'static str)>> {
+    let file =
+        lofty::read_from_path(path).with_context(|| format!("reading {}", path.display()))?;
+    let pics: Vec<&Picture> = file.tags().iter().flat_map(|t| t.pictures()).collect();
+    let Some(pic) = pics
+        .iter()
+        .find(|p| p.pic_type() == PictureType::CoverFront)
+        .or(pics.first())
+    else {
+        return Ok(None);
+    };
+    let ext = match pic.mime_type() {
+        Some(MimeType::Png) => "png",
+        Some(MimeType::Gif) => "gif",
+        Some(MimeType::Bmp) => "bmp",
+        Some(MimeType::Tiff) => "tiff",
+        _ => "jpg",
+    };
+    Ok(Some((pic.data().to_vec(), ext)))
+}
+
+/// Remove every embedded picture. Returns whether anything was removed.
+pub fn clear_art(path: &Path) -> Result<bool> {
+    let mut file =
+        lofty::read_from_path(path).with_context(|| format!("reading {}", path.display()))?;
+    let mut removed = false;
+    let types: Vec<_> = file.tags().iter().map(|t| t.tag_type()).collect();
+    for tt in types {
+        let tag = file.tag_mut(tt).unwrap();
+        while tag.picture_count() > 0 {
+            tag.remove_picture(0);
+            removed = true;
+        }
+    }
+    if removed {
+        save(&file, path)?;
+    }
+    Ok(removed)
 }
 
 /// Write an item's metadata into its file.
@@ -344,6 +433,37 @@ mod roundtrip {
             .status()
             .is_ok_and(|s| s.success());
         ok.then_some((d, p))
+    }
+
+    #[test]
+    fn embeds_extracts_and_clears_art() {
+        // 1x1 PNG.
+        let png: &[u8] = &[
+            0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00, 0x00, 0x0D, 0x49, 0x48,
+            0x44, 0x52, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x06, 0x00, 0x00,
+            0x00, 0x1F, 0x15, 0xC4, 0x89, 0x00, 0x00, 0x00, 0x0D, 0x49, 0x44, 0x41, 0x54, 0x78,
+            0x9C, 0x63, 0xF8, 0xCF, 0xC0, 0xF0, 0x1F, 0x00, 0x05, 0x00, 0x01, 0xFF, 0x89, 0x99,
+            0x3D, 0x1D, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4E, 0x44, 0xAE, 0x42, 0x60, 0x82,
+        ];
+        for ext in ["mp3", "flac", "m4a", "ogg"] {
+            let Some((_d, p)) = make(ext) else { return };
+            assert!(!has_art(&p).unwrap());
+            embed_art(&p, png).unwrap();
+            // Embedding twice replaces rather than stacking covers.
+            embed_art(&p, png).unwrap();
+            let file = lofty::read_from_path(&p).unwrap();
+            let n: u32 = file.tags().iter().map(|t| t.picture_count()).sum();
+            assert_eq!(n, 1, "{ext}");
+            let (data, kind) = extract_art(&p).unwrap().unwrap();
+            assert_eq!((data.as_slice(), kind), (png, "png"), "{ext}");
+            // Ordinary tag writes keep the picture.
+            let mut item = read(&p).unwrap();
+            item.set_str("title", "x");
+            write(&item).unwrap();
+            assert!(has_art(&p).unwrap(), "{ext}");
+            assert!(clear_art(&p).unwrap());
+            assert!(!has_art(&p).unwrap());
+        }
     }
 
     #[test]

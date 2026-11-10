@@ -2,6 +2,7 @@
 //! beets-style `plugins:` config list. They hook into import and can add
 //! their own subcommands (wired up in `main.rs`/`commands.rs`).
 
+pub mod embedart;
 pub mod fetchart;
 pub mod lyrics;
 
@@ -57,7 +58,7 @@ pub trait Plugin {
     }
 }
 
-pub const AVAILABLE: &[&str] = &["fetchart", "lyrics"];
+pub const AVAILABLE: &[&str] = &["embedart", "fetchart", "lyrics"];
 
 pub fn load(cfg: &Config) -> Result<Vec<Box<dyn Plugin>>> {
     let mut out: Vec<Box<dyn Plugin>> = vec![];
@@ -65,12 +66,16 @@ pub fn load(cfg: &Config) -> Result<Vec<Box<dyn Plugin>>> {
         match name.as_str() {
             "fetchart" => out.push(Box::new(fetchart::FetchArt::new(cfg))),
             "lyrics" => out.push(Box::new(lyrics::Lyrics::new(cfg))),
+            "embedart" => out.push(Box::new(embedart::EmbedArt::new(cfg))),
             other => bail!(
                 "unknown plugin {other:?} (available: {})",
                 AVAILABLE.join(", ")
             ),
         }
     }
+    // embedart embeds whatever fetchart found, so it must run after it
+    // regardless of the order they're listed in.
+    out.sort_by_key(|p| p.name() == "embedart");
     Ok(out)
 }
 

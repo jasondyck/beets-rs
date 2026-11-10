@@ -91,6 +91,11 @@ fetchart:
     art_filename: cover
     maxwidth: 0
 
+embedart:
+    auto: yes
+    ifempty: no
+    remove_art_file: no
+
 lyrics:
     auto: yes
     force: no

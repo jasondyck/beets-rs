@@ -265,7 +265,10 @@ mod tests {
         let f = FetchArt::new(&cfg);
         let d = tempfile::tempdir().unwrap();
         std::fs::write(d.path().join("back.jpg"), b"x").unwrap();
-        assert_eq!(f.search_filesystem(d.path()), Some(d.path().join("back.jpg")));
+        assert_eq!(
+            f.search_filesystem(d.path()),
+            Some(d.path().join("back.jpg"))
+        );
         std::fs::write(d.path().join("Folder.png"), b"x").unwrap();
         std::fs::write(d.path().join("scan-front.jpg"), b"x").unwrap();
         // "front" comes before "folder" in cover_names.

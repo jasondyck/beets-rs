@@ -170,6 +170,39 @@ pub enum Cmd {
         #[arg(allow_hyphen_values = true)]
         query: Vec<String>,
     },
+    /// Embed album art into files (plugin: embedart)
+    Embedart {
+        /// Embed this image instead of each album's art file
+        #[arg(short = 'f', long = "file")]
+        file: Option<PathBuf>,
+        /// Skip confirmation
+        #[arg(short = 'y', long)]
+        yes: bool,
+        #[arg(allow_hyphen_values = true)]
+        query: Vec<String>,
+    },
+    /// Extract embedded art to a file (plugin: embedart)
+    Extractart {
+        /// Output path without extension (default: ./cover)
+        #[arg(short = 'o', long)]
+        output: Option<PathBuf>,
+        /// Base name for files written next to albums with -a (default: fetchart.art_filename)
+        #[arg(short = 'n', long)]
+        name: Option<String>,
+        /// Extract each matching album's art into its folder and set it as the album art
+        #[arg(short = 'a', long)]
+        associate: bool,
+        #[arg(allow_hyphen_values = true)]
+        query: Vec<String>,
+    },
+    /// Remove embedded art from files (plugin: embedart)
+    Clearart {
+        /// Skip confirmation
+        #[arg(short = 'y', long)]
+        yes: bool,
+        #[arg(allow_hyphen_values = true)]
+        query: Vec<String>,
+    },
     /// Fetch lyrics (plugin: lyrics)
     Lyrics {
         /// Print the lyrics
