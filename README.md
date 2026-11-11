@@ -18,7 +18,7 @@ beet ls artist:radiohead year:2000..2009 year-
 beet ls -a -f '$albumartist - $album ($year)'
 beet modify -a 'in rainbows' genre=Alternative
 beet modify nude 'title=$title (live)' mood=calm   # values are templates; unknown fields become flexible attributes
-beet mv -c -d /mnt/usb artist:radiohead            # export copies with library path formats
+beet mv -e -d /mnt/usb artist:radiohead            # export copies with library path formats (library unchanged)
 beet update                                         # re-read changed tags, drop deleted files
 ```
 
@@ -38,7 +38,8 @@ beet update                                         # re-read changed tags, drop
 | Tags | MP3, FLAC, M4A/ALAC, Ogg/Opus, WavPack, APE, AIFF, WAV via lofty |
 | Release preferences | `match.preferred.countries` / `media` (regex lists, earlier = better) and `original_year`, as in beets |
 | Plugins | enabled with `plugins:`; import hooks + subcommands. **fetchart** (folder image, then Cover Art Archive; `beet fetchart [-f]`), **lyrics** (LRCLIB, plain or synced; `beet lyrics [-p] [-f]`), **embedart** (embeds the album art on import, always after fetchart; `beet embedart [-f IMAGE] [-y]`, `beet extractart [-o PATH] [-a] [-n NAME]`, `beet clearart [-y]`; options `ifempty`, `remove_art_file`) |
-| Album art | `artpath` follows the album on `mv`/`modify`/`update`, is copied on `mv -c -d`, and is deleted by `rm -d` |
+| `move` | as beets: consolidates into the library directory, or `-d/--dest DIR`; `-c/--copy` (copy and point the library at the copies), `-e/--export` (copy, library unchanged), `-p/--pretend` (beets' `Source -> Destination` listing, two lines per file when it doesn't fit), `-t/--timid` ("Really move? (Yes/no/select)"), `-a`, `-l/--limit`; "Moving N items (M already in place)."; taken destinations get beets' `.1`, `.2` suffixes; missing files are skipped; emptied library directories are pruned (`clutter` ignored) |
+| Album art | `artpath` follows the album on `mv`/`modify`/`update` (copied, and the copy recorded, with `mv -c`; copied into the export with `mv -e -a`, as beets, but not with item exports), and is deleted by `rm -d` |
 
 ## Example config
 

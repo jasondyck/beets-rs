@@ -223,15 +223,24 @@ pub enum Cmd {
     Move {
         #[arg(short = 'a', long)]
         album: bool,
-        /// Destination directory instead of the library directory
-        #[arg(short = 'd', long = "dest")]
+        /// Destination directory
+        #[arg(short = 'd', long = "dest", value_name = "DIR")]
         dest: Option<PathBuf>,
-        /// Copy instead of move
+        /// Copy instead of moving
         #[arg(short = 'c', long)]
         copy: bool,
-        /// Show what would be moved
+        /// Show how files would be moved, but don't touch anything
         #[arg(short = 'p', long)]
         pretend: bool,
+        /// Always confirm all actions
+        #[arg(short = 't', long)]
+        timid: bool,
+        /// Copy without changing the database path
+        #[arg(short = 'e', long)]
+        export: bool,
+        /// Limit query results
+        #[arg(short = 'l', long)]
+        limit: Option<usize>,
         #[arg(allow_hyphen_values = true)]
         query: Vec<String>,
     },

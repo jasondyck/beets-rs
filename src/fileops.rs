@@ -6,7 +6,7 @@ use crate::config::Config;
 use anyhow::{Context, Result, anyhow};
 use std::ffi::OsStr;
 use std::io::ErrorKind;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 /// beets' `MoveOperation`, plus `None` for "leave files where they are".
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -89,6 +89,45 @@ pub fn transfer(op: FileOp, src: &Path, dest: &Path) -> Result<()> {
         FileOp::Reflink => reflink_file(src, dest, false),
         FileOp::ReflinkAuto => reflink_file(src, dest, true),
         FileOp::None => Ok(()),
+    }
+}
+
+/// beets' `util.unique_path`: `path` if it doesn't exist, else the first
+/// free `base.N.ext`, counting on from a `.N` the base already ends with.
+pub fn unique_path(path: &Path) -> PathBuf {
+    unique_path_for(path, None)
+}
+
+/// `unique_path` where `own` (the file being moved) counts as free, so a
+/// file already at `foo.1.mp3` with `foo.mp3` taken stays put rather than
+/// going on to `foo.2.mp3` (unlike beets, which flips between the two on
+/// every move).
+pub fn unique_path_for(path: &Path, own: Option<&Path>) -> PathBuf {
+    let free = |p: &Path| own == Some(p) || !p.exists();
+    if free(path) {
+        return path.to_path_buf();
+    }
+    let name = path
+        .file_name()
+        .map(|f| f.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    // `os.path.splitext`: a leading dot doesn't start an extension.
+    let (base, ext) = match name.rfind('.') {
+        Some(i) if name[..i].chars().any(|c| c != '.') => name.split_at(i),
+        _ => (name.as_str(), ""),
+    };
+    let (base, mut num) = match base.rsplit_once('.') {
+        Some((b, n)) if !n.is_empty() && n.bytes().all(|c| c.is_ascii_digit()) => {
+            (b, n.parse::<u64>().unwrap_or(0))
+        }
+        _ => (base, 0),
+    };
+    loop {
+        num += 1;
+        let cand = path.with_file_name(format!("{base}.{num}{ext}"));
+        if free(&cand) {
+            return cand;
+        }
     }
 }
 
@@ -242,6 +281,25 @@ impl WalkFilter {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn unique_path_counts_on_like_beets() {
+        let d = tempfile::tempdir().unwrap();
+        let p = |n: &str| d.path().join(n);
+        assert_eq!(unique_path(&p("a.mp3")), p("a.mp3"));
+        for n in ["a.mp3", "a.1.mp3", "b.3.mp3", ".hidden"] {
+            std::fs::write(p(n), b"").unwrap();
+        }
+        assert_eq!(unique_path(&p("a.mp3")), p("a.2.mp3"));
+        assert_eq!(unique_path(&p("b.3.mp3")), p("b.4.mp3"));
+        assert_eq!(unique_path(&p(".hidden")), p(".hidden.1"));
+        // The file being moved doesn't block its own name.
+        assert_eq!(
+            unique_path_for(&p("a.mp3"), Some(&p("a.1.mp3"))),
+            p("a.1.mp3")
+        );
+        assert_eq!(unique_path_for(&p("a.mp3"), Some(&p("a.mp3"))), p("a.mp3"));
+    }
 
     /// Defaults with dotted keys set to YAML values.
     fn cfg(pairs: &[(&str, &str)]) -> Config {

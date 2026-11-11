@@ -19,7 +19,7 @@ use anyhow::{Context as _, Result, bail};
 
 use serde_yaml::Value as Y;
 use std::collections::{HashMap, HashSet};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 pub fn run(cli: Cli) -> Result<()> {
     crate::logging::set_verbosity(cli.verbose);
@@ -259,8 +259,22 @@ pub fn run(cli: Cli) -> Result<()> {
             dest,
             copy,
             pretend,
+            timid,
+            export,
+            limit,
             query,
-        } => move_cmd(&cfg, &lib, album, dest, copy, pretend, &query),
+        } => {
+            let opts = MoveOpts {
+                album,
+                dest,
+                copy,
+                export,
+                pretend,
+                timid,
+                limit,
+            };
+            move_cmd(&cfg, &lib, &opts, &query)
+        }
         Cmd::Update {
             pretend,
             nomove,
@@ -474,35 +488,12 @@ fn show_model_changes(label: &str, old: &Record, new: &Record) -> bool {
     !changes.is_empty()
 }
 
-/// Recompute paths and move an item's file to match its metadata.
-fn move_item(
-    fmt: &PathFormatter,
-    lib: &Library,
-    cfg: &Config,
-    item: &mut Item,
-    copy: bool,
-) -> Result<bool> {
+/// Move an item's file to its library destination (`modify`/`update`,
+/// beets' `Item.move`).
+fn move_item(fmt: &PathFormatter, lib: &Library, cfg: &Config, item: &mut Item) -> Result<bool> {
     let album = lib.get_album(item.int("album_id"))?;
     let dest = fmt.destination(item, album.as_ref(), Some(lib));
-    let src = item.path().to_path_buf();
-    if dest == src {
-        return Ok(false);
-    }
-    let dest = if dest.exists() {
-        bail!("destination exists: {}", dest.display())
-    } else {
-        dest
-    };
-    if copy {
-        fileops::copy_file(&src, &dest)?;
-    } else {
-        fileops::move_file(&src, &dest)?;
-        if let Some(p) = src.parent() {
-            fileops::prune_dirs(p, &cfg.directory(), &fileops::clutter(cfg));
-        }
-    }
-    item.set_path(dest);
-    Ok(true)
+    move_item_file(cfg, item, &dest, FileOp::Move)
 }
 
 /// `beet modify` options besides the arguments.
@@ -618,7 +609,7 @@ fn modify(cfg: &Config, lib: &Library, opts: ModifyOpts, args: &[String]) -> Res
         }
         if mv
             && item.path().starts_with(cfg.directory())
-            && let Err(e) = move_item(&fmt, lib, cfg, item, false)
+            && let Err(e) = move_item(&fmt, lib, cfg, item)
         {
             eprintln!("warning: {e:#}");
         }
@@ -753,79 +744,274 @@ fn remove(
     })
 }
 
-fn move_cmd(
-    cfg: &Config,
-    lib: &Library,
-    album: bool,
-    dest: Option<PathBuf>,
-    copy: bool,
-    pretend: bool,
-    q: &[String],
-) -> Result<()> {
-    let mut cfg = cfg.clone();
-    if let Some(d) = &dest {
-        cfg.set("directory", Y::String(d.to_string_lossy().into()));
+/// `beet move` options besides the query.
+pub struct MoveOpts {
+    pub album: bool,
+    /// -d: base directory instead of the library directory.
+    pub dest: Option<PathBuf>,
+    /// -c: copy, and point the library at the copies.
+    pub copy: bool,
+    /// -e: copy, leaving the library pointing at the originals.
+    pub export: bool,
+    pub pretend: bool,
+    /// -t: ask before acting.
+    pub timid: bool,
+    pub limit: Option<usize>,
+}
+
+/// One object `beet move` acts on: an item (with its album, for the art)
+/// or, with -a, an album and all its items; `dests` are the items'
+/// destinations.
+#[derive(Clone)]
+struct MoveObj {
+    album: Option<Album>,
+    items: Vec<Item>,
+    dests: Vec<PathBuf>,
+}
+
+impl MoveObj {
+    /// beets' `isitemmoved` / `isalbummoved`.
+    fn needs_moving(&self) -> bool {
+        self.items
+            .iter()
+            .zip(&self.dests)
+            .any(|(i, d)| i.path() != d)
     }
-    let fmt = PathFormatter::new(&cfg)?;
-    let items: Vec<Item> = if album {
-        let mut v = vec![];
-        for a in lib.albums(&Query::parse(Kind::Album, q)?)? {
-            v.extend(lib.album_items(a.id.unwrap())?);
+
+    fn path_changes(&self) -> Vec<(PathBuf, PathBuf)> {
+        self.items
+            .iter()
+            .zip(&self.dests)
+            .map(|(i, d)| (i.path().to_path_buf(), d.clone()))
+            .collect()
+    }
+}
+
+/// beets' `show_path_changes`: "old -> new" per line under a
+/// "Source -> Destination" header, or over two lines each when the paths
+/// don't fit in half the terminal.
+fn show_path_changes(cfg: &Config, changes: &[(PathBuf, PathBuf)]) {
+    let width = cfg
+        .get("ui.terminal_width")
+        .and_then(Y::as_u64)
+        .map_or(80, |n| n as usize);
+    for line in path_changes_lines(ui::term_width(width), changes) {
+        println!("{line}");
+    }
+}
+
+fn path_changes_lines(term_width: usize, changes: &[(PathBuf, PathBuf)]) -> Vec<String> {
+    let strs: Vec<(String, String)> = changes
+        .iter()
+        .map(|(a, b)| (a.display().to_string(), b.display().to_string()))
+        .collect();
+    let len = |s: &String| s.chars().count();
+    let col_width = term_width.saturating_sub(" -> ".len()) / 2;
+    let max_width = strs
+        .iter()
+        .flat_map(|(a, b)| [len(a), len(b)])
+        .max()
+        .unwrap_or(0);
+    let mut out = vec![];
+    if max_width > col_width {
+        for (a, b) in &strs {
+            let (ca, cb) = crate::diff::colordiff(a, b);
+            out.push(format!("{ca} \n  -> {cb}"));
         }
-        v
     } else {
-        lib.items(&Query::parse(Kind::Item, q)?)?
-    };
-    let mut n = 0;
-    // Album id -> directory its items ended up in, to bring the art along.
-    let mut album_dirs: HashMap<i64, PathBuf> = HashMap::new();
-    for mut item in items {
-        let album = lib.get_album(item.int("album_id"))?;
-        if let Some(dir) = fmt.destination(&item, album.as_ref(), Some(lib)).parent()
-            && item.int("album_id") != 0
-        {
-            album_dirs.insert(item.int("album_id"), dir.to_path_buf());
-        }
-        let target = fmt.destination(&item, album.as_ref(), Some(lib));
-        if target == item.path() {
-            continue;
-        }
-        if pretend {
-            println!("{} -> {}", item.path().display(), target.display());
-            continue;
-        }
-        match move_item(&fmt, lib, &cfg, &mut item, copy) {
-            Ok(true) => {
-                // With --dest, copies stay where they are in the library.
-                if !(copy && dest.is_some()) {
-                    lib.store(&item)?;
-                }
-                n += 1;
-            }
-            Ok(false) => {}
-            Err(e) => eprintln!("warning: {e:#}"),
+        // Python's `" " * n` is empty for negative n.
+        let title_pad = (max_width + " -> ".len()).saturating_sub("Source ".len());
+        out.push(format!("Source {} Destination", " ".repeat(title_pad)));
+        for (a, b) in &strs {
+            let (ca, cb) = crate::diff::colordiff(a, b);
+            out.push(format!("{ca} {} -> {cb}", " ".repeat(max_width - len(a))));
         }
     }
-    if !pretend {
-        for (id, dir) in album_dirs {
-            if copy {
-                // Exported copies get a copy of the art; the library keeps its own.
-                if let Some(a) = lib.get_album(id)? {
-                    let art = a.path_field("artpath");
-                    if art.is_file() {
-                        let target = dir.join(art.file_name().unwrap_or_default());
-                        if target != art && !target.exists() {
-                            fileops::copy_file(art, &target)?;
-                        }
-                    }
-                }
-            } else {
-                sync_art(&cfg, lib, id)?;
+    out
+}
+
+/// Where `beet move` puts an item: its destination, made unique if another
+/// file has it (the item's own file doesn't count, so a repeated move is
+/// a no-op).
+fn item_destination(
+    fmt: &PathFormatter,
+    lib: &Library,
+    item: &Item,
+    album: Option<&Album>,
+) -> PathBuf {
+    let d = fmt.destination(item, album, Some(lib));
+    fileops::unique_path_for(&d, Some(item.path()))
+}
+
+/// beets' `move_func` / `move_objects`.
+fn move_cmd(cfg: &Config, lib: &Library, opts: &MoveOpts, q: &[String]) -> Result<()> {
+    let dest = match &opts.dest {
+        Some(d) => {
+            let d = std::path::absolute(crate::config::expand_tilde(&d.to_string_lossy()))?;
+            if !d.is_dir() {
+                bail!("no such directory: {}", d.display());
             }
+            Some(d)
         }
-        println!("{} {n} item(s).", if copy { "Copied" } else { "Moved" });
+        None => None,
+    };
+    let mut dcfg = cfg.clone();
+    if let Some(d) = &dest {
+        dcfg.set("directory", Y::String(d.to_string_lossy().into()));
+    }
+    let fmt = PathFormatter::new(&dcfg)?;
+    let entity = if opts.album { "album" } else { "item" };
+    let mut all: Vec<MoveObj> = vec![];
+    if opts.album {
+        let mut albums = lib.albums(&Query::parse(Kind::Album, q)?)?;
+        albums.truncate(opts.limit.unwrap_or(usize::MAX));
+        for a in albums {
+            let items = lib.album_items(a.id.unwrap())?;
+            let dests = items
+                .iter()
+                .map(|i| item_destination(&fmt, lib, i, Some(&a)))
+                .collect();
+            all.push(MoveObj {
+                album: Some(a),
+                items,
+                dests,
+            });
+        }
+    } else {
+        let mut items = lib.items(&Query::parse(Kind::Item, q)?)?;
+        items.truncate(opts.limit.unwrap_or(usize::MAX));
+        for i in items {
+            let album = lib.get_album(i.int("album_id"))?;
+            let d = item_destination(&fmt, lib, &i, album.as_ref());
+            all.push(MoveObj {
+                album,
+                items: vec![i],
+                dests: vec![d],
+            });
+        }
+    }
+    if all.is_empty() {
+        bail!("No matching {entity}s found.");
+    }
+    let total = all.len();
+    let objs: Vec<MoveObj> = all.into_iter().filter(MoveObj::needs_moving).collect();
+    let unmoved = total - objs.len();
+    let unmoved_msg = if unmoved > 0 {
+        format!(" ({unmoved} already in place)")
+    } else {
+        String::new()
+    };
+    // Exporting always copies.
+    let copy = opts.copy || opts.export;
+    let (action, act) = if copy {
+        ("Copying", "copy")
+    } else {
+        ("Moving", "move")
+    };
+    let n = objs.len();
+    // beets logs this at INFO, which goes to stderr.
+    eprintln!(
+        "{action} {n} {entity}{}{unmoved_msg}.",
+        if n == 1 { "" } else { "s" }
+    );
+    if objs.is_empty() {
+        return Ok(());
+    }
+    if opts.pretend {
+        let changes: Vec<_> = objs.iter().flat_map(MoveObj::path_changes).collect();
+        show_path_changes(cfg, &changes);
+        return Ok(());
+    }
+    let selected = if opts.timid {
+        ui::select_objects(&format!("Really {act}"), &objs, |o| {
+            show_path_changes(cfg, &o.path_changes())
+        })
+    } else {
+        objs
+    };
+    let op = if copy { FileOp::Copy } else { FileOp::Move };
+    let store = !opts.export;
+    for obj in selected {
+        if let Err(e) = move_obj(cfg, lib, obj, op, store, opts.album) {
+            eprintln!("error: {e:#}");
+        }
     }
     Ok(())
+}
+
+/// beets' `Item.move` (one item, then its album's art) or `Album.move`
+/// (all items, then the art), with `store` false for -e.
+fn move_obj(
+    cfg: &Config,
+    lib: &Library,
+    obj: MoveObj,
+    op: FileOp,
+    store: bool,
+    album_mode: bool,
+) -> Result<()> {
+    let MoveObj {
+        album,
+        items,
+        dests,
+    } = obj;
+    let mut moved_item_dir: Option<PathBuf> = None;
+    for (mut item, dest) in items.into_iter().zip(dests) {
+        debug!("moving: {}", item.path().display());
+        let old = item.path().to_path_buf();
+        if !move_item_file(cfg, &mut item, &dest, op)? {
+            continue;
+        }
+        if store {
+            lib.store(&item)?;
+        }
+        if moved_item_dir.is_none() && item.path() != old {
+            moved_item_dir = item.path().parent().map(PathBuf::from);
+        }
+    }
+    // Items re-read their album: an earlier item may have moved the art.
+    let album = match album {
+        Some(a) if !album_mode => lib.get_album(a.id.unwrap())?,
+        a => a,
+    };
+    let Some(mut album) = album else {
+        return Ok(());
+    };
+    // `Album.move` puts the art next to the first moved item; `Item.move`
+    // next to the album's first item as stored, so an item export (not
+    // stored) leaves the art alone.
+    let item_dir = if album_mode { moved_item_dir } else { None };
+    if move_art(cfg, lib, &mut album, op, item_dir)? && store {
+        lib.store(&album)?;
+    }
+    Ok(())
+}
+
+/// beets' `Item.move` for the file: copy or move it to `dest` (made unique
+/// if taken by another file), set the path and prune the vacated directory after a move.
+/// False when the file is missing.
+fn move_item_file(cfg: &Config, item: &mut Item, dest: &Path, op: FileOp) -> Result<bool> {
+    let src = item.path().to_path_buf();
+    if !src.exists() {
+        let what = if op == FileOp::Move {
+            "Moving"
+        } else {
+            "Copying"
+        };
+        eprintln!("{what}: file not found at {}, skipping", src.display());
+        return Ok(false);
+    }
+    let dest = fileops::unique_path_for(dest, Some(&src));
+    if src == dest {
+        return Ok(true);
+    }
+    fileops::transfer(op, &src, &dest)?;
+    item.set_path(dest);
+    if op == FileOp::Move
+        && let Some(p) = src.parent()
+    {
+        fileops::prune_dirs(p, &cfg.directory(), &fileops::clutter(cfg));
+    }
+    Ok(true)
 }
 
 fn update(cfg: &Config, lib: &Library, pretend: bool, mv: bool, q: &[String]) -> Result<()> {
@@ -881,7 +1067,7 @@ fn update(cfg: &Config, lib: &Library, pretend: bool, mv: bool, q: &[String]) ->
         if !pretend {
             if mv
                 && new.path().starts_with(cfg.directory())
-                && let Err(e) = move_item(&fmt, lib, cfg, &mut new, false)
+                && let Err(e) = move_item(&fmt, lib, cfg, &mut new)
             {
                 eprintln!("warning: {e:#}");
             }
@@ -913,34 +1099,61 @@ fn update(cfg: &Config, lib: &Library, pretend: bool, mv: bool, q: &[String]) ->
     Ok(())
 }
 
-/// Keep an album's art next to its items after they move.
-/// Move an album's art next to its items, if it lives elsewhere.
+/// Move an album's art next to its (stored) items, if it lives elsewhere.
 pub(crate) fn sync_art(cfg: &Config, lib: &Library, album_id: i64) -> Result<()> {
     let Some(mut album) = lib.get_album(album_id)? else {
         return Ok(());
     };
-    let art = album.path_field("artpath").to_path_buf();
-    if !art.is_file() {
-        return Ok(());
+    if move_art(cfg, lib, &mut album, FileOp::Move, None)? {
+        lib.store(&album)?;
     }
-    let items = lib.album_items(album_id)?;
-    let Some(dir) = plugins::fetchart::album_dir(&items) else {
-        return Ok(());
+    Ok(())
+}
+
+/// beets' `Album.move_art`: move or copy the art into `item_dir` (default:
+/// the directory of the album's first stored item), under a unique name.
+/// A reference to a missing art file is dropped. True if `artpath`
+/// changed (the caller stores the album).
+fn move_art(
+    cfg: &Config,
+    lib: &Library,
+    album: &mut Album,
+    op: FileOp,
+    item_dir: Option<PathBuf>,
+) -> Result<bool> {
+    let art = album.path_field("artpath").to_path_buf();
+    if art.as_os_str().is_empty() {
+        return Ok(false);
+    }
+    if !art.exists() {
+        eprintln!(
+            "removing reference to missing album art file {}",
+            art.display()
+        );
+        album.set("artpath", crate::model::Value::Path(PathBuf::new()));
+        return Ok(true);
+    }
+    let dir = match item_dir {
+        Some(d) => d,
+        None => match plugins::fetchart::album_dir(&lib.album_items(album.id.unwrap())?) {
+            Some(d) => d,
+            None => return Ok(false),
+        },
     };
     let dest = dir.join(art.file_name().unwrap_or_default());
     if dest == art {
-        return Ok(());
+        return Ok(false);
     }
-    if dest.exists() {
-        eprintln!("warning: not moving art, {} exists", dest.display());
-        return Ok(());
-    }
-    fileops::move_file(&art, &dest)?;
-    if let Some(p) = art.parent() {
+    let dest = fileops::unique_path(&dest);
+    debug!("moving album art {} to {}", art.display(), dest.display());
+    fileops::transfer(op, &art, &dest)?;
+    if op == FileOp::Move
+        && let Some(p) = art.parent()
+    {
         fileops::prune_dirs(p, &cfg.directory(), &fileops::clutter(cfg));
     }
     album.set("artpath", crate::model::Value::Path(dest));
-    lib.store(&album)
+    Ok(true)
 }
 
 fn require_plugin(cfg: &Config, name: &str) -> Result<()> {
@@ -1373,6 +1586,287 @@ mod tests {
     fn items(lib: &Library) -> Vec<Item> {
         lib.items(&Query::parse::<&str>(Kind::Item, &[]).unwrap())
             .unwrap()
+    }
+
+    /// `lib_with_album` with real (dummy) files and `src/cover.jpg` as art.
+    fn lib_with_files(n: usize) -> (tempfile::TempDir, Config, Library) {
+        let (d, cfg, lib) = lib_with_album(n);
+        std::fs::create_dir_all(d.path().join("src")).unwrap();
+        for i in items(&lib) {
+            std::fs::write(i.path(), b"audio").unwrap();
+        }
+        let art = d.path().join("src/cover.jpg");
+        std::fs::write(&art, b"img").unwrap();
+        let mut a = lib.all_albums().unwrap().remove(0);
+        a.set("artpath", Value::Path(art));
+        lib.store(&a).unwrap();
+        (d, cfg, lib)
+    }
+
+    fn move_opts() -> MoveOpts {
+        MoveOpts {
+            album: false,
+            dest: None,
+            copy: false,
+            export: false,
+            pretend: false,
+            timid: false,
+            limit: None,
+        }
+    }
+
+    fn artpath(lib: &Library) -> PathBuf {
+        lib.all_albums().unwrap()[0]
+            .path_field("artpath")
+            .to_path_buf()
+    }
+
+    #[test]
+    fn move_consolidates_into_the_library_with_the_art() {
+        let (d, cfg, lib) = lib_with_files(2);
+        let libdir = d.path().join("lib");
+        move_cmd(&cfg, &lib, &move_opts(), &[]).unwrap();
+        for i in items(&lib) {
+            assert!(i.path().starts_with(&libdir), "{}", i.path().display());
+            assert!(i.path().is_file());
+        }
+        assert!(!d.path().join("src/0.mp3").exists());
+        let art = artpath(&lib);
+        assert_eq!(art.parent(), items(&lib)[0].path().parent());
+        assert!(art.is_file());
+        assert!(!d.path().join("src/cover.jpg").exists());
+        // A second run has nothing to do.
+        move_cmd(&cfg, &lib, &move_opts(), &[]).unwrap();
+        assert!(items(&lib)[0].path().is_file());
+    }
+
+    #[test]
+    fn move_prunes_emptied_library_dirs_but_not_clutter() {
+        let (d, cfg, lib) = lib_with_files(1);
+        move_cmd(&cfg, &lib, &move_opts(), &[]).unwrap();
+        let old_dir = items(&lib)[0].path().parent().unwrap().to_path_buf();
+        std::fs::write(old_dir.join(".DS_Store"), b"").unwrap();
+        // Retitle the album so the files move to another directory.
+        let mut a = lib.all_albums().unwrap().remove(0);
+        a.set_str("album", "Other");
+        lib.store(&a).unwrap();
+        for mut i in items(&lib) {
+            i.set_str("album", "Other");
+            lib.store(&i).unwrap();
+        }
+        let mut o = move_opts();
+        o.album = true;
+        move_cmd(&cfg, &lib, &o, &[]).unwrap();
+        assert!(!old_dir.exists(), "clutter-only dir pruned");
+        assert!(d.path().join("lib").exists());
+        assert!(artpath(&lib).is_file());
+    }
+
+    #[test]
+    fn move_copy_points_the_library_at_the_copies() {
+        let (d, cfg, lib) = lib_with_files(2);
+        let out = d.path().join("out");
+        std::fs::create_dir(&out).unwrap();
+        let mut o = move_opts();
+        o.copy = true;
+        o.dest = Some(out.clone());
+        move_cmd(&cfg, &lib, &o, &[]).unwrap();
+        for i in items(&lib) {
+            assert!(i.path().starts_with(&out));
+            assert!(i.path().is_file());
+        }
+        assert!(d.path().join("src/0.mp3").is_file(), "original kept");
+        assert!(artpath(&lib).starts_with(&out));
+        assert!(d.path().join("src/cover.jpg").is_file());
+    }
+
+    #[test]
+    fn move_export_copies_without_touching_the_library() {
+        let (d, cfg, lib) = lib_with_files(2);
+        let out = d.path().join("out");
+        std::fs::create_dir(&out).unwrap();
+        let before = items(&lib);
+        let mut o = move_opts();
+        o.export = true;
+        o.album = true;
+        o.dest = Some(out.clone());
+        move_cmd(&cfg, &lib, &o, &[]).unwrap();
+        let after = items(&lib);
+        assert_eq!(
+            before.iter().map(|i| i.path()).collect::<Vec<_>>(),
+            after.iter().map(|i| i.path()).collect::<Vec<_>>()
+        );
+        assert!(after.iter().all(|i| i.path().is_file()));
+        assert_eq!(artpath(&lib), d.path().join("src/cover.jpg"));
+        let copies: Vec<PathBuf> = walk(&out);
+        assert_eq!(
+            copies
+                .iter()
+                .filter(|p| p.extension().unwrap() == "mp3")
+                .count(),
+            2
+        );
+        // Album exports bring the art along.
+        assert!(copies.iter().any(|p| p.file_name().unwrap() == "cover.jpg"));
+    }
+
+    #[test]
+    fn move_export_of_items_leaves_the_art() {
+        let (d, cfg, lib) = lib_with_files(1);
+        let out = d.path().join("out");
+        std::fs::create_dir(&out).unwrap();
+        let mut o = move_opts();
+        o.export = true;
+        o.dest = Some(out.clone());
+        move_cmd(&cfg, &lib, &o, &[]).unwrap();
+        let copies = walk(&out);
+        assert_eq!(copies.len(), 1, "{copies:?}");
+        assert_eq!(items(&lib)[0].path(), d.path().join("src/0.mp3"));
+    }
+
+    #[test]
+    fn move_pretend_limit_and_errors() {
+        let (d, cfg, lib) = lib_with_files(2);
+        let mut o = move_opts();
+        o.pretend = true;
+        move_cmd(&cfg, &lib, &o, &[]).unwrap();
+        assert!(d.path().join("src/0.mp3").is_file());
+        assert!(!d.path().join("lib").exists());
+
+        let mut o = move_opts();
+        o.limit = Some(1);
+        move_cmd(&cfg, &lib, &o, &[]).unwrap();
+        let moved = items(&lib)
+            .iter()
+            .filter(|i| i.path().starts_with(d.path().join("lib")))
+            .count();
+        assert_eq!(moved, 1);
+
+        let e = move_cmd(&cfg, &lib, &move_opts(), &strs(&["title:nope"])).unwrap_err();
+        assert_eq!(e.to_string(), "No matching items found.");
+        let mut o = move_opts();
+        o.album = true;
+        let e = move_cmd(&cfg, &lib, &o, &strs(&["album:nope"])).unwrap_err();
+        assert_eq!(e.to_string(), "No matching albums found.");
+        let mut o = move_opts();
+        o.dest = Some(d.path().join("missing"));
+        let e = move_cmd(&cfg, &lib, &o, &[]).unwrap_err();
+        assert!(e.to_string().starts_with("no such directory: "), "{e}");
+    }
+
+    #[test]
+    fn move_skips_missing_files_and_drops_missing_art() {
+        let (d, cfg, lib) = lib_with_files(2);
+        std::fs::remove_file(d.path().join("src/0.mp3")).unwrap();
+        std::fs::remove_file(d.path().join("src/cover.jpg")).unwrap();
+        let mut o = move_opts();
+        o.album = true;
+        move_cmd(&cfg, &lib, &o, &[]).unwrap();
+        let its = items(&lib);
+        assert_eq!(its[0].path(), d.path().join("src/0.mp3"));
+        assert!(its[1].path().starts_with(d.path().join("lib")));
+        assert_eq!(artpath(&lib), PathBuf::new());
+    }
+
+    #[test]
+    fn move_takes_a_unique_name_when_the_destination_exists() {
+        let (_d, cfg, lib) = lib_with_files(1);
+        let dest = {
+            let i = &items(&lib)[0];
+            let a = lib.get_album(i.int("album_id")).unwrap();
+            PathFormatter::new(&cfg)
+                .unwrap()
+                .destination(i, a.as_ref(), Some(&lib))
+        };
+        std::fs::create_dir_all(dest.parent().unwrap()).unwrap();
+        std::fs::write(&dest, b"other").unwrap();
+        move_cmd(&cfg, &lib, &move_opts(), &[]).unwrap();
+        let p = items(&lib)[0].path().to_path_buf();
+        assert_ne!(p, dest);
+        assert_eq!(
+            p.file_name().unwrap().to_string_lossy(),
+            format!("{}.1.mp3", dest.file_stem().unwrap().to_string_lossy())
+        );
+        assert_eq!(std::fs::read(&dest).unwrap(), b"other");
+        // Repeated moves leave it at `.1` (no flip to `.2` as in beets),
+        // and it counts as already in place.
+        for _ in 0..3 {
+            move_cmd(&cfg, &lib, &move_opts(), &[]).unwrap();
+            assert_eq!(items(&lib)[0].path(), p);
+        }
+        let i = &items(&lib)[0];
+        let a = lib.get_album(i.int("album_id")).unwrap();
+        let fmt = PathFormatter::new(&cfg).unwrap();
+        assert_eq!(item_destination(&fmt, &lib, i, a.as_ref()), p);
+        let mut names: Vec<String> = walk(dest.parent().unwrap())
+            .iter()
+            .map(|f| f.file_name().unwrap().to_string_lossy().into_owned())
+            .collect();
+        names.sort();
+        let stem = dest.file_stem().unwrap().to_string_lossy();
+        assert_eq!(
+            names,
+            [
+                format!("{stem}.1.mp3"),
+                format!("{stem}.mp3"),
+                "cover.jpg".into()
+            ]
+        );
+    }
+
+    #[test]
+    fn modify_moves_to_a_unique_name_when_the_destination_exists() {
+        let (_d, cfg, lib) = lib_with_files(1);
+        move_cmd(&cfg, &lib, &move_opts(), &[]).unwrap();
+        let old = items(&lib)[0].path().to_path_buf();
+        let taken = old.with_file_name("01 New.mp3");
+        std::fs::write(&taken, b"other").unwrap();
+        let mut o = quiet_opts(false);
+        o.mv = Some(true);
+        modify(&cfg, &lib, o, &strs(&["title=New"])).unwrap();
+        let p = items(&lib)[0].path().to_path_buf();
+        assert_eq!(p, old.with_file_name("01 New.1.mp3"));
+        assert!(p.is_file());
+        assert!(!old.exists());
+        assert_eq!(std::fs::read(&taken).unwrap(), b"other");
+        // Modifying again (same destination) keeps the `.1` name.
+        let mut o = quiet_opts(false);
+        o.mv = Some(true);
+        modify(&cfg, &lib, o, &strs(&["comments=x"])).unwrap();
+        assert_eq!(items(&lib)[0].path(), p);
+    }
+
+    #[test]
+    fn path_changes_layout_as_beets() {
+        let ch = vec![
+            (PathBuf::from("/a/x.mp3"), PathBuf::from("/b/x.mp3")),
+            (PathBuf::from("/a/yy.mp3"), PathBuf::from("/b/yy.mp3")),
+        ];
+        assert_eq!(
+            path_changes_lines(80, &ch),
+            [
+                "Source        Destination",
+                "/a/x.mp3   -> /b/x.mp3",
+                "/a/yy.mp3  -> /b/yy.mp3",
+            ]
+        );
+        assert_eq!(
+            path_changes_lines(19, &ch[..1]),
+            ["/a/x.mp3 \n  -> /b/x.mp3"]
+        );
+    }
+
+    fn walk(dir: &Path) -> Vec<PathBuf> {
+        let mut out = vec![];
+        for e in std::fs::read_dir(dir).unwrap() {
+            let p = e.unwrap().path();
+            if p.is_dir() {
+                out.extend(walk(&p));
+            } else {
+                out.push(p);
+            }
+        }
+        out
     }
 
     #[test]

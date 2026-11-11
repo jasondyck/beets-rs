@@ -189,3 +189,27 @@ pub fn yes_no(prompt: &str) -> bool {
         }
     }
 }
+
+/// beets' `ui.term_width`: `$COLUMNS` or the size of the terminal on
+/// stdout (as Python's `shutil.get_terminal_size`), else `fallback`
+/// (beets' `ui.terminal_width`, 80 by default).
+pub fn term_width(fallback: usize) -> usize {
+    if let Some(n) = std::env::var("COLUMNS")
+        .ok()
+        .and_then(|c| c.parse::<usize>().ok())
+        .filter(|&n| n > 0)
+    {
+        return n;
+    }
+    #[cfg(unix)]
+    {
+        // SAFETY: TIOCGWINSZ only writes a `winsize` into the struct we pass.
+        let mut ws: libc::winsize = unsafe { std::mem::zeroed() };
+        if unsafe { libc::ioctl(libc::STDOUT_FILENO, libc::TIOCGWINSZ, &mut ws) } == 0
+            && ws.ws_col > 0
+        {
+            return ws.ws_col as usize;
+        }
+    }
+    fallback
+}

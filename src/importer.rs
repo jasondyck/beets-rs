@@ -386,28 +386,6 @@ pub fn group_files(root: &Path, filter: &WalkFilter) -> Result<Vec<(PathBuf, Vec
     Ok(groups.into_iter().collect())
 }
 
-/// Append ".1", ".2", ... before the extension until the path is free.
-fn unique_path(p: &Path) -> PathBuf {
-    if !p.exists() {
-        return p.to_path_buf();
-    }
-    let stem = p
-        .file_stem()
-        .map(|s| s.to_string_lossy().into_owned())
-        .unwrap_or_default();
-    let ext = p
-        .extension()
-        .map(|e| format!(".{}", e.to_string_lossy()))
-        .unwrap_or_default();
-    for n in 1.. {
-        let cand = p.with_file_name(format!("{stem}.{n}{ext}"));
-        if !cand.exists() {
-            return cand;
-        }
-    }
-    unreachable!()
-}
-
 fn file_label(item: &Item) -> String {
     item.path()
         .file_name()
@@ -1564,7 +1542,7 @@ impl<'a> Importer<'a> {
         let dest = self.fmt.destination(item, album, Some(self.lib));
         let mut copied = None;
         if op != FileOp::None && dest != src {
-            let dest = unique_path(&dest);
+            let dest = fileops::unique_path(&dest);
             fileops::transfer(op, &src, &dest)?;
             item.set_path(dest);
             if op == FileOp::Move {
@@ -1887,7 +1865,7 @@ mod tests {
         let d = tempfile::tempdir().unwrap();
         let f = d.path().join("x.mp3");
         std::fs::write(&f, b"").unwrap();
-        assert_eq!(unique_path(&f), d.path().join("x.1.mp3"));
+        assert_eq!(fileops::unique_path(&f), d.path().join("x.1.mp3"));
         let deep = d.path().join("a/b/c");
         std::fs::create_dir_all(&deep).unwrap();
         prune_dirs(&deep, d.path(), &Globs::default());
