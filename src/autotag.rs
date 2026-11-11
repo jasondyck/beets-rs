@@ -441,7 +441,7 @@ pub fn album_candidates(
     for id in release_ids {
         match mb.release(&id) {
             Ok(info) => matches.push(match_album(cfg, items, info)),
-            Err(e) => eprintln!("warning: {e:#}"),
+            Err(e) => crate::logging::emit(format!("warning: {e:#}")),
         }
     }
     matches.sort_by(|a, b| {

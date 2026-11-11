@@ -54,6 +54,8 @@ paths:
     singleton: Non-Album/$artist/$title
     comp: Compilations/$album%aunique{}/$track $title
 
+threaded: yes
+
 path_sep_replace: _
 empty_component_replace:
 drive_sep_replace: _

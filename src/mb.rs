@@ -3,7 +3,7 @@
 use crate::config::Config;
 use anyhow::{Context, Result, bail};
 use serde_json::Value as J;
-use std::cell::Cell;
+use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 pub const VA_ARTIST_ID: &str = "89ad4ac3-39f7-470e-963a-56509c546377";
@@ -68,7 +68,9 @@ pub struct MusicBrainz {
     agent: ureq::Agent,
     base: String,
     interval: Duration,
-    last: Cell<Option<Instant>>,
+    /// The last request's time; locked while waiting for the next slot, so
+    /// threads sharing the client share the rate limit.
+    last: Mutex<Option<Instant>>,
     pub search_limit: usize,
     aliases: AliasPrefs,
 }
@@ -206,20 +208,21 @@ impl MusicBrainz {
                 .build(),
             base: format!("{scheme}://{host}/ws/2"),
             interval,
-            last: Cell::new(None),
+            last: Mutex::new(None),
             search_limit: cfg.f64("musicbrainz.searchlimit").max(1.0) as usize,
             aliases: AliasPrefs::from_config(cfg),
         }
     }
 
     fn throttle(&self) {
-        if let Some(last) = self.last.get() {
-            let elapsed = last.elapsed();
+        let mut last = self.last.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(t) = *last {
+            let elapsed = t.elapsed();
             if elapsed < self.interval {
                 std::thread::sleep(self.interval - elapsed);
             }
         }
-        self.last.set(Some(Instant::now()));
+        *last = Some(Instant::now());
     }
 
     fn get(&self, path: &str, query: &[(&str, &str)]) -> Result<J> {

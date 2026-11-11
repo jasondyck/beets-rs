@@ -42,7 +42,7 @@ config`, plugins fetchart / lyrics / embedart, release preferences.
 - [x] **3.2 Templates**: `%sunique`; `$format`/`$bitrate`/`$samplerate` and other computed fields in path formats; `path_sep_replace`; `overwrite_null`
 - [x] **3.3 Tag field coverage**: APEv2 keys under MediaFile's alternative names (only date and album artist handled so far); every MediaFile field beets reads/writes (composer, lyricist, arranger, work, mb_workid, artist_sort/credit, albumartists multi-valued, genres, R128 gains, barcode, isrc, asin, script, language, etc.); `id3v23`; multi-valued fields
 - [x] **3.4 library.db compatibility**: schema identical to beets' (column names, types, path as BLOB relative to the library directory as beets stores it (ours are absolute), singleton album_id NULL (ours 0), `added`/`mtime` floats, flex tables), so beets' own `library.db` format is readable and writable; plus a migration command (decided by the maintainer) that opens a beets `library.db` at a path the user passes **read-only** (SQLite `mode=ro`/`immutable=1`, never written) and copies items, albums and flex attributes into the beets-rs DB. Tests use synthetic beets-format DBs only; never point it at `~/.config/beets/library.db`
-- [ ] **3.5 Performance**: query filtering/sorting in SQL done in 3.1 (50k items: 0.03–0.6s); remaining: import pipeline threading (`threaded`)
+- [x] **3.5 Performance**: query filtering/sorting in SQL done in 3.1 (50k items: 0.03–0.6s); import pipeline threading (`threaded`) done in 3.5: reads and MusicBrainz lookups run up to 4 units ahead of the prompt; file copying/tag writing don't overlap yet
 
 ## 4. Core: autotagger
 

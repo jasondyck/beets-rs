@@ -46,6 +46,7 @@ replace:
     "sortcfg.yaml": "sort_item: title- \nsort_album: year+ album-\n",
     "art.yaml": "art_filename: 'cover-$album'\n",
     "id3v23.yaml": "id3v23: yes\n",
+    "unthreaded.yaml": "threaded: no\n",
 }
 
 # ---------------------------------------------------------------------------
@@ -185,16 +186,21 @@ LAME_CORPUS = [
 ]
 
 # Import steps: args to `beet`; the last one is a directory under src/.
+# Half run with `threaded: no`, so the library the cases list was built by
+# both import pipelines.
+_UNTHREADED = ["-c", f"{ROOT}/unthreaded.yaml"]
 IMPORTS = [
     ["import", "-A", "-q", d]
-    for d in ["a01", "a02", "a03", "a04", "a05", "a06", "a07", "a08", "a09",
-              "a10", "a11", "a12", "a13", "a14", "a15"]
+    for d in ["a01", "a02", "a03", "a04", "a05", "a06", "a07", "a08"]
+] + [
+    [*_UNTHREADED, "import", "-A", "-q", d]
+    for d in ["a09", "a10", "a11", "a12", "a13", "a14", "a15"]
 ] + [
     ["import", "-A", "-q", "-s", "s01"],
     ["import", "-A", "-q", "-s", "s02"],
     ["import", "-A", "-q", "-s", "s03"],
-    ["import", "-A", "-q", "-s", "s04"],
-    ["import", "-A", "-q", "-s", "s05"],
+    [*_UNTHREADED, "import", "-A", "-q", "-s", "s04"],
+    [*_UNTHREADED, "import", "-A", "-q", "-s", "s05"],
 ]
 
 MODIFIES = [

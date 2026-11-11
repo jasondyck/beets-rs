@@ -16,6 +16,7 @@ mod mediafile;
 mod migrate;
 mod model;
 mod paths;
+mod pipeline;
 mod plugins;
 mod props;
 mod query;

@@ -12,16 +12,18 @@ use crate::mb::MusicBrainz;
 use crate::media;
 use crate::model::{Album, Item, Value};
 use crate::paths::PathFormatter;
+use crate::pipeline::{Cancel, Lookahead};
 use crate::plugins::{self, Plugin, PluginCtx};
 use crate::state::ImportState;
 use crate::template::Template;
 use crate::ui::{self, Choice};
 use anyhow::{Context, Result, bail};
 use regex::Regex;
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
 use std::io::Write as _;
 use std::path::{Path, PathBuf};
-use std::sync::LazyLock;
+use std::sync::{Arc, LazyLock};
+use std::time::SystemTime;
 
 pub struct ImportOptions {
     pub op: FileOp,
@@ -55,6 +57,9 @@ pub struct ImportOptions {
     pub detail: bool,
     /// `import.from_scratch`: clear existing tags before applying a match.
     pub from_scratch: bool,
+    /// `threaded`: read and look up the next few tasks while the current
+    /// one is being decided on and imported.
+    pub threaded: bool,
 }
 
 /// Flexible attributes that a reimport takes from the new match instead of
@@ -235,6 +240,7 @@ impl ImportOptions {
             default_action: default_action(cfg).unwrap_or(Some('a')),
             detail: cfg.bool("import.detail"),
             from_scratch: cfg.bool("import.from_scratch"),
+            threaded: cfg.bool("threaded"),
         }
     }
 }
@@ -314,11 +320,171 @@ pub fn group_albums(items: Vec<Item>) -> Vec<Vec<Item>> {
     groups.into_values().collect()
 }
 
+/// Where each task's first lookup gets its candidates: MusicBrainz, or a
+/// stand-in in tests. Shared with the threaded pipeline's lookup thread.
+/// (Searches the user asks for at the prompt always go to MusicBrainz.)
+pub trait CandidateSource: Send + Sync {
+    fn album(&self, items: &[Item]) -> Result<(Vec<AlbumMatch>, Recommendation)>;
+    fn item(&self, item: &Item) -> Result<(Vec<TrackMatch>, Recommendation)>;
+}
+
+/// The autotagger's lookup, with `--search-id`s if any.
+struct MbSource {
+    cfg: Config,
+    mb: Arc<MusicBrainz>,
+    ids: Vec<String>,
+}
+
+impl CandidateSource for MbSource {
+    fn album(&self, items: &[Item]) -> Result<(Vec<AlbumMatch>, Recommendation)> {
+        autotag::album_candidates(&self.cfg, &self.mb, items, None, &self.ids)
+    }
+
+    fn item(&self, item: &Item) -> Result<(Vec<TrackMatch>, Recommendation)> {
+        autotag::item_candidates(&self.cfg, &self.mb, item, None, &self.ids)
+    }
+}
+
+/// A task's directories and audio files (see [`group_files`]).
+type Group = (Vec<PathBuf>, Vec<PathBuf>);
+
+/// A unit of lookahead: (import path, group, file) indices; the file index
+/// is always 0 unless importing singletons, where each file is a unit.
+type Pos = (usize, usize, usize);
+
+/// At most this many units are read or looked up ahead of time, the one
+/// being imported included, so an abort wastes few requests.
+const LOOKAHEAD: usize = 4;
+
+/// Which lookups the pipeline does for a unit's items, as the sequential
+/// flow would on reaching it.
+#[derive(Clone, Copy)]
+enum LookupMode {
+    None,
+    Album,
+    Groups,
+    Tracks,
+}
+
+enum Candidates {
+    Album(Vec<AlbumMatch>, Recommendation),
+    Track(Vec<TrackMatch>, Recommendation),
+}
+
+/// A lookup done ahead of time, with what it logged.
+struct Looked {
+    log: Vec<String>,
+    result: Result<Candidates>,
+}
+
+/// A unit read (and looked up) by the pipeline.
+struct Prepared {
+    pos: Pos,
+    files: Vec<PathBuf>,
+    /// Each file's modification time just before it was read: if one has
+    /// changed by the time the unit is imported, it's read again.
+    stamps: Vec<Option<SystemTime>>,
+    items: Vec<Item>,
+    /// What reading logged (unreadable files).
+    log: Vec<String>,
+    /// Keyed by the paths of the items each lookup was for.
+    lookups: Vec<(Vec<PathBuf>, Looked)>,
+}
+
+fn stamps(files: &[PathBuf]) -> Vec<Option<SystemTime>> {
+    files
+        .iter()
+        .map(|f| std::fs::metadata(f).and_then(|m| m.modified()).ok())
+        .collect()
+}
+
+/// Read each file's tags, leaving out those in `skip`; unreadable files
+/// are logged (with [`crate::logging::emit`]) and left out.
+fn read_files(files: &[PathBuf], skip: &HashSet<PathBuf>) -> Vec<Item> {
+    let mut items = vec![];
+    for f in files {
+        if skip.contains(f) {
+            continue;
+        }
+        match media::read(f) {
+            Ok(i) => items.push(i),
+            Err(e) => crate::logging::emit(format!("warning: {e:#}")),
+        }
+    }
+    items
+}
+
+fn item_paths(items: &[Item]) -> Vec<PathBuf> {
+    items.iter().map(|i| i.path().to_path_buf()).collect()
+}
+
+/// The pipeline's lookup stage: the lookups the sequential flow would do
+/// first for these items, stopping at an error as it would.
+fn look_up(
+    src: &dyn CandidateSource,
+    mode: LookupMode,
+    items: &[Item],
+    cancel: &Cancel,
+) -> Vec<(Vec<PathBuf>, Looked)> {
+    let units: Vec<Vec<Item>> = match mode {
+        LookupMode::None => vec![],
+        _ if items.is_empty() => vec![],
+        LookupMode::Album => vec![items.to_vec()],
+        LookupMode::Groups => group_albums(items.to_vec()),
+        LookupMode::Tracks => items.iter().map(|i| vec![i.clone()]).collect(),
+    };
+    let mut out = vec![];
+    for unit in units {
+        if cancel.is_set() {
+            break;
+        }
+        let (result, log) = crate::logging::capture(|| match mode {
+            LookupMode::Tracks => src.item(&unit[0]).map(|(c, r)| Candidates::Track(c, r)),
+            _ => src.album(&unit).map(|(c, r)| Candidates::Album(c, r)),
+        });
+        let failed = result.is_err();
+        out.push((item_paths(&unit), Looked { log, result }));
+        if failed {
+            break;
+        }
+    }
+    out
+}
+
+/// The threaded pipeline (`threaded: yes`) and where its planning is.
+struct Ahead {
+    pipe: Lookahead<(Pos, Vec<PathBuf>), Prepared>,
+    /// The units in flight, oldest first.
+    queued: VecDeque<Pos>,
+    /// The next unit to consider submitting.
+    cursor: Pos,
+}
+
+/// The import paths' tasks, walked as they're needed: by the main loop on
+/// reaching a path, or earlier by the lookahead.
+struct Plan {
+    paths: Vec<PathBuf>,
+    roots: Vec<Option<RootPlan>>,
+}
+
+enum RootPlan {
+    Ready {
+        groups: Vec<Group>,
+        /// What the walk logged, replayed when the import reaches the path.
+        log: Vec<String>,
+        /// The tasks a resumed import skips, if known without asking.
+        done: Option<BTreeSet<PathBuf>>,
+    },
+    /// Not importable (the main loop reports why on reaching it).
+    Failed,
+}
+
 pub struct Importer<'a> {
     cfg: &'a Config,
     lib: &'a Library,
     fmt: PathFormatter,
-    mb: MusicBrainz,
+    mb: Arc<MusicBrainz>,
+    source: Arc<dyn CandidateSource>,
     opts: ImportOptions,
     pub stats: Stats,
     roots: Vec<PathBuf>,
@@ -330,6 +496,10 @@ pub struct Importer<'a> {
     merged: HashSet<PathBuf>,
     clutter: Globs,
     walk: WalkFilter,
+    /// The unit about to be imported, as the pipeline read it.
+    prepared: Option<Prepared>,
+    /// Its lookups, taken by the prompts they were done for.
+    lookups: HashMap<Vec<PathBuf>, Looked>,
 }
 
 /// beets' `_MULTIDISC_MARKERS`, as `MULTIDISC_PATTERNS`: a disc marker,
@@ -365,7 +535,10 @@ fn sorted_walk(root: &Path, filter: &WalkFilter) -> Vec<(PathBuf, Vec<String>, V
         let entries = match std::fs::read_dir(dir) {
             Ok(e) => e,
             Err(e) => {
-                eprintln!("warning: could not list directory {}: {e}", dir.display());
+                crate::logging::emit(format!(
+                    "warning: could not list directory {}: {e}",
+                    dir.display()
+                ));
                 return;
             }
         };
@@ -530,15 +703,24 @@ impl<'a> Importer<'a> {
             ),
             None => None,
         };
+        let mb = Arc::new(MusicBrainz::new(cfg));
+        let source = Arc::new(MbSource {
+            cfg: cfg.clone(),
+            mb: mb.clone(),
+            ids: opts.search_ids.clone(),
+        });
         Ok(Importer {
             log,
+            mb,
+            source,
+            prepared: None,
+            lookups: HashMap::new(),
             merged: HashSet::new(),
             clutter: fileops::clutter(cfg),
             walk: WalkFilter::from_config(cfg),
             cfg,
             lib,
             fmt: PathFormatter::new(cfg)?,
-            mb: MusicBrainz::new(cfg),
             opts,
             stats: Stats::default(),
             roots: vec![],
@@ -546,6 +728,13 @@ impl<'a> Importer<'a> {
             state: ImportState::load(&cfg.state_path()),
             state_path: cfg.state_path(),
         })
+    }
+
+    /// Take each task's first lookup from `src` instead of MusicBrainz.
+    #[cfg(test)]
+    fn with_source(mut self, src: Arc<dyn CandidateSource>) -> Self {
+        self.source = src;
+        self
     }
 
     pub fn run(&mut self, paths: &[PathBuf]) -> Result<()> {
@@ -564,7 +753,12 @@ impl<'a> Importer<'a> {
                 Resume::Ask => !self.opts.quiet,
                 Resume::No => false,
             };
-        for p in paths {
+        let mut plan = Plan {
+            paths: paths.to_vec(),
+            roots: paths.iter().map(|_| None).collect(),
+        };
+        let mut ahead = (self.opts.threaded && !self.opts.pretend).then(|| self.start_pipeline());
+        for (ri, p) in paths.iter().enumerate() {
             let p = std::fs::canonicalize(p)
                 .with_context(|| format!("no such file or directory: {}", p.display()))?;
             self.roots.push(if p.is_dir() {
@@ -585,16 +779,19 @@ impl<'a> Importer<'a> {
                 }
                 Default::default()
             };
-            let groups = if self.opts.flat && p.is_dir() {
-                let files = group_files(&p, &self.walk)?
-                    .into_iter()
-                    .flat_map(|(_, f)| f)
-                    .collect();
-                vec![(vec![p.clone()], files)]
-            } else {
-                group_files(&p, &self.walk)?
+            let groups = match plan.roots[ri].take() {
+                Some(RootPlan::Ready { groups, log, .. }) => {
+                    crate::logging::replay(&log);
+                    groups
+                }
+                _ => self.root_groups(&p)?,
             };
-            for (paths, group) in groups {
+            plan.roots[ri] = Some(RootPlan::Ready {
+                groups: groups.clone(),
+                log: vec![],
+                done: Some(done.clone()),
+            });
+            for (gi, (paths, group)) in groups.into_iter().enumerate() {
                 // The state (progress, history) keys a task by its first
                 // path: the album's directory, the parent of nested discs,
                 // or the first of a run of sibling disc directories.
@@ -614,8 +811,11 @@ impl<'a> Importer<'a> {
                 }
                 let outcome = if self.opts.singletons {
                     let mut outcome = Outcome::Done;
-                    for f in group {
-                        match self.import_singleton(&f)? {
+                    for (fi, f) in group.iter().enumerate() {
+                        self.prepare(ahead.as_mut(), &mut plan, (ri, gi, fi), track_progress);
+                        let o = self.import_singleton(f);
+                        self.unprepare();
+                        match o? {
                             Outcome::Done => {}
                             Outcome::Skipped => outcome = Outcome::Skipped,
                             Outcome::Aborted => {
@@ -626,9 +826,15 @@ impl<'a> Importer<'a> {
                     }
                     outcome
                 } else {
-                    self.import_album(&paths, &group)?
+                    self.prepare(ahead.as_mut(), &mut plan, (ri, gi, 0), track_progress);
+                    let o = self.import_album(&paths, &group);
+                    self.unprepare();
+                    o?
                 };
                 if outcome == Outcome::Aborted {
+                    // Stop the lookahead first: it only reads, so nothing
+                    // it was doing needs finishing.
+                    drop(ahead);
                     // Progress so far stays recorded, so the import can resume.
                     println!("Import aborted.");
                     return Ok(());
@@ -640,6 +846,154 @@ impl<'a> Importer<'a> {
             }
         }
         Ok(())
+    }
+
+    /// An import path's tasks: its album groups, or one with every file
+    /// (`--flat`).
+    fn root_groups(&self, top: &Path) -> Result<Vec<Group>> {
+        Ok(if self.opts.flat && top.is_dir() {
+            let files = group_files(top, &self.walk)?
+                .into_iter()
+                .flat_map(|(_, f)| f)
+                .collect();
+            vec![(vec![top.to_path_buf()], files)]
+        } else {
+            group_files(top, &self.walk)?
+        })
+    }
+
+    /// Start the threaded pipeline: one thread reads the files of upcoming
+    /// units, another looks up their candidates.
+    fn start_pipeline(&self) -> Ahead {
+        let mode = match (
+            self.opts.autotag,
+            self.opts.singletons,
+            self.opts.group_albums,
+        ) {
+            (false, _, _) => LookupMode::None,
+            (true, true, _) => LookupMode::Tracks,
+            (true, false, true) => LookupMode::Groups,
+            (true, false, false) => LookupMode::Album,
+        };
+        let src = self.source.clone();
+        let pipe = Lookahead::new(
+            |(pos, files): (Pos, Vec<PathBuf>), _: &Cancel| {
+                let stamps = stamps(&files);
+                let (items, log) = crate::logging::capture(|| read_files(&files, &HashSet::new()));
+                Prepared {
+                    pos,
+                    files,
+                    stamps,
+                    items,
+                    log,
+                    lookups: vec![],
+                }
+            },
+            move |mut p: Prepared, cancel: &Cancel| {
+                p.lookups = look_up(src.as_ref(), mode, &p.items, cancel);
+                p
+            },
+        );
+        Ahead {
+            pipe,
+            queued: VecDeque::new(),
+            cursor: (0, 0, 0),
+        }
+    }
+
+    /// Before importing the unit at `cur`: queue the units after it, up to
+    /// [`LOOKAHEAD`], and take its own from the pipeline if it was queued.
+    fn prepare(&mut self, ahead: Option<&mut Ahead>, plan: &mut Plan, cur: Pos, progress: bool) {
+        let Some(a) = ahead else {
+            return;
+        };
+        // Units the import passed over (an abort of singletons, a skipped
+        // path) are dropped first, so they don't count against the bound.
+        while a.queued.front().is_some_and(|&q| q < cur) {
+            a.queued.pop_front();
+            if a.pipe.next().is_none() {
+                a.queued.clear();
+            }
+        }
+        self.plan_ahead(a, plan, cur, progress);
+        if a.queued.front() == Some(&cur) {
+            a.queued.pop_front();
+            match a.pipe.next() {
+                Some(p) => {
+                    debug_assert_eq!(p.pos, cur);
+                    self.prepared = Some(p);
+                }
+                // The pipeline died; carry on without it.
+                None => a.queued.clear(),
+            }
+        }
+    }
+
+    fn unprepare(&mut self) {
+        self.prepared = None;
+        self.lookups.clear();
+    }
+
+    /// Queue units from the cursor on until [`LOOKAHEAD`] are in flight,
+    /// skipping the tasks the main loop will skip. Planning stops at an
+    /// import path that needs asking whether to resume, until it's asked.
+    fn plan_ahead(&self, a: &mut Ahead, plan: &mut Plan, cur: Pos, progress: bool) {
+        a.cursor = a.cursor.max(cur);
+        while a.pipe.in_flight() < LOOKAHEAD {
+            let (r, g, f) = a.cursor;
+            if r >= plan.roots.len() {
+                return;
+            }
+            if plan.roots[r].is_none() {
+                plan.roots[r] = Some(self.plan_root(&plan.paths[r], progress));
+            }
+            let Some(RootPlan::Ready { groups, done, .. }) = &plan.roots[r] else {
+                return;
+            };
+            let Some(done) = done else {
+                return;
+            };
+            let Some((paths, files)) = groups.get(g) else {
+                a.cursor = (r + 1, 0, 0);
+                continue;
+            };
+            let key = &paths[0];
+            if done.contains(key)
+                || (self.opts.incremental && self.state.history.contains(key))
+                || f >= files.len()
+            {
+                a.cursor = (r, g + 1, 0);
+                continue;
+            }
+            let unit = if self.opts.singletons {
+                a.cursor = (r, g, f + 1);
+                vec![files[f].clone()]
+            } else {
+                a.cursor = (r, g + 1, 0);
+                files.clone()
+            };
+            if !a.pipe.submit(((r, g, f), unit)) {
+                return; // the pipeline died
+            }
+            a.queued.push_back((r, g, f));
+        }
+    }
+
+    /// Walk import path `r` ahead of the main loop, capturing what the walk
+    /// logs, and work out which of its tasks a resumed import would skip.
+    fn plan_root(&self, top: &Path, progress: bool) -> RootPlan {
+        let Ok(top) = std::fs::canonicalize(top) else {
+            return RootPlan::Failed;
+        };
+        let (groups, log) = crate::logging::capture(|| self.root_groups(&top));
+        let Ok(groups) = groups else {
+            return RootPlan::Failed;
+        };
+        let done = match self.state.progress.get(&top) {
+            Some(d) if progress => (self.opts.resume == Resume::Yes).then(|| d.clone()),
+            _ => Some(BTreeSet::new()),
+        };
+        RootPlan::Ready { groups, log, done }
     }
 
     /// The groups an interrupted earlier import of `top` already finished,
@@ -692,20 +1046,26 @@ impl<'a> Importer<'a> {
     }
 
     fn read_items(&mut self, files: &[PathBuf]) -> Result<Vec<Item>> {
-        let mut items = vec![];
-        for f in files {
-            // Files already in the library are reimported, replacing their
-            // rows, unless a merge already took them this run.
-            if self.merged.contains(f) {
-                continue;
-            }
-            match media::read(f) {
-                Ok(i) => items.push(i),
-                Err(e) => eprintln!("warning: {e:#}"),
-            }
+        if let Some(p) = self.prepared.take()
+            && p.files == files
+            && !files.iter().any(|f| self.merged.contains(f))
+            && p.stamps == stamps(files)
+        {
+            crate::logging::replay(&p.log);
+            self.lookups = p.lookups.into_iter().collect();
+            return Ok(p.items);
         }
-        // Path order, as beets: the library ids follow it.
-        Ok(items)
+        // Files already in the library are reimported, replacing their
+        // rows, unless a merge already took them this run. Path order, as
+        // beets: the library ids follow it.
+        Ok(read_files(files, &self.merged))
+    }
+
+    /// The first lookup for these items, if the pipeline did it.
+    fn prefetched(&mut self, items: &[Item]) -> Option<Result<Candidates>> {
+        let l = self.lookups.remove(&item_paths(items))?;
+        crate::logging::replay(&l.log);
+        Some(l.result)
     }
 
     /// The match display, with `--detail` (or `import.detail`).
@@ -965,9 +1325,11 @@ impl<'a> Importer<'a> {
     }
 
     fn choose_album(&mut self, items: &[Item]) -> Result<Decision<AlbumMatch>> {
-        let ids = self.opts.search_ids.clone();
-        let (mut cands, mut rec) =
-            autotag::album_candidates(self.cfg, &self.mb, items, None, &ids)?;
+        let (mut cands, mut rec) = match self.prefetched(items) {
+            Some(Ok(Candidates::Album(c, r))) => (c, r),
+            Some(Err(e)) => return Err(e),
+            _ => self.source.album(items)?,
+        };
 
         // `fresh`: candidates just (re)fetched, so quiet/strong handling
         // applies. `focus`: the candidate shown for confirmation, with
@@ -1668,8 +2030,12 @@ impl<'a> Importer<'a> {
     }
 
     fn choose_item(&mut self, item: &Item) -> Result<Decision<TrackMatch>> {
-        let ids = self.opts.search_ids.clone();
-        let (mut cands, mut rec) = autotag::item_candidates(self.cfg, &self.mb, item, None, &ids)?;
+        // An album's lookup for a lone track ("as Tracks") isn't this one.
+        let (mut cands, mut rec) = match self.prefetched(std::slice::from_ref(item)) {
+            Some(Ok(Candidates::Track(c, r))) => (c, r),
+            Some(Err(e)) => return Err(e),
+            _ => self.source.item(item)?,
+        };
         let disp = self.display();
         if let Some(d) = self.summary_judgment(rec) {
             return Ok(d);
@@ -3181,5 +3547,207 @@ mod tests {
                 .iter()
                 .all(|i| i.str("albumartist") == "VA" && i.bool("comp"))
         );
+    }
+
+    /// A candidate source that never finds anything, slowly, and records
+    /// what it was asked for.
+    struct FakeSource {
+        calls: Arc<std::sync::Mutex<Vec<String>>>,
+        delay: std::time::Duration,
+    }
+
+    impl FakeSource {
+        fn new(delay_ms: u64) -> (Arc<Self>, Arc<std::sync::Mutex<Vec<String>>>) {
+            let calls = Arc::new(std::sync::Mutex::new(vec![]));
+            let src = FakeSource {
+                calls: calls.clone(),
+                delay: std::time::Duration::from_millis(delay_ms),
+            };
+            (Arc::new(src), calls)
+        }
+    }
+
+    impl CandidateSource for FakeSource {
+        fn album(&self, items: &[Item]) -> Result<(Vec<AlbumMatch>, Recommendation)> {
+            let names: Vec<&str> = items.iter().map(|i| i.str("title")).collect();
+            let call = format!("album {} {}", items[0].str("album"), names.join(","));
+            self.calls.lock().unwrap().push(call);
+            std::thread::sleep(self.delay);
+            Ok((vec![], Recommendation::None))
+        }
+
+        fn item(&self, item: &Item) -> Result<(Vec<TrackMatch>, Recommendation)> {
+            let call = format!("item {} {}", item.str("album"), item.str("title"));
+            self.calls.lock().unwrap().push(call);
+            std::thread::sleep(self.delay);
+            Ok((vec![], Recommendation::None))
+        }
+    }
+
+    /// Albums A..F of two tracks each (the last a mix of two albums, for
+    /// -g); None without ffmpeg.
+    fn lookahead_corpus(src: &Path, n: usize) -> Option<()> {
+        for (k, name) in ["A", "B", "C", "D", "E", "F"].iter().take(n).enumerate() {
+            let album = if k == n - 1 { "Mixed" } else { name };
+            album_with(src, name, album, &[("one", 128), ("two", 128)])?;
+        }
+        // Make the last directory hold two albums by tag.
+        let last = src.join(["A", "B", "C", "D", "E", "F"][n - 1]);
+        make_mp3(
+            &last,
+            "3.mp3",
+            &[("artist", "Other"), ("album", "Else"), ("title", "three")],
+            128,
+        )
+        .then_some(())
+    }
+
+    /// A library row: (id, album_id, album, title, path).
+    type Row = (i64, i64, String, String, PathBuf);
+    type Mode = (&'static str, fn(&mut ImportOptions));
+
+    /// Import with the fake source in quiet mode (no match: as-is) and
+    /// return the library's (id, album_id, album, title, path) rows and the
+    /// lookups made, in order.
+    fn quiet_import(
+        threaded: bool,
+        f: impl Fn(&mut ImportOptions),
+    ) -> Option<(Vec<Row>, Vec<String>)> {
+        let (d, cfg, lib, _) = setup(&[]);
+        let src = d.path().join("music");
+        lookahead_corpus(&src, 5)?;
+        let mut o = opts(&cfg);
+        o.autotag = true;
+        o.quiet = true;
+        o.quiet_fallback_asis = true;
+        o.threaded = threaded;
+        f(&mut o);
+        let (fake, calls) = FakeSource::new(5);
+        let mut imp = Importer::new(&cfg, &lib, o, &[]).unwrap().with_source(fake);
+        imp.run(std::slice::from_ref(&src)).unwrap();
+        let rows = all_items(&lib)
+            .iter()
+            .map(|i| {
+                (
+                    i.id.unwrap(),
+                    i.int("album_id"),
+                    i.str("album").to_string(),
+                    i.str("title").to_string(),
+                    i.path().strip_prefix(&src).unwrap().to_path_buf(),
+                )
+            })
+            .collect();
+        let calls = calls.lock().unwrap().clone();
+        Some((rows, calls))
+    }
+
+    #[test]
+    fn threaded_import_does_what_the_sequential_one_does() {
+        let modes: [Mode; 4] = [
+            ("albums", |_| {}),
+            ("singletons", |o| o.singletons = true),
+            ("group albums", |o| o.group_albums = true),
+            ("flat", |o| o.flat = true),
+        ];
+        for (name, f) in modes {
+            let Some(seq) = quiet_import(false, f) else {
+                return; // no ffmpeg
+            };
+            let thr = quiet_import(true, f).unwrap();
+            assert_eq!(seq, thr, "{name}");
+            assert!(!seq.0.is_empty() && !seq.1.is_empty(), "{name}");
+            // Each lookup happens once, in import order.
+            let unique: HashSet<&String> = thr.1.iter().collect();
+            assert_eq!(unique.len(), thr.1.len(), "{name}: {:?}", thr.1);
+        }
+    }
+
+    #[test]
+    fn lookahead_is_bounded_and_stops_when_dropped() {
+        let (d, cfg, lib, _) = setup(&[]);
+        let src = d.path().join("music");
+        if lookahead_corpus(&src, 6).is_none() {
+            return;
+        }
+        let mut o = opts(&cfg);
+        o.autotag = true;
+        let (fake, calls) = FakeSource::new(0);
+        let mut imp = Importer::new(&cfg, &lib, o, &[]).unwrap().with_source(fake);
+        let mut plan = Plan {
+            paths: vec![src.clone()],
+            roots: vec![None],
+        };
+        let mut ahead = imp.start_pipeline();
+        imp.prepare(Some(&mut ahead), &mut plan, (0, 0, 0), false);
+        let p = imp.prepared.as_ref().expect("first unit prepared");
+        assert_eq!(p.pos, (0, 0, 0));
+        assert_eq!(p.items.len(), 2);
+        assert_eq!(p.lookups.len(), 1);
+        std::thread::sleep(std::time::Duration::from_millis(300));
+        // The unit being imported and three more; then nothing until the
+        // import moves on.
+        assert_eq!(calls.lock().unwrap().len(), LOOKAHEAD);
+        assert_eq!(ahead.queued.len(), LOOKAHEAD - 1);
+
+        // Moving on to the third unit queues two more (the last there is).
+        imp.unprepare();
+        imp.prepare(Some(&mut ahead), &mut plan, (0, 2, 0), false);
+        assert_eq!(imp.prepared.as_ref().unwrap().pos, (0, 2, 0));
+        std::thread::sleep(std::time::Duration::from_millis(300));
+        assert_eq!(calls.lock().unwrap().len(), 6);
+
+        // An abort drops the pipeline; it starts nothing more.
+        let (fake, calls) = FakeSource::new(50);
+        let mut imp = Importer::new(&cfg, &lib, opts(&cfg), &[])
+            .unwrap()
+            .with_source(fake);
+        imp.opts.autotag = true;
+        let mut plan = Plan {
+            paths: vec![src.clone()],
+            roots: vec![None],
+        };
+        let mut ahead = imp.start_pipeline();
+        imp.prepare(Some(&mut ahead), &mut plan, (0, 0, 0), false);
+        drop(ahead);
+        std::thread::sleep(std::time::Duration::from_millis(300));
+        // The first unit, and the one that was being looked up.
+        let calls = calls.lock().unwrap().clone();
+        assert!(calls.len() <= 2, "{calls:?}");
+    }
+
+    #[test]
+    fn a_file_changed_after_the_lookahead_read_it_is_read_again() {
+        let (d, cfg, lib, _) = setup(&[]);
+        let src = d.path().join("music");
+        if lookahead_corpus(&src, 2).is_none() {
+            return;
+        }
+        let mut o = opts(&cfg);
+        o.autotag = true;
+        o.quiet = true; // no prompt
+        let (fake, calls) = FakeSource::new(0);
+        let mut imp = Importer::new(&cfg, &lib, o, &[]).unwrap().with_source(fake);
+        let mut plan = Plan {
+            paths: vec![src.clone()],
+            roots: vec![None],
+        };
+        let mut ahead = imp.start_pipeline();
+        imp.prepare(Some(&mut ahead), &mut plan, (0, 0, 0), false);
+        let files = imp.prepared.as_ref().unwrap().files.clone();
+        let f = std::fs::File::options()
+            .write(true)
+            .open(&files[0])
+            .unwrap();
+        f.set_modified(SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(86400))
+            .unwrap();
+        let items = imp.read_items(&files).unwrap();
+        assert_eq!(items.len(), 2);
+        // Read afresh, so its lookup is done again too.
+        assert!(imp.lookups.is_empty());
+        assert!(imp.prepared.is_none());
+        imp.choose_album(&items).ok();
+        let calls = calls.lock().unwrap().clone();
+        let first = calls.iter().filter(|c| *c == "album A one,two").count();
+        assert_eq!(first, 2, "{calls:?}");
     }
 }
