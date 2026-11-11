@@ -34,7 +34,15 @@ import:
     autotag: yes
     singletons: no
     group_albums: no
+    duplicate_keys:
+        album: albumartist album
+        item: artist title
     duplicate_action: ask
+    duplicate_verbose_prompt: no
+    bell: no
+    languages: []
+    ignored_alias_types: []
+    singleton_album_disambig: yes
     incremental: no
     incremental_skip_later: no
     resume: ask
@@ -127,6 +135,7 @@ musicbrainz:
     ratelimit: 1
     ratelimit_interval: 1.0
     searchlimit: 5
+    aliases_as_credits: no
 "#;
 
 #[derive(Debug, Clone)]

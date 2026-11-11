@@ -31,6 +31,9 @@ pub struct TrackInfo {
     pub disctitle: String,
     pub media: String,
     pub isrc: String,
+    /// The first release a searched-for recording appears on (display only,
+    /// for `import.singleton_album_disambig`).
+    pub album: String,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -67,6 +70,53 @@ pub struct MusicBrainz {
     interval: Duration,
     last: Cell<Option<Instant>>,
     pub search_limit: usize,
+    aliases: AliasPrefs,
+}
+
+/// Which MusicBrainz alias to use for names and titles: `import.languages`,
+/// `import.ignored_alias_types` and `musicbrainz.aliases_as_credits`.
+#[derive(Debug, Clone, Default)]
+pub struct AliasPrefs {
+    pub languages: Vec<String>,
+    /// Lower-cased alias types never used.
+    pub ignored_types: Vec<String>,
+    /// Use the alias for the artist credit too, not just name and sort name.
+    pub as_credits: bool,
+}
+
+impl AliasPrefs {
+    pub fn from_config(cfg: &Config) -> Self {
+        AliasPrefs {
+            languages: cfg.list("import.languages"),
+            ignored_types: cfg
+                .list("import.ignored_alias_types")
+                .iter()
+                .map(|t| t.to_lowercase())
+                .collect(),
+            as_credits: cfg.bool("musicbrainz.aliases_as_credits"),
+        }
+    }
+
+    /// beets' `_preferred_alias`: the first primary alias for the first
+    /// configured locale that has one, skipping ignored alias types.
+    fn preferred<'j>(&self, obj: &'j J) -> Option<&'j J> {
+        let aliases = obj.get("aliases")?.as_array()?;
+        self.languages.iter().find_map(|locale| {
+            aliases.iter().find(|al| {
+                al.get("locale").and_then(|l| l.as_str()) == Some(locale.as_str())
+                    && al.get("primary").and_then(|p| p.as_bool()) == Some(true)
+                    && !self.ignored_types.contains(&s(al, "type").to_lowercase())
+            })
+        })
+    }
+
+    /// An object's title, or its preferred alias's name.
+    fn title(&self, obj: &J) -> String {
+        match self.preferred(obj) {
+            Some(al) => s(al, "name"),
+            None => s(obj, "title"),
+        }
+    }
 }
 
 fn s(v: &J, key: &str) -> String {
@@ -97,8 +147,10 @@ fn parse_date(d: &str) -> (i64, i64, i64) {
     )
 }
 
-/// Flatten an artist-credit list into (display name, first artist id, sort name, credit name).
-fn artist_credit(ac: Option<&J>) -> (String, String, String, String) {
+/// Flatten an artist-credit list into (display name, first artist id, sort
+/// name, credit name), using each artist's preferred alias for the name and
+/// sort name (and the credit, with `aliases_as_credits`).
+fn artist_credit(ac: Option<&J>, prefs: &AliasPrefs) -> (String, String, String, String) {
     let Some(list) = ac.and_then(|a| a.as_array()) else {
         return Default::default();
     };
@@ -107,17 +159,22 @@ fn artist_credit(ac: Option<&J>) -> (String, String, String, String) {
     for c in list {
         let artist = c.get("artist").cloned().unwrap_or(J::Null);
         let join = s(c, "joinphrase");
-        let aname = s(&artist, "name");
-        let cname = c
-            .get("name")
-            .and_then(|x| x.as_str())
-            .map(String::from)
-            .unwrap_or(aname.clone());
+        let alias = prefs.preferred(&artist);
+        let named = alias.unwrap_or(&artist);
+        let aname = s(named, "name");
+        let cname = match alias {
+            Some(al) if prefs.as_credits => s(al, "name"),
+            _ => c
+                .get("name")
+                .and_then(|x| x.as_str())
+                .map(String::from)
+                .unwrap_or(aname.clone()),
+        };
         name.push_str(&aname);
         name.push_str(&join);
         credit.push_str(&cname);
         credit.push_str(&join);
-        let sn = s(&artist, "sort-name");
+        let sn = s(named, "sort-name");
         sort.push_str(if sn.is_empty() { &aname } else { &sn });
         sort.push_str(&join);
         if id.is_empty() {
@@ -151,6 +208,7 @@ impl MusicBrainz {
             interval,
             last: Cell::new(None),
             search_limit: cfg.f64("musicbrainz.searchlimit").max(1.0) as usize,
+            aliases: AliasPrefs::from_config(cfg),
         }
     }
 
@@ -220,10 +278,10 @@ impl MusicBrainz {
             &format!("release/{id}"),
             &[(
                 "inc",
-                "recordings artist-credits labels release-groups isrcs",
+                "recordings artist-credits labels release-groups isrcs aliases",
             )],
         )?;
-        Ok(parse_release(&j))
+        Ok(parse_release(&j, &self.aliases))
     }
 
     pub fn search_recordings(&self, artist: &str, title: &str) -> Result<Vec<TrackInfo>> {
@@ -245,23 +303,33 @@ impl MusicBrainz {
         Ok(res
             .get("recordings")
             .and_then(|r| r.as_array())
-            .map(|a| a.iter().map(parse_recording).collect())
+            .map(|a| {
+                a.iter()
+                    .map(|r| parse_recording(r, &self.aliases))
+                    .collect()
+            })
             .unwrap_or_default())
     }
 
     pub fn recording(&self, id: &str) -> Result<TrackInfo> {
         let j = self.get(
             &format!("recording/{id}"),
-            &[("inc", "artist-credits isrcs")],
+            &[("inc", "artist-credits isrcs aliases")],
         )?;
-        Ok(parse_recording(&j))
+        Ok(parse_recording(&j, &self.aliases))
     }
 }
 
-pub fn parse_recording(r: &J) -> TrackInfo {
-    let (artist, artist_id, artist_sort, credit) = artist_credit(r.get("artist-credit"));
+pub fn parse_recording(r: &J, prefs: &AliasPrefs) -> TrackInfo {
+    let (artist, artist_id, artist_sort, credit) = artist_credit(r.get("artist-credit"), prefs);
     TrackInfo {
-        title: s(r, "title"),
+        title: prefs.title(r),
+        album: r
+            .get("releases")
+            .and_then(|rs| rs.as_array())
+            .and_then(|rs| rs.first())
+            .map(|rel| s(rel, "title"))
+            .unwrap_or_default(),
         track_id: s(r, "id"),
         artist,
         artist_id,
@@ -282,8 +350,9 @@ pub fn parse_recording(r: &J) -> TrackInfo {
     }
 }
 
-pub fn parse_release(j: &J) -> AlbumInfo {
-    let (artist, artist_id, artist_sort, artist_credit_s) = artist_credit(j.get("artist-credit"));
+pub fn parse_release(j: &J, prefs: &AliasPrefs) -> AlbumInfo {
+    let (artist, artist_id, artist_sort, artist_credit_s) =
+        artist_credit(j.get("artist-credit"), prefs);
     let (year, month, day) = parse_date(&s(j, "date"));
     let rg = j.get("release-group").cloned().unwrap_or(J::Null);
     let (oy, om, od) = parse_date(&s(&rg, "first-release-date"));
@@ -324,14 +393,15 @@ pub fn parse_release(j: &J) -> AlbumInfo {
         let mtotal = mtracks.len();
         for (ti, t) in mtracks.iter().enumerate() {
             let rec = t.get("recording").cloned().unwrap_or(J::Null);
-            let mut info = parse_recording(&rec);
-            // The release's track title/credit wins over the recording's.
+            let mut info = parse_recording(&rec, prefs);
+            // The release's track title/credit wins over the recording's,
+            // unless the recording has a preferred alias.
             let title = s(t, "title");
-            if !title.is_empty() {
+            if !title.is_empty() && prefs.preferred(&rec).is_none() {
                 info.title = title;
             }
             if t.get("artist-credit").is_some() {
-                let (a, aid, asort, acred) = artist_credit(t.get("artist-credit"));
+                let (a, aid, asort, acred) = artist_credit(t.get("artist-credit"), prefs);
                 info.artist = a;
                 info.artist_id = aid;
                 info.artist_sort = asort;
@@ -357,7 +427,7 @@ pub fn parse_release(j: &J) -> AlbumInfo {
     formats.dedup();
     AlbumInfo {
         album_id: s(j, "id"),
-        album: s(j, "title"),
+        album: prefs.title(j),
         va: artist_id == VA_ARTIST_ID,
         artist,
         artist_id,
@@ -415,7 +485,7 @@ mod tests {
             ]}"#,
         )
         .unwrap();
-        let a = parse_release(&j);
+        let a = parse_release(&j, &AliasPrefs::default());
         assert_eq!(a.artist, "A & B");
         assert_eq!(a.artist_sort, "A, The & B");
         assert_eq!(a.artist_id, "a1");
@@ -435,6 +505,65 @@ mod tests {
         assert_eq!(a.tracks[2].medium_index, 1);
         assert_eq!(a.tracks[2].artist, "C");
         assert_eq!(a.tracks[2].disctitle, "Bonus");
+    }
+
+    #[test]
+    fn preferred_aliases_follow_languages_and_ignored_types() {
+        let j: J = serde_json::from_str(
+            r#"{
+            "id": "rel", "title": "Arubamu",
+            "aliases": [{"name": "Album (en)", "locale": "en", "primary": true, "type": "Release name"}],
+            "artist-credit": [{"name": "Kurejitto", "joinphrase": "", "artist": {
+                "id": "a1", "name": "Aatisuto", "sort-name": "Aatisuto",
+                "aliases": [
+                  {"name": "Not primary", "sort-name": "x", "locale": "en", "primary": false, "type": "Artist name"},
+                  {"name": "Search", "sort-name": "Search", "locale": "de", "primary": true, "type": "Search hint"},
+                  {"name": "Artist", "sort-name": "Artist, The", "locale": "en", "primary": true, "type": "Artist name"},
+                  {"name": "Kuenstler", "sort-name": "Kuenstler", "locale": "de", "primary": true, "type": "Artist name"}]}}],
+            "media": [{"position": 1, "tracks": [
+                {"id": "t1", "position": 1, "title": "Torakku", "recording": {"id": "r1", "title": "Torakku",
+                  "aliases": [{"name": "Track", "locale": "en", "primary": true, "type": null}]}},
+                {"id": "t2", "position": 2, "title": "Track title", "recording": {"id": "r2", "title": "Rec title"}}]}]
+            }"#,
+        )
+        .unwrap();
+        let prefs = |langs: &[&str], ignored: &[&str], as_credits| AliasPrefs {
+            languages: langs.iter().map(|s| s.to_string()).collect(),
+            ignored_types: ignored.iter().map(|s| s.to_string()).collect(),
+            as_credits,
+        };
+        // No languages: the plain names, and track titles win.
+        let a = parse_release(&j, &AliasPrefs::default());
+        assert_eq!(
+            (a.artist.as_str(), a.album.as_str()),
+            ("Aatisuto", "Arubamu")
+        );
+        assert_eq!(a.artist_credit, "Kurejitto");
+        assert_eq!(a.tracks[0].title, "Torakku");
+        // English: the primary English aliases for artist, sort, album and
+        // the recording (which then beats the track title).
+        let a = parse_release(&j, &prefs(&["fr", "en", "de"], &[], false));
+        assert_eq!(a.artist, "Artist");
+        assert_eq!(a.artist_sort, "Artist, The");
+        assert_eq!(a.artist_credit, "Kurejitto");
+        assert_eq!(a.album, "Album (en)");
+        assert_eq!(a.tracks[0].title, "Track");
+        assert_eq!(a.tracks[1].title, "Track title");
+        // German, with search hints ignored (case-insensitively), and the
+        // alias used for the credit too.
+        let a = parse_release(&j, &prefs(&["de"], &["search hint"], true));
+        assert_eq!(a.artist, "Kuenstler");
+        assert_eq!(a.artist_credit, "Kuenstler");
+        assert_eq!(a.album, "Arubamu");
+    }
+
+    #[test]
+    fn searched_recordings_carry_their_first_release() {
+        let r: J = serde_json::from_str(
+            r#"{"id": "r1", "title": "Song", "releases": [{"title": "First"}, {"title": "Second"}]}"#,
+        )
+        .unwrap();
+        assert_eq!(parse_recording(&r, &AliasPrefs::default()).album, "First");
     }
 
     #[test]

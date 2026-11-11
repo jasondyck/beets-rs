@@ -3,6 +3,7 @@
 
 use crate::autotag::{self, AlbumMatch, Recommendation, TrackMatch};
 use crate::config::Config;
+use crate::duplicates::{self, DuplicateAction, Found, KeyValues};
 use crate::fileops::{self, FileOp, Globs, WalkFilter, prune_dirs};
 use crate::library::{Library, now};
 use crate::mb::MusicBrainz;
@@ -137,6 +138,13 @@ enum DupOutcome {
     Skip,
     /// "Merge all": the duplicates' items, to import together with the new ones.
     Merge(Vec<Item>),
+    /// "Upgrade": import only these new items (indices); the superseded old
+    /// ones are already gone. `album_id`: the surviving old album the kept
+    /// items join.
+    Upgrade {
+        kept: Vec<usize>,
+        album_id: Option<i64>,
+    },
 }
 
 /// `import.none_rec_action`: what to do, outside quiet mode, when the
@@ -793,7 +801,37 @@ impl<'a> Importer<'a> {
             Decision::Group => return self.import_groups(items, dir),
         };
 
-        match self.resolve_duplicates(&items, m.as_deref(), paths)? {
+        // Apply the choice to a copy: a merge starts over from the
+        // untouched items, and the duplicate check and upgrade compare
+        // against the new metadata.
+        let album_keys = self.cfg.list("import.duplicate_keys.album");
+        let mut applied = items.clone();
+        let want = if let Some(m) = &m {
+            if self.opts.from_scratch {
+                for &(i, _) in &m.mapping {
+                    clear_tags(&mut applied[i]);
+                }
+            }
+            // Items with no matching track are dropped, as in beets.
+            autotag::apply_album(self.cfg, &mut applied, m);
+            let keep: Vec<usize> = m.mapping.iter().map(|(i, _)| *i).collect();
+            let mut idx = 0;
+            applied.retain(|_| {
+                let k = keep.contains(&idx);
+                idx += 1;
+                k
+            });
+            match applied.first() {
+                Some(first) => duplicates::key_values(first, &album_keys),
+                None => duplicates::likely_key_values(&items, &album_keys),
+            }
+        } else {
+            align_asis(&mut applied, &self.cfg.str("va_name"));
+            duplicates::likely_key_values(&items, &album_keys)
+        };
+
+        let mut graft = None;
+        match self.resolve_duplicates(true, &applied, &items, &want, paths)? {
             DupOutcome::Proceed => {}
             DupOutcome::Skip => {
                 self.stats.skipped += 1;
@@ -810,27 +848,17 @@ impl<'a> Importer<'a> {
                 items.extend(dups);
                 return self.import_album_items(items, dir, &paths);
             }
-        }
-
-        if let Some(m) = &m {
-            if self.opts.from_scratch {
-                for &(i, _) in &m.mapping {
-                    clear_tags(&mut items[i]);
-                }
+            DupOutcome::Upgrade { kept, album_id } => {
+                let mut idx = 0;
+                applied.retain(|_| {
+                    let k = kept.contains(&idx);
+                    idx += 1;
+                    k
+                });
+                graft = album_id;
             }
-            // Items with no matching track are dropped, as in beets.
-            autotag::apply_album(self.cfg, &mut items, m);
-            let keep: Vec<usize> = m.mapping.iter().map(|(i, _)| *i).collect();
-            let mut idx = 0;
-            items.retain(|_| {
-                let k = keep.contains(&idx);
-                idx += 1;
-                k
-            });
-        } else {
-            align_asis(&mut items, &self.cfg.str("va_name"));
         }
-        self.finalize_album(items, m.is_some(), dir)?;
+        self.finalize_album(applied, m.is_some(), dir, graft)?;
         Ok(Outcome::Done)
     }
 
@@ -866,6 +894,7 @@ impl<'a> Importer<'a> {
 
             let choice = if let Some((k, default_apply)) = focus {
                 self.show_album_match(items, &cands[k]);
+                self.bell();
                 match ui::options(
                     &ALBUM_CONFIRM,
                     None,
@@ -1084,81 +1113,144 @@ impl<'a> Importer<'a> {
         }
     }
 
-    /// Returns false to skip this album.
+    /// Remove a duplicate item from the library, deleting its file when
+    /// it's inside the library directory (beets' `remove_duplicates`).
+    fn remove_duplicate_item(&self, it: &Item) -> Result<()> {
+        let libdir = self.cfg.directory();
+        if it.path().starts_with(&libdir) {
+            std::fs::remove_file(it.path()).ok();
+            if let Some(p) = it.path().parent() {
+                prune_dirs(p, &libdir, &self.clutter);
+            }
+        }
+        self.lib.remove(it)
+    }
+
+    /// Remove a duplicate album row, and its art file if that's inside the
+    /// library directory.
+    fn remove_duplicate_album(&self, id: i64) -> Result<()> {
+        let Some(a) = self.lib.get_album(id)? else {
+            return Ok(());
+        };
+        let libdir = self.cfg.directory();
+        let art = a.path_field("artpath");
+        if !art.as_os_str().is_empty() && art.starts_with(&libdir) && art.is_file() {
+            std::fs::remove_file(art).ok();
+            if let Some(p) = art.parent() {
+                prune_dirs(p, &libdir, &self.clutter);
+            }
+        }
+        self.lib.remove(&a)
+    }
+
+    /// The albums (or, for a track, singletons) already in the library with
+    /// the same `import.duplicate_keys` values (beets' `find_duplicates`).
+    /// An album whose files are all part of this import is being reimported,
+    /// not duplicated; so is the track's own row.
+    fn find_duplicates(&self, album: bool, task: &[Item], want: &KeyValues) -> Result<Vec<Found>> {
+        let task_paths: HashSet<&Path> = task.iter().map(|i| i.path()).collect();
+        let mut found = vec![];
+        if album {
+            for a in self.lib.all_albums()? {
+                if !duplicates::matches(&a, want) {
+                    continue;
+                }
+                let album_items = self.lib.album_items(a.id.unwrap())?;
+                if !album_items.iter().all(|i| task_paths.contains(i.path())) {
+                    found.push(Found {
+                        album_id: a.id,
+                        items: album_items,
+                    });
+                }
+            }
+        } else {
+            let all = crate::query::Query::parse::<&str>(crate::model::Kind::Item, &[])?;
+            for it in self.lib.items(&all)? {
+                if it.int("album_id") == 0
+                    && !task_paths.contains(it.path())
+                    && duplicates::matches(&it, want)
+                {
+                    found.push(Found {
+                        album_id: None,
+                        items: vec![it],
+                    });
+                }
+            }
+        }
+        Ok(found)
+    }
+
+    /// beets' `_resolve_duplicates`: look for the album (`album`) or track
+    /// already in the library and settle what to do. `new` are the items
+    /// as they'll be imported, `task` all of the task's original items,
+    /// `want` the duplicate key values; `paths` identify it in the log.
     fn resolve_duplicates(
         &mut self,
-        items: &[Item],
-        m: Option<&AlbumMatch>,
+        album: bool,
+        new: &[Item],
+        task: &[Item],
+        want: &KeyValues,
         paths: &[PathBuf],
     ) -> Result<DupOutcome> {
-        let (artist, album, mbid) = match m {
-            Some(m) => (
-                if m.info.va {
-                    self.cfg.str("va_name")
-                } else {
-                    m.info.artist.clone()
-                },
-                m.info.album.clone(),
-                m.info.album_id.clone(),
-            ),
-            None => {
-                let cur = autotag::current_metadata(items);
-                (cur.artist, cur.album, String::new())
-            }
-        };
-        let task_paths: HashSet<&Path> = items.iter().map(|i| i.path()).collect();
-        let mut dups: Vec<(Album, Vec<Item>)> = vec![];
-        for a in self.lib.all_albums()? {
-            // Like beets' default duplicate_keys (albumartist album), plus same release ID.
-            let same = (!mbid.is_empty() && a.str("mb_albumid") == mbid)
-                || (a.str("albumartist").eq_ignore_ascii_case(&artist)
-                    && a.str("album").eq_ignore_ascii_case(&album));
-            if !same {
-                continue;
-            }
-            // An album whose files are all in this task is being reimported,
-            // not duplicated (it gets replaced).
-            let album_items = self.lib.album_items(a.id.unwrap())?;
-            if !album_items.iter().all(|i| task_paths.contains(i.path())) {
-                dups.push((a, album_items));
-            }
-        }
-        if dups.is_empty() {
+        let found = self.find_duplicates(album, task, want)?;
+        if found.is_empty() {
             return Ok(DupOutcome::Proceed);
         }
-        let action = self.cfg.str("import.duplicate_action");
-        println!("{}", ui::yellow("This album is already in the library!"));
-        let choice = match action.as_str() {
-            "skip" => 's',
-            "keep" => 'k',
-            "remove" => 'r',
-            "merge" => 'm',
-            _ if self.opts.quiet => 's',
-            // beets' `DuplicateAction.strict_options()` order.
-            _ => match ui::options(
-                &["Skip new", "Merge all", "Remove old", "Keep all"],
-                None,
-                None,
-            ) {
-                Some(Choice::Letter(c)) => c,
-                _ => 's',
-            },
-        };
-        // As beets' `log_choice(task, duplicate=True)`: a merge keeps both.
+        let mut action = DuplicateAction::from_config(&self.cfg.str("import.duplicate_action"));
+        if action == DuplicateAction::Ask {
+            let what = if album { "album" } else { "track" };
+            println!(
+                "{}",
+                ui::yellow(&format!("This {what} is already in the library!"))
+            );
+            action = if self.opts.quiet {
+                DuplicateAction::Skip
+            } else {
+                let verbose = self
+                    .cfg
+                    .bool("import.duplicate_verbose_prompt")
+                    .then(|| Template::parse(&self.cfg.str("format_item")));
+                for dup in &found {
+                    for line in duplicates::report("Old", &dup.items, !album, verbose.as_ref()) {
+                        println!("{line}");
+                    }
+                }
+                for line in duplicates::report("New", new, !album, verbose.as_ref()) {
+                    println!("{line}");
+                }
+                match ui::options(&DuplicateAction::PROMPT, None, None) {
+                    Some(Choice::Letter(c)) => DuplicateAction::from_letter(c),
+                    _ => DuplicateAction::Skip,
+                }
+            };
+        }
+        let mut upgrade = None;
+        if action == DuplicateAction::Upgrade {
+            let keys = self.cfg.list("import.duplicate_keys.item");
+            let u = duplicates::resolve_upgrade_target(new, &found, &keys);
+            if u.kept.is_empty() {
+                // No track improves on what's there: beets declines.
+                action = DuplicateAction::Skip;
+            } else {
+                upgrade = Some(u);
+            }
+        }
+        // As beets' `log_choice(task, duplicate=True)`: a merge or upgrade
+        // keeps both.
         self.tag_log(
-            match choice {
-                'k' | 'm' => "duplicate-keep",
-                'r' => "duplicate-replace",
-                _ => "duplicate-skip",
+            match action {
+                DuplicateAction::Remove => "duplicate-replace",
+                DuplicateAction::Skip => "duplicate-skip",
+                _ => "duplicate-keep",
             },
             paths,
         );
-        match choice {
-            'k' => Ok(DupOutcome::Proceed),
-            'm' => {
+        match action {
+            DuplicateAction::Keep | DuplicateAction::Ask => Ok(DupOutcome::Proceed),
+            DuplicateAction::Merge => {
                 let mut merged = vec![];
-                for (_, album_items) in dups {
-                    for mut it in album_items {
+                for dup in found {
+                    for mut it in dup.items {
                         // Make them look fresh, as beets' `_freshen_items`.
                         it.id = None;
                         it.set_int("album_id", 0);
@@ -1167,23 +1259,38 @@ impl<'a> Importer<'a> {
                 }
                 Ok(DupOutcome::Merge(merged))
             }
-            'r' => {
-                let libdir = self.cfg.directory();
-                for (a, album_items) in dups {
-                    for it in album_items {
-                        if it.path().starts_with(&libdir) {
-                            std::fs::remove_file(it.path()).ok();
-                            if let Some(p) = it.path().parent() {
-                                prune_dirs(p, &libdir, &self.clutter);
-                            }
-                        }
-                        self.lib.remove(&it)?;
+            DuplicateAction::Remove => {
+                for dup in found {
+                    for it in &dup.items {
+                        self.remove_duplicate_item(it)?;
                     }
-                    self.lib.remove(&a)?;
+                    if let Some(id) = dup.album_id {
+                        self.remove_duplicate_album(id)?;
+                    }
                 }
                 Ok(DupOutcome::Proceed)
             }
-            _ => {
+            DuplicateAction::Upgrade => {
+                let u = upgrade.expect("set for upgrades");
+                for it in &u.superseded {
+                    self.remove_duplicate_item(it)?;
+                }
+                // The kept tracks join the old album if any of it survives;
+                // otherwise it goes (beets' `_remove_upgrade_duplicates`).
+                let mut album_id = None;
+                if let Some(id) = u.album_id {
+                    if self.lib.album_items(id)?.is_empty() {
+                        self.remove_duplicate_album(id)?;
+                    } else {
+                        album_id = Some(id);
+                    }
+                }
+                Ok(DupOutcome::Upgrade {
+                    kept: u.kept,
+                    album_id,
+                })
+            }
+            DuplicateAction::Skip => {
                 println!("Skipping.");
                 Ok(DupOutcome::Skip)
             }
@@ -1279,6 +1386,7 @@ impl<'a> Importer<'a> {
         mut items: Vec<Item>,
         tagged: bool,
         source_dir: &Path,
+        graft: Option<i64>,
     ) -> Result<()> {
         let added = now();
         for i in &mut items {
@@ -1291,9 +1399,27 @@ impl<'a> Importer<'a> {
         let mut album = lib.transaction(|lib| {
             let replaced = self.record_replaced(&items)?;
             self.remove_replaced(&replaced)?;
-            let mut album = lib.add_album(&mut items)?;
+            let mut album = match graft {
+                // An upgrade adds its tracks to the surviving old album; as
+                // in beets, `set_fields` doesn't touch that album.
+                Some(id) => {
+                    let album = lib
+                        .get_album(id)?
+                        .with_context(|| format!("album {id} vanished"))?;
+                    for item in &mut items {
+                        item.set_int("album_id", id);
+                        lib.add(item)?;
+                    }
+                    album
+                }
+                None => lib.add_album(&mut items)?,
+            };
             self.reimport_metadata(Some(&mut album), &mut items, &replaced);
-            self.apply_set_fields(Some(&mut album), &mut items);
+            if graft.is_some() {
+                self.apply_set_fields(None, &mut items);
+            } else {
+                self.apply_set_fields(Some(&mut album), &mut items);
+            }
             lib.store(&album)?;
             for (item, dups) in items.iter_mut().zip(&replaced.items) {
                 let op = self.file_op(item, !dups.is_empty());
@@ -1480,13 +1606,15 @@ impl<'a> Importer<'a> {
     fn import_singleton_item(&mut self, mut item: Item) -> Result<Outcome> {
         println!();
         println!("{}", item.path().display());
+        let paths = [item.path().to_path_buf()];
         let decision = if self.opts.autotag {
             let d = self.choose_item(&item)?;
-            self.log_choice(&d, &[item.path().to_path_buf()]);
+            self.log_choice(&d, &paths);
             d
         } else {
             Decision::AsIs
         };
+        let original = item.clone();
         let tagged = match decision {
             Decision::Abort => return Ok(Outcome::Aborted),
             Decision::Skip => {
@@ -1503,6 +1631,31 @@ impl<'a> Importer<'a> {
             }
             Decision::Tracks | Decision::Group => unreachable!("not offered for tracks"),
         };
+        let want = duplicates::key_values(&item, &self.cfg.list("import.duplicate_keys.item"));
+        let new = std::slice::from_ref(&item);
+        match self.resolve_duplicates(false, new, std::slice::from_ref(&original), &want, &paths)? {
+            DupOutcome::Proceed | DupOutcome::Upgrade { .. } => {}
+            DupOutcome::Skip => {
+                self.stats.skipped += 1;
+                return Ok(Outcome::Skipped);
+            }
+            DupOutcome::Merge(dups) => {
+                // As beets: the track and its duplicates become one album task.
+                let mut paths = paths.to_vec();
+                for d in &dups {
+                    self.merged.insert(d.path().to_path_buf());
+                    paths.push(d.path().to_path_buf());
+                }
+                let dir = original
+                    .path()
+                    .parent()
+                    .unwrap_or(Path::new(""))
+                    .to_path_buf();
+                let mut items = vec![original];
+                items.extend(dups);
+                return self.import_album_items(items, &dir, &paths);
+            }
+        }
         item.set("added", Value::Float(now()));
         item.set_int("album_id", 0);
         let lib = self.lib;
@@ -1523,6 +1676,24 @@ impl<'a> Importer<'a> {
         Ok(Outcome::Done)
     }
 
+    /// `import.bell`: ring the terminal bell before asking about a match.
+    fn bell(&self) {
+        if self.cfg.bool("import.bell") {
+            print!("\x07");
+            std::io::stdout().flush().ok();
+        }
+    }
+
+    /// A singleton candidate's disambiguation: its album in brackets, with
+    /// `import.singleton_album_disambig` (beets' `TrackMatch` disambig data).
+    fn track_disambig(&self, info: &crate::mb::TrackInfo) -> String {
+        if self.cfg.bool("import.singleton_album_disambig") && !info.album.is_empty() {
+            format!(" ([{}])", info.album)
+        } else {
+            String::new()
+        }
+    }
+
     fn choose_item(&mut self, item: &Item) -> Result<Decision<TrackMatch>> {
         println!(
             "Tagging track: {} - {}",
@@ -1539,10 +1710,11 @@ impl<'a> Importer<'a> {
             if !cands.is_empty() && rec == Recommendation::Strong && !self.opts.timid {
                 let m = cands.swap_remove(0);
                 println!(
-                    "  Match ({}): {} - {}",
+                    "  Match ({}): {} - {}{}",
                     ui::similarity(m.distance.distance(), strong, medium),
                     m.info.artist,
-                    m.info.title
+                    m.info.title,
+                    ui::dim(&self.track_disambig(&m.info))
                 );
                 return Ok(Decision::Apply(Box::new(m)));
             }
@@ -1559,15 +1731,17 @@ impl<'a> Importer<'a> {
                     format!(" {}", ui::yellow(&format!("({})", keys.join(", "))))
                 };
                 println!(
-                    "{}. {} - {} ({}){}{}",
+                    "{}. {} - {} ({}){}{}{}",
                     n + 1,
                     m.info.artist,
                     m.info.title,
                     ui::similarity(m.distance.distance(), strong, medium),
                     penalty,
-                    ui::dim(&len_str(m.info.length))
+                    ui::dim(&len_str(m.info.length)),
+                    ui::dim(&self.track_disambig(&m.info))
                 );
             }
+            self.bell();
             let numbers = if cands.is_empty() {
                 None
             } else {
@@ -2517,6 +2691,231 @@ mod tests {
             text.contains(&format!("duplicate-keep {}", b.display())),
             "{text}"
         );
+    }
+
+    /// An MP3 with the given tags and bitrate (kbps); false without ffmpeg.
+    fn make_mp3(dir: &Path, name: &str, tags: &[(&str, &str)], kbps: u32) -> bool {
+        std::fs::create_dir_all(dir).unwrap();
+        let mut cmd = std::process::Command::new("ffmpeg");
+        cmd.args(["-loglevel", "error", "-f", "lavfi", "-i", "sine=duration=1"]);
+        for (k, v) in tags {
+            cmd.args(["-metadata", &format!("{k}={v}")]);
+        }
+        cmd.args(["-b:a", &format!("{kbps}k")])
+            .arg(dir.join(name))
+            .status()
+            .is_ok_and(|s| s.success())
+    }
+
+    /// An album directory of (title, kbps) tracks by "Artist".
+    fn album_with(src: &Path, dir: &str, album: &str, tracks: &[(&str, u32)]) -> Option<PathBuf> {
+        let d = src.join(dir);
+        for (n, (title, kbps)) in tracks.iter().enumerate() {
+            let track = (n + 1).to_string();
+            let tags = [
+                ("artist", "Artist"),
+                ("album", album),
+                ("title", *title),
+                ("track", track.as_str()),
+            ];
+            if !make_mp3(&d, &format!("{track}.mp3"), &tags, *kbps) {
+                return None;
+            }
+        }
+        Some(d)
+    }
+
+    fn copy_op(o: &mut ImportOptions) {
+        o.op = FileOp::Copy;
+    }
+
+    #[test]
+    fn duplicate_keys_decide_what_counts_as_a_duplicate() {
+        let (_d, mut cfg, lib, src) = setup(&[]);
+        let (Some(a), Some(b), Some(c)) = (
+            album_with(&src, "a", "Same", &[("One", 128)]),
+            album_with(&src, "b", "same", &[("One", 128)]),
+            album_with(&src, "c", "Other", &[("One", 128)]),
+        ) else {
+            return;
+        };
+        cfg.set("import.duplicate_action", "skip".into());
+        import_dir(&cfg, &lib, &a, copy_op);
+        // Keys match exactly, so a different case isn't a duplicate...
+        assert_eq!(import_dir(&cfg, &lib, &b, copy_op).skipped, 0);
+        // ...and a different album isn't either, unless only the artist counts.
+        assert_eq!(import_dir(&cfg, &lib, &c, copy_op).skipped, 0);
+        cfg.set("import.duplicate_keys.album", "albumartist".into());
+        let c2 = album_with(&src, "c2", "Third", &[("One", 128)]).unwrap();
+        assert_eq!(import_dir(&cfg, &lib, &c2, copy_op).skipped, 1);
+        assert_eq!(lib.all_albums().unwrap().len(), 3);
+    }
+
+    #[test]
+    fn singletons_are_checked_against_singletons_with_item_keys() {
+        let (_d, mut cfg, lib, src) = setup(&[]);
+        let song = |dir: &str, name: &str, title: &str| {
+            let d = src.join(dir);
+            make_mp3(&d, name, &[("artist", "Artist"), ("title", title)], 128).then_some(d)
+        };
+        let (Some(a), Some(b), Some(c)) = (
+            song("a", "x.mp3", "Song"),
+            song("b", "y.mp3", "Song"),
+            song("c", "z.mp3", "Else"),
+        ) else {
+            return;
+        };
+        let single = |o: &mut ImportOptions| {
+            o.op = FileOp::Copy;
+            o.singletons = true;
+        };
+        // An album track with the same artist and title isn't a duplicate.
+        let album = album_with(&src, "album", "Alb", &[("Song", 128)]).unwrap();
+        cfg.set("import.duplicate_action", "skip".into());
+        import_dir(&cfg, &lib, &album, copy_op);
+        assert_eq!(import_dir(&cfg, &lib, &a, single).skipped, 0);
+        assert_eq!(import_dir(&cfg, &lib, &b, single).skipped, 1);
+        assert_eq!(import_dir(&cfg, &lib, &c, single).skipped, 0);
+        cfg.set("import.duplicate_action", "keep".into());
+        assert_eq!(import_dir(&cfg, &lib, &b, single).items, 1);
+        let songs = |lib: &Library| {
+            all_items(lib)
+                .into_iter()
+                .filter(|i| i.int("album_id") == 0 && i.str("title") == "Song")
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(songs(&lib).len(), 2);
+        // Remove old: both earlier copies go, files and all (the new copy
+        // then takes the freed path).
+        cfg.set("import.duplicate_action", "remove".into());
+        let libdir = cfg.directory();
+        assert_eq!(walkdir_files(&libdir), 4);
+        let d = song("d", "w.mp3", "Song").unwrap();
+        import_dir(&cfg, &lib, &d, single);
+        let now = songs(&lib);
+        assert_eq!(now.len(), 1);
+        assert!(now[0].path().starts_with(&libdir) && now[0].path().is_file());
+        assert_eq!(all_items(&lib).len(), 3);
+        assert_eq!(walkdir_files(&libdir), 3);
+    }
+
+    #[test]
+    fn upgrade_replaces_only_better_tracks_and_keeps_the_album() {
+        let (_d, mut cfg, lib, src) = setup(&[]);
+        let Some(a) = album_with(&src, "a", "Up", &[("One", 64), ("Two", 192)]) else {
+            return;
+        };
+        import_dir(&cfg, &lib, &a, copy_op);
+        let old_album = lib.all_albums().unwrap()[0].id.unwrap();
+        let old_one = all_items(&lib)
+            .into_iter()
+            .find(|i| i.str("title") == "One")
+            .unwrap();
+        cfg.set("import.duplicate_action", "upgrade".into());
+        let log = src.join("import.log");
+
+        // Only "One" is better: it replaces the old one in the old album.
+        let b = album_with(&src, "b", "Up", &[("One", 192), ("Two", 64)]).unwrap();
+        let s = import_dir(&cfg, &lib, &b, |o| {
+            copy_op(o);
+            o.log = Some(log.clone());
+        });
+        assert_eq!((s.skipped, s.items), (0, 1));
+        // The old file was removed; the new one took its place.
+        assert_eq!(walkdir_files(&cfg.directory()), 2);
+        let new_one = all_items(&lib)
+            .into_iter()
+            .find(|i| i.str("title") == "One")
+            .unwrap();
+        assert_ne!(new_one.id, old_one.id);
+        assert_eq!(new_one.path(), old_one.path());
+        let albums = lib.all_albums().unwrap();
+        assert_eq!(albums.len(), 1);
+        assert_eq!(albums[0].id, Some(old_album));
+        let items = all_items(&lib);
+        assert_eq!(items.len(), 2);
+        for i in &items {
+            assert_eq!(i.int("album_id"), old_album);
+            assert!(i.int("bitrate") > 150_000, "{}", i.str("title"));
+        }
+        let text = std::fs::read_to_string(&log).unwrap();
+        assert!(
+            text.contains(&format!("duplicate-keep {}", b.display())),
+            "{text}"
+        );
+
+        // Nothing better: declined, as a skip.
+        let c = album_with(&src, "c", "Up", &[("One", 64), ("Two", 64)]).unwrap();
+        let s = import_dir(&cfg, &lib, &c, |o| {
+            copy_op(o);
+            o.log = Some(log.clone());
+        });
+        assert_eq!(s.skipped, 1);
+        let text = std::fs::read_to_string(&log).unwrap();
+        assert!(
+            text.contains(&format!("duplicate-skip {}", c.display())),
+            "{text}"
+        );
+
+        // Everything better: the old album goes and the new one replaces it.
+        let d = album_with(&src, "d", "Up", &[("One", 320), ("Two", 320)]).unwrap();
+        import_dir(&cfg, &lib, &d, copy_op);
+        let albums = lib.all_albums().unwrap();
+        assert_eq!(albums.len(), 1);
+        let items = all_items(&lib);
+        assert_eq!(items.len(), 2);
+        for i in &items {
+            assert!(i.int("bitrate") > 300_000);
+            assert_eq!(i.int("album_id"), albums[0].id.unwrap());
+        }
+    }
+
+    #[test]
+    fn singleton_upgrade_replaces_one_worse_copy() {
+        let (_d, mut cfg, lib, src) = setup(&[]);
+        let song = |dir: &str, kbps| {
+            let d = src.join(dir);
+            make_mp3(
+                &d,
+                "s.mp3",
+                &[("artist", "Artist"), ("title", "Song")],
+                kbps,
+            )
+            .then_some(d)
+        };
+        let Some(a) = song("a", 64) else {
+            return;
+        };
+        let single = |o: &mut ImportOptions| {
+            o.op = FileOp::Copy;
+            o.singletons = true;
+        };
+        import_dir(&cfg, &lib, &a, single);
+        cfg.set("import.duplicate_action", "upgrade".into());
+        let worse = song("b", 32).unwrap();
+        assert_eq!(import_dir(&cfg, &lib, &worse, single).skipped, 1);
+        let better = song("c", 256).unwrap();
+        assert_eq!(import_dir(&cfg, &lib, &better, single).items, 1);
+        let items = all_items(&lib);
+        assert_eq!(items.len(), 1);
+        assert!(items[0].int("bitrate") > 200_000);
+    }
+
+    #[test]
+    fn singleton_candidates_show_their_album_unless_disabled() {
+        let (_d, mut cfg, lib, _src) = setup(&[]);
+        let info = crate::mb::TrackInfo {
+            album: "Alb".into(),
+            ..Default::default()
+        };
+        let disambig = |cfg: &Config| {
+            Importer::new(cfg, &lib, opts(cfg), &[])
+                .unwrap()
+                .track_disambig(&info)
+        };
+        assert_eq!(disambig(&cfg), " ([Alb])");
+        cfg.set("import.singleton_album_disambig", false.into());
+        assert_eq!(disambig(&cfg), "");
     }
 
     #[test]
