@@ -7,7 +7,7 @@ use crate::library::Library;
 use crate::logging::debug;
 use crate::media;
 use crate::model::{
-    ALBUM_FIELDS, Album, ITEM_FIELDS, Item, Kind, Record, album_item_shared_fields,
+    ALBUM_FIELDS, Album, ITEM_FIELDS, Item, Kind, Record, Value, album_item_shared_fields,
 };
 use crate::paths::PathFormatter;
 use crate::plugins::{self, PluginCtx};
@@ -16,7 +16,7 @@ use crate::template::{Context, Template};
 use crate::ui;
 use crate::{Cli, Cmd};
 use anyhow::{Context as _, Result, bail};
-use regex::Regex;
+
 use serde_yaml::Value as Y;
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
@@ -226,19 +226,28 @@ pub fn run(cli: Cli) -> Result<()> {
         } => list(&cfg, &lib, album, path, format, &query),
         Cmd::Modify {
             album,
-            yes,
+            mv,
             nomove,
+            write,
             nowrite,
-            args,
-        } => modify(
-            &cfg,
-            &lib,
-            album,
+            format,
             yes,
-            !nomove,
-            !nowrite && cfg.bool("import.write"),
-            &args,
-        ),
+            noinherit,
+            limit,
+            args,
+        } => {
+            let flag = |on: bool, off: bool| (on || off).then_some(on);
+            let opts = ModifyOpts {
+                album,
+                yes,
+                mv: flag(mv, nomove),
+                write: flag(write, nowrite),
+                inherit: !noinherit,
+                format,
+                limit,
+            };
+            modify(&cfg, &lib, opts, &args)
+        }
         Cmd::Remove {
             album,
             delete,
@@ -367,49 +376,102 @@ fn list(
 }
 
 /// Split modify arguments into a query, assignments and deletions.
-fn parse_modify_args(args: &[String]) -> (Vec<String>, Vec<(String, String)>, Vec<String>) {
-    let set_re = Regex::new(r"^([A-Za-z_][A-Za-z0-9_]*)=(.*)$").unwrap();
-    let del_re = Regex::new(r"^([A-Za-z_][A-Za-z0-9_]*)!$").unwrap();
-    let (mut query, mut sets, mut dels) = (vec![], vec![], vec![]);
-    for a in args {
-        if let Some(c) = set_re.captures(a) {
-            sets.push((c[1].to_string(), c[2].to_string()));
-        } else if let Some(c) = del_re.captures(a) {
-            dels.push(c[1].to_string());
-        } else {
-            query.push(a.clone());
-        }
-    }
-    (query, sets, dels)
+/// One `field=value` assignment of `modify`; `op` is beets' `+`/`-` (from
+/// `field+=value` / `field-=value`), only valid for multi-valued fields.
+#[derive(Debug, Clone, PartialEq)]
+struct Modification {
+    field: String,
+    op: Option<char>,
+    value: String,
 }
 
-fn show_changes(before: &Record, after: &Record, label: &str) -> bool {
-    let mut changed = false;
-    let mut keys = before.keys();
-    for k in after.keys() {
-        if !keys.contains(&k) {
-            keys.push(k);
+/// beets' `modify_parse_args`: split arguments into query terms,
+/// assignments (`field=value`, no `:` before the `=`) and deletions
+/// (`field!`, with no `=` or `:`). A later assignment to the same field
+/// replaces an earlier one.
+fn parse_modify_args(args: &[String]) -> (Vec<String>, Vec<Modification>, Vec<String>) {
+    let (mut query, mut mods, mut dels) = (vec![], Vec::<Modification>::new(), vec![]);
+    for arg in args {
+        if arg.ends_with('!') && !arg.contains('=') && !arg.contains(':') {
+            dels.push(arg[..arg.len() - 1].to_string());
+        } else if let Some((key, value)) = arg.split_once('=')
+            && !key.contains(':')
+        {
+            let (field, op) = match key.chars().last() {
+                Some(c @ ('+' | '-')) => (&key[..key.len() - 1], Some(c)),
+                _ => (key, None),
+            };
+            let m = Modification {
+                field: field.to_string(),
+                op,
+                value: value.to_string(),
+            };
+            match mods.iter_mut().find(|x| x.field == m.field) {
+                Some(old) => *old = m,
+                None => mods.push(m),
+            }
+        } else {
+            query.push(arg.clone());
         }
     }
-    for k in keys {
-        if k == "mtime" {
-            continue;
-        }
-        let (a, b) = (before.formatted(&k), after.formatted(&k));
-        if a != b {
-            if !changed {
-                println!("{label}");
-                changed = true;
-            }
-            match (a, b) {
-                (Some(a), Some(b)) => println!("  {k}: {} -> {}", ui::red(&a), ui::green(&b)),
-                (None, Some(b)) => println!("  {k}: {}", ui::green(&b)),
-                (Some(a), None) => println!("  {k}: {} -> {}", ui::red(&a), ui::dim("(deleted)")),
-                _ => {}
-            }
+    (query, mods, dels)
+}
+
+/// beets' `_field_diff`: a line showing how `field` changed, or None.
+fn field_diff(field: &str, old: &Record, new: &Record) -> Option<String> {
+    let (oldval, newval) = (old.get(field), new.get(field));
+    if oldval == newval {
+        return None;
+    }
+    if let (Some(Value::Float(a)), Some(Value::Float(b))) = (&oldval, &newval)
+        && (a - b).abs() < 0.01
+    {
+        return None;
+    }
+    let oldstr = old.formatted(field).unwrap_or_default();
+    let newstr = new.formatted(field).unwrap_or_default();
+    if newval.is_none() {
+        return Some(crate::diff::removed(&format!("{field}: {oldstr}")));
+    }
+    let Some(oldval) = oldval else {
+        return Some(crate::diff::added(&format!("{field}: {newstr}")));
+    };
+    let (a, b) = if matches!(oldval, Value::Str(_)) {
+        crate::diff::colordiff(&oldstr, &newstr)
+    } else {
+        (crate::diff::removed(&oldstr), crate::diff::added(&newstr))
+    };
+    Some(format!("{field}: {a} -> {b}"))
+}
+
+/// beets' `get_model_changes`: diff lines for every changed field (fixed
+/// and flexible, except `mtime`), sorted by field name.
+fn model_changes(old: &Record, new: &Record) -> Vec<String> {
+    let mut fields: Vec<String> = old.keys();
+    for k in new.keys() {
+        if !fields.contains(&k) {
+            fields.push(k);
         }
     }
-    changed
+    fields.retain(|f| f != "mtime");
+    fields.sort();
+    fields
+        .iter()
+        .filter_map(|f| field_diff(f, old, new))
+        .collect()
+}
+
+/// beets' `show_model_changes`: print `label` (the object, formatted as
+/// it was) and its changes, if there are any. Returns whether there were.
+fn show_model_changes(label: &str, old: &Record, new: &Record) -> bool {
+    let changes = model_changes(old, new);
+    if !changes.is_empty() {
+        println!("{label}");
+        for c in &changes {
+            println!("  {}", c.replace('\n', "\n  "));
+        }
+    }
+    !changes.is_empty()
 }
 
 /// Recompute paths and move an item's file to match its metadata.
@@ -443,80 +505,151 @@ fn move_item(
     Ok(true)
 }
 
-fn modify(
-    cfg: &Config,
-    lib: &Library,
-    album: bool,
-    yes: bool,
-    mv: bool,
-    write: bool,
-    args: &[String],
-) -> Result<()> {
-    let (q, sets, dels) = parse_modify_args(args);
-    if sets.is_empty() && dels.is_empty() {
+/// `beet modify` options besides the arguments.
+pub struct ModifyOpts {
+    pub album: bool,
+    pub yes: bool,
+    /// -m/-M; default `import.move` or `import.copy` (beets' `should_move`).
+    pub mv: Option<bool>,
+    /// -w/-W; default `import.write`.
+    pub write: Option<bool>,
+    /// Album changes also go to the album's items (off with -I).
+    pub inherit: bool,
+    /// -f: `format_item` for this run.
+    pub format: Option<String>,
+    pub limit: Option<usize>,
+}
+
+/// Apply `mods` and `dels` to a copy of `obj`: values are templates
+/// evaluated against the object, then parsed for the field's type.
+fn modified(obj: &Record, mods: &[Modification], dels: &[String]) -> Result<Record> {
+    let mut new = obj.clone();
+    for m in mods {
+        let v = format_record(&Template::parse(&m.value), obj);
+        new.set_parsed(&m.field, &v)?;
+    }
+    for f in dels {
+        // As beets: a flexible attribute goes, a fixed field is reset to
+        // its type's null; computed or unknown fields are left alone.
+        if !new.remove_flex(f)
+            && f != "id"
+            && let Some(ty) = new.field_type(f)
+        {
+            new.set(f, ty.default_value());
+        }
+    }
+    Ok(new)
+}
+
+/// beets' `modify_func` / `modify_objects`.
+fn modify(cfg: &Config, lib: &Library, opts: ModifyOpts, args: &[String]) -> Result<()> {
+    let (q, mods, dels) = parse_modify_args(args);
+    if mods.is_empty() && dels.is_empty() {
         bail!("no modifications specified");
     }
+    let album = opts.album;
     let kind = if album { Kind::Album } else { Kind::Item };
-    let objs = if album {
+    let mut objs = if album {
         lib.albums(&Query::parse(kind, &q)?)?
     } else {
         lib.items(&Query::parse(kind, &q)?)?
     };
-    let t = Template::parse(&cfg.str(if album { "format_album" } else { "format_item" }));
-
-    let mut changed: Vec<Record> = vec![];
-    for obj in &objs {
-        let mut new = obj.clone();
-        for (k, v) in &sets {
-            // Values are templates, so `title='$title (live)'` works.
-            let v = format_record(&Template::parse(v), obj);
-            new.set_parsed(k, &v)?;
-        }
-        for k in &dels {
-            new.remove_flex(k);
-        }
-        if show_changes(obj, &new, &format_record(&t, obj)) {
-            changed.push(new);
+    if let Some(n) = opts.limit {
+        objs.truncate(n);
+    }
+    // No multi-valued fields yet, so no field takes `+=`/`-=`.
+    if let Some(m) = mods.iter().find(|m| m.op.is_some()) {
+        bail!(
+            "field '{}' does not support the {}= operator",
+            m.field,
+            m.op.unwrap()
+        );
+    }
+    if objs.is_empty() {
+        bail!("No matching objects to modify.");
+    }
+    let t = Template::parse(&match (&opts.format, album) {
+        (_, true) => cfg.str("format_album"),
+        (Some(f), false) => f.clone(),
+        (None, false) => cfg.str("format_item"),
+    });
+    println!(
+        "Modifying {} {}s.",
+        objs.len(),
+        if album { "album" } else { "item" }
+    );
+    let mut changed: Vec<(Record, Record)> = vec![];
+    for obj in objs {
+        let new = modified(&obj, &mods, &dels)?;
+        if show_model_changes(&format_record(&t, &obj), &obj, &new) {
+            changed.push((obj, new));
         }
     }
     if changed.is_empty() {
         println!("No changes to make.");
         return Ok(());
     }
-    let what = if album { "albums" } else { "items" };
-    if !yes && !ui::yes_no(&format!("Really modify {} {what}", changed.len())) {
-        return Ok(());
-    }
+
+    let write = opts.write.unwrap_or_else(|| cfg.bool("import.write"));
+    let mv = opts
+        .mv
+        .unwrap_or_else(|| cfg.bool("import.move") || cfg.bool("import.copy"));
+    let selected = if opts.yes {
+        changed
+    } else {
+        let extra = match (write, mv) {
+            (true, true) => ", move and write tags",
+            (true, false) => " and write tags",
+            (false, true) => " and move",
+            (false, false) => "",
+        };
+        ui::select_objects(&format!("Really modify{extra}"), &changed, |(old, new)| {
+            show_model_changes(&format_record(&t, old), old, new);
+        })
+    };
+
     let fmt = PathFormatter::new(cfg)?;
-    let in_lib = |i: &Item| i.path().starts_with(cfg.directory());
     let mut albums_touched: HashSet<i64> = HashSet::new();
+    // beets' `Item.try_sync`: write tags, move files inside the library,
+    // store.
+    let sync = |lib: &Library, item: &mut Item, touched: &mut HashSet<i64>| -> Result<()> {
+        if write && let Err(e) = media::write_item(item) {
+            eprintln!("warning: {e:#}");
+        }
+        if mv
+            && item.path().starts_with(cfg.directory())
+            && let Err(e) = move_item(&fmt, lib, cfg, item, false)
+        {
+            eprintln!("warning: {e:#}");
+        }
+        touched.insert(item.int("album_id"));
+        lib.store(item)
+    };
     lib.transaction(|lib| {
-        for obj in &mut changed {
-            lib.store(obj)?;
-            let mut items = if album {
-                lib.album_items(obj.id.unwrap())?
-            } else {
-                vec![obj.clone()]
-            };
-            for item in &mut items {
-                if album {
-                    for f in album_item_shared_fields() {
-                        if let Some(v) = obj.get(f) {
-                            item.set(f, v);
+        for (old, mut new) in selected {
+            if !album {
+                sync(lib, &mut new, &mut albums_touched)?;
+                continue;
+            }
+            lib.store(&new)?;
+            let mut items = lib.album_items(new.id.unwrap())?;
+            if opts.inherit {
+                // beets' `Album.store(inherit=True)`: changed fixed fields
+                // (but `artpath`/`id`) and flexible attributes, set or
+                // deleted, go to the items too.
+                for f in model_changes_fields(&old, &new) {
+                    for item in &mut items {
+                        match new.get(&f) {
+                            Some(v) => item.set(&f, v),
+                            None => {
+                                item.remove_flex(&f);
+                            }
                         }
                     }
                 }
-                if write && let Err(e) = media::write_item(item) {
-                    eprintln!("warning: {e:#}");
-                }
-                if mv
-                    && in_lib(item)
-                    && let Err(e) = move_item(&fmt, lib, cfg, item, false)
-                {
-                    eprintln!("warning: {e:#}");
-                }
-                lib.store(item)?;
-                albums_touched.insert(item.int("album_id"));
+            }
+            for item in &mut items {
+                sync(lib, item, &mut albums_touched)?;
             }
         }
         Ok(())
@@ -527,6 +660,21 @@ fn modify(
         }
     }
     Ok(())
+}
+
+/// The album fields an inheriting store passes to the items: every changed
+/// field except `artpath` and `id`.
+fn model_changes_fields(old: &Album, new: &Album) -> Vec<String> {
+    let mut fields = old.keys();
+    for k in new.keys() {
+        if !fields.contains(&k) {
+            fields.push(k);
+        }
+    }
+    fields
+        .into_iter()
+        .filter(|f| f != "artpath" && f != "id" && old.get(f) != new.get(f))
+        .collect()
 }
 
 fn remove(
@@ -727,7 +875,7 @@ fn update(cfg: &Config, lib: &Library, pretend: bool, mv: bool, q: &[String]) ->
                 new.set(name, v);
             }
         }
-        if show_changes(&item, &new, &format_record(&t, &item)) {
+        if show_model_changes(&format_record(&t, &item), &item, &new) {
             updated += 1;
         }
         if !pretend {
@@ -1128,6 +1276,187 @@ mod tests {
         assert_eq!(e.to_string(), "unknown command 'frob'");
     }
 
+    fn strs(a: &[&str]) -> Vec<String> {
+        a.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn modify_args_follow_beets_rules() {
+        let (q, mods, dels) = parse_modify_args(&strs(&[
+            "a!",
+            "artist:x!",
+            "title:a=b",
+            "x=y!",
+            "comment=a:b",
+            "genre+=Rock",
+            "mood-=sad",
+            "year=1",
+            "year=2",
+            "^artist=z",
+        ]));
+        assert_eq!(dels, ["a"]);
+        assert_eq!(q, ["artist:x!", "title:a=b"]);
+        let m: Vec<(&str, Option<char>, &str)> = mods
+            .iter()
+            .map(|m| (m.field.as_str(), m.op, m.value.as_str()))
+            .collect();
+        assert_eq!(
+            m,
+            [
+                ("x", None, "y!"),
+                ("comment", None, "a:b"),
+                ("genre", Some('+'), "Rock"),
+                ("mood", Some('-'), "sad"),
+                ("year", None, "2"),
+                ("^artist", None, "z"),
+            ]
+        );
+    }
+
+    #[test]
+    fn model_changes_list_changed_fields_like_beets() {
+        let mut old = Record::new_item();
+        old.set_str("title", "A");
+        old.set("length", Value::Float(100.0));
+        old.flex.insert("gone".into(), "x".into());
+        let mut new = old.clone();
+        new.set_str("title", "B");
+        new.set_int("year", 1999);
+        new.set("length", Value::Float(100.005));
+        new.set("mtime", Value::Float(5.0));
+        new.remove_flex("gone");
+        new.flex.insert("mood".into(), "happy".into());
+        assert_eq!(
+            model_changes(&old, &new),
+            [
+                "gone: x",
+                "mood: happy",
+                "title: A -> B",
+                "year: 0000 -> 1999"
+            ]
+        );
+        assert!(model_changes(&old, &old).is_empty());
+    }
+
+    /// An in-memory library with `n` items in one album (no files).
+    fn lib_with_album(n: usize) -> (tempfile::TempDir, Config, Library) {
+        let d = tempfile::tempdir().unwrap();
+        let mut cfg = Config::defaults();
+        cfg.set("directory", d.path().join("lib").to_string_lossy().into());
+        let lib = Library::in_memory().unwrap();
+        let mut items: Vec<Item> = (0..n)
+            .map(|i| {
+                let mut it = Record::new_item();
+                it.set_str("title", format!("T{i}"));
+                it.set_str("album", "Alb");
+                it.set_int("track", i as i64 + 1);
+                it.set_path(d.path().join(format!("src/{i}.mp3")));
+                it
+            })
+            .collect();
+        lib.add_album(&mut items).unwrap();
+        (d, cfg, lib)
+    }
+
+    fn quiet_opts(album: bool) -> ModifyOpts {
+        ModifyOpts {
+            album,
+            yes: true,
+            mv: Some(false),
+            write: Some(false),
+            inherit: true,
+            format: None,
+            limit: None,
+        }
+    }
+
+    fn items(lib: &Library) -> Vec<Item> {
+        lib.items(&Query::parse::<&str>(Kind::Item, &[]).unwrap())
+            .unwrap()
+    }
+
+    #[test]
+    fn modify_items_with_templates_types_and_deletions() {
+        let (_d, cfg, lib) = lib_with_album(2);
+        let run = |args: &[&str]| modify(&cfg, &lib, quiet_opts(false), &strs(args));
+        run(&[
+            "title:T1",
+            "title=$title (live)",
+            "year=1999x",
+            "bpm=120",
+            "mood=calm",
+        ])
+        .unwrap();
+        let it = &items(&lib)[1];
+        assert_eq!(it.str("title"), "T1 (live)");
+        assert_eq!(
+            it.int("year"),
+            0,
+            "unparsable values become null, as in beets"
+        );
+        assert_eq!(it.int("bpm"), 120);
+        assert_eq!(it.str("mood"), "calm");
+        assert_eq!(items(&lib)[0].str("title"), "T0");
+        // Deleting a flex attribute drops it; a fixed field resets.
+        run(&["title:T1", "mood!", "bpm!", "nosuch!"]).unwrap();
+        let it = &items(&lib)[1];
+        assert_eq!(it.get("mood"), None);
+        assert_eq!(it.int("bpm"), 0);
+        // Nothing to change is fine; errors use beets' wording.
+        run(&["title:T1", "bpm=0"]).unwrap();
+        let err = |args: &[&str]| run(args).unwrap_err().to_string();
+        assert_eq!(err(&["title:T1"]), "no modifications specified");
+        assert_eq!(
+            err(&["title:zzz", "bpm=1"]),
+            "No matching objects to modify."
+        );
+        assert_eq!(
+            err(&["genre+=Rock"]),
+            "field 'genre' does not support the += operator"
+        );
+        // -l caps the matches.
+        let mut o = quiet_opts(false);
+        o.limit = Some(1);
+        modify(&cfg, &lib, o, &strs(&["comment=x"])).unwrap();
+        let n = items(&lib)
+            .iter()
+            .filter(|i| i.str("comment") == "x")
+            .count();
+        assert_eq!(n, 1);
+    }
+
+    #[test]
+    fn album_changes_are_inherited_by_items_unless_noinherit() {
+        let (_d, cfg, lib) = lib_with_album(2);
+        modify(
+            &cfg,
+            &lib,
+            quiet_opts(true),
+            &strs(&["genre=Jazz", "mood=x"]),
+        )
+        .unwrap();
+        assert_eq!(lib.all_albums().unwrap()[0].str("genre"), "Jazz");
+        for i in items(&lib) {
+            assert_eq!((i.str("genre"), i.str("mood")), ("Jazz", "x"));
+        }
+        // Deleting the album's flex attribute deletes it from the items.
+        modify(&cfg, &lib, quiet_opts(true), &strs(&["mood!"])).unwrap();
+        assert!(items(&lib).iter().all(|i| i.get("mood").is_none()));
+        // Only changed fields propagate.
+        let mut it = items(&lib).remove(0);
+        it.set_str("genre", "Own");
+        lib.store(&it).unwrap();
+        modify(&cfg, &lib, quiet_opts(true), &strs(&["year=2001"])).unwrap();
+        assert_eq!(items(&lib)[0].str("genre"), "Own");
+        assert!(items(&lib).iter().all(|i| i.int("year") == 2001));
+        // -I keeps the album's change to itself.
+        let mut o = quiet_opts(true);
+        o.inherit = false;
+        modify(&cfg, &lib, o, &strs(&["genre=Blues"])).unwrap();
+        assert_eq!(lib.all_albums().unwrap()[0].str("genre"), "Blues");
+        assert!(items(&lib).iter().all(|i| i.str("genre") != "Blues"));
+    }
+
     #[test]
     fn modify_args() {
         let args: Vec<String> = ["artist:foo", "genre=Rock", "mood!", "-live", "year:2000"]
@@ -1136,7 +1465,14 @@ mod tests {
             .collect();
         let (q, s, d) = parse_modify_args(&args);
         assert_eq!(q, vec!["artist:foo", "-live", "year:2000"]);
-        assert_eq!(s, vec![("genre".to_string(), "Rock".to_string())]);
+        assert_eq!(
+            s,
+            [Modification {
+                field: "genre".into(),
+                op: None,
+                value: "Rock".into()
+            }]
+        );
         assert_eq!(d, vec!["mood"]);
     }
 }

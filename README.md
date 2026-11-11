@@ -33,6 +33,7 @@ beet update                                         # re-read changed tags, drop
 | Templates | `$f`, `${f}`, escapes, `%lower %upper %capitalize %title %left %right %if %ifdef %asciify %initial %first %time %aunique` |
 | Paths | `paths:` with `default`/`singleton`/`comp`/query keys, `replace:` rules, `asciify_paths`, `max_filename_length`, unique-path suffixes, empty-dir pruning (directories holding only `clutter` files count as empty) |
 | Commands | `import` (`imp`, `im`), `list` (`ls`), `modify` (`mod`), `remove` (`rm`), `move` (`mv`), `update` (`upd`, `up`), `write`, `stats`, `fields`, `config`, `version`, `help [COMMAND]` (`?`), with beets' aliases; no command shows the help, and an unknown one gives beets' `unknown command 'x'` error |
+| `modify` | as beets: `field=value` (values are templates, parsed by field type with beets' leniency: unparsable numbers become 0), `field!` (drops a flexible attribute, resets a fixed field), query terms otherwise (anything with `:` before the `=`); `-a` with album changes inherited by the items (fixed fields and flexible attributes, set or deleted; `-I/--noinherit` to keep them on the album), `-m/-M` (default: `import.move` or `import.copy`), `-w/-W` (default `import.write`), `-f/--format`, `-y`, `-l/--limit`; beets' change listing ("Modifying N items.", `field: old -> new` with difflib-style highlighting) and the "Really modify, move and write tags? (Yes/no/select)" prompt with per-object selection; `update` shows changes the same way |
 | Global options | before the command, as in beets: `-l/--library`, `-d/--directory`, `-c/--config`, `-v/--verbose` (repeatable: `-v` logs config/library paths, plugin loading, MusicBrainz searches and lookups, duplicates found; `-vv` also each MusicBrainz request), `-p/--plugins LIST` and `-P/--disable-plugins LIST` (comma-separated; also the `disabled_plugins` config key), `-h/--help`, `--version` |
 | Tags | MP3, FLAC, M4A/ALAC, Ogg/Opus, WavPack, APE, AIFF, WAV via lofty |
 | Release preferences | `match.preferred.countries` / `media` (regex lists, earlier = better) and `original_year`, as in beets |
@@ -64,4 +65,4 @@ reading or writing beets' own `library.db`.
 
 `model` (typed fields + flex attrs) · `library` (SQLite) · `query` · `template` ·
 `paths` · `duplicates` (duplicate keys, Upgrade, prompt summaries) · `fileops` (copy/move/link/reflink, pruning, ignore globs) · `media` (lofty tags) · `mb` (MusicBrainz) · `autotag` · `importer` ·
-`commands` · `logging` (`-v`) · `state` (import resume/history) · `ui` · `plugins/` (`fetchart`, `embedart`, `lyrics`).
+`commands` · `diff` (change highlighting) · `logging` (`-v`) · `state` (import resume/history) · `ui` · `plugins/` (`fetchart`, `embedart`, `lyrics`).

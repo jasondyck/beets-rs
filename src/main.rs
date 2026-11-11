@@ -1,6 +1,7 @@
 mod autotag;
 mod commands;
 mod config;
+mod diff;
 mod duplicates;
 mod fileops;
 mod importer;
@@ -172,18 +173,35 @@ pub enum Cmd {
     /// Change metadata fields: `beet modify QUERY field=value field!`
     #[command(visible_alias = "mod")]
     Modify {
+        /// Match albums instead of tracks
         #[arg(short = 'a', long)]
         album: bool,
+        /// Move files in the library directory
+        #[arg(short = 'm', long = "move", overrides_with = "nomove")]
+        mv: bool,
+        /// Don't move files in library
+        #[arg(short = 'M', long = "nomove", overrides_with = "mv")]
+        nomove: bool,
+        /// Write new metadata to files' tags (default)
+        #[arg(short = 'w', long = "write", overrides_with = "nowrite")]
+        write: bool,
+        /// Don't write metadata (opposite of -w)
+        #[arg(short = 'W', long = "nowrite", overrides_with = "write")]
+        nowrite: bool,
+        /// Print with custom format
+        #[arg(short = 'f', long)]
+        format: Option<String>,
         /// Skip confirmation
         #[arg(short = 'y', long)]
         yes: bool,
-        /// Don't move files to match new metadata
-        #[arg(short = 'M', long = "nomove")]
-        nomove: bool,
-        /// Don't write tags
-        #[arg(short = 'W', long = "nowrite")]
-        nowrite: bool,
-        #[arg(required = true, allow_hyphen_values = true)]
+        /// When modifying albums, don't also change item data
+        #[arg(short = 'I', long = "noinherit")]
+        noinherit: bool,
+        /// Limit query results
+        #[arg(short = 'l', long)]
+        limit: Option<usize>,
+        /// Query terms, `field=value` assignments and `field!` deletions
+        #[arg(allow_hyphen_values = true)]
         args: Vec<String>,
     },
     /// Remove matching items from the library
@@ -430,6 +448,41 @@ mod tests {
         for name in ["stat", "wr", "conf", "fetch", "upgrade"] {
             assert!(parse(&[name]).is_err(), "{name}");
         }
+    }
+
+    #[test]
+    fn modify_flags_last_one_wins() {
+        let flags = |args: &[&str]| match parse(args).unwrap().cmd.unwrap() {
+            Cmd::Modify {
+                mv,
+                nomove,
+                write,
+                nowrite,
+                noinherit,
+                limit,
+                format,
+                ..
+            } => (mv, nomove, write, nowrite, noinherit, limit, format),
+            _ => unreachable!(),
+        };
+        assert_eq!(
+            flags(&["mod", "-m", "-M", "-W", "-w", "x=y"]),
+            (false, true, true, false, false, None, None)
+        );
+        assert_eq!(
+            flags(&["mod", "-I", "-l", "3", "-f", "$title", "x=y"]),
+            (
+                false,
+                false,
+                false,
+                false,
+                true,
+                Some(3),
+                Some("$title".into())
+            )
+        );
+        // No arguments at all reach modify, which reports beets' error.
+        assert!(parse(&["modify"]).is_ok());
     }
 
     #[test]

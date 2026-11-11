@@ -1,8 +1,8 @@
 //! Items and albums: a fixed schema of typed fields plus free-form
 //! "flexible attributes", mirroring beets' `dbcore` models.
 
-use anyhow::{Context, Result, bail};
-use chrono::{Local, NaiveDate, NaiveDateTime, TimeZone};
+use anyhow::{Result, bail};
+use chrono::{Local, NaiveDateTime, TimeZone};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
@@ -58,29 +58,45 @@ impl FieldType {
         }
     }
 
-    /// Parse user input (e.g. from `modify`) into a value of this type.
-    pub fn parse(self, s: &str) -> Result<Value> {
-        let s = s.trim_end();
-        Ok(match self {
+    /// Parse user input (from `modify` or `set_fields`) into a value of this
+    /// type, as beets' dbcore types do: anything unparsable becomes the
+    /// type's null (0, 0.0, false) rather than an error.
+    pub fn parse(self, s: &str) -> Value {
+        let int = || s.trim().parse::<i64>().unwrap_or(0);
+        let float = || s.trim().parse::<f64>().unwrap_or(0.0);
+        match self {
             FieldType::Str => Value::Str(s.to_string()),
             FieldType::Path => Value::Path(PathBuf::from(s)),
-            FieldType::Bool => {
-                Value::Bool(parse_bool(s).with_context(|| format!("not a boolean: {s:?}"))?)
-            }
-            FieldType::Float => Value::Float(if s.is_empty() { 0.0 } else { s.parse()? }),
-            FieldType::Duration => {
-                Value::Float(parse_duration(s).with_context(|| format!("not a duration: {s:?}"))?)
-            }
-            FieldType::Date => {
-                Value::Float(parse_datetime(s).with_context(|| format!("not a date: {s:?}"))?)
-            }
-            _ => Value::Int(if s.is_empty() {
-                0
-            } else {
-                s.parse()
-                    .with_context(|| format!("not an integer: {s:?}"))?
+            // beets' `str2bool`.
+            FieldType::Bool => Value::Bool(matches!(
+                s.to_lowercase().as_str(),
+                "yes" | "1" | "true" | "t" | "y"
+            )),
+            FieldType::Float => Value::Float(float()),
+            // "M:SS", else a number of seconds.
+            FieldType::Duration => Value::Float(match s.split_once(':') {
+                Some((m, ss))
+                    if !m.is_empty()
+                        && m.bytes().all(|c| c.is_ascii_digit())
+                        && ss.len() == 2
+                        && ss.as_bytes()[0].is_ascii_digit()
+                        && ss.as_bytes()[0] <= b'5'
+                        && ss.as_bytes()[1].is_ascii_digit() =>
+                {
+                    (m.parse::<f64>().unwrap_or(0.0)) * 60.0 + ss.parse::<f64>().unwrap_or(0.0)
+                }
+                _ => float(),
             }),
-        })
+            // `time_format`, else a timestamp.
+            FieldType::Date => Value::Float(
+                NaiveDateTime::parse_from_str(s, TIME_FORMAT)
+                    .ok()
+                    .and_then(|d| Local.from_local_datetime(&d).earliest())
+                    .map(|d| d.timestamp() as f64)
+                    .unwrap_or_else(float),
+            ),
+            _ => Value::Int(int()),
+        }
     }
 }
 
@@ -115,6 +131,7 @@ pub fn format_duration(secs: f64) -> String {
 
 pub const TIME_FORMAT: &str = "%Y-%m-%d %H:%M:%S";
 
+#[cfg(test)]
 pub fn parse_datetime(s: &str) -> Option<f64> {
     if s.is_empty() {
         return Some(0.0);
@@ -122,7 +139,7 @@ pub fn parse_datetime(s: &str) -> Option<f64> {
     let naive = NaiveDateTime::parse_from_str(s, TIME_FORMAT)
         .ok()
         .or_else(|| {
-            NaiveDate::parse_from_str(s, "%Y-%m-%d")
+            chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d")
                 .ok()
                 .and_then(|d| d.and_hms_opt(0, 0, 0))
         })?;
@@ -399,7 +416,7 @@ impl Record {
             bail!("field {name} cannot be set this way");
         }
         match self.field_type(name) {
-            Some(ty) => self.set(name, ty.parse(s)?),
+            Some(ty) => self.set(name, ty.parse(s)),
             None => {
                 self.flex.insert(name.to_string(), s.to_string());
             }
@@ -519,6 +536,29 @@ mod tests {
         assert_eq!(it.str("mood"), "happy");
         assert_eq!(it.int("year"), 2001);
         assert_eq!(it.float("length"), 250.0);
-        assert!(it.set_parsed("year", "abc").is_err());
+        // As beets: unparsable values become the type's null, not errors.
+        let parsed = |name: &str, s: &str| {
+            let mut it = Record::new_item();
+            it.set_parsed(name, s).unwrap();
+            it.get(name).unwrap()
+        };
+        assert_eq!(parsed("year", "abc"), Value::Int(0));
+        assert_eq!(parsed("year", "2003.7"), Value::Int(0));
+        assert_eq!(parsed("year", " 1999 "), Value::Int(1999));
+        assert_eq!(parsed("bpm", "-5"), Value::Int(-5));
+        assert_eq!(parsed("comp", "yes"), Value::Bool(true));
+        assert_eq!(parsed("comp", "on"), Value::Bool(false));
+        assert_eq!(parsed("length", "3:7"), Value::Float(0.0));
+        assert_eq!(parsed("length", "1:07"), Value::Float(67.0));
+        assert_eq!(parsed("length", "1:60"), Value::Float(0.0));
+        assert_eq!(parsed("length", "12.5"), Value::Float(12.5));
+        assert_eq!(parsed("added", "1700000000"), Value::Float(1.7e9));
+        assert_eq!(parsed("added", "2024-03-15"), Value::Float(0.0));
+        assert_eq!(
+            parsed("added", "2024-03-15 12:00:00"),
+            Value::Float(parse_datetime("2024-03-15 12:00:00").unwrap())
+        );
+        assert_eq!(parsed("title", " x "), Value::Str(" x ".into()));
+        assert!(it.set_parsed("id", "3").is_err());
     }
 }

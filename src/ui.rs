@@ -121,6 +121,61 @@ pub fn options(opts: &[&str], numbers: Option<usize>, default: Option<Choice>) -
     }
 }
 
+/// beets' `input_options` with an explicit prompt: the answer is the first
+/// letter of the input, if it's one of `letters`; empty input picks the
+/// first letter unless `require`; anything else asks again with
+/// `fallback`. None at end of input.
+pub fn input_options(
+    letters: &[char],
+    require: bool,
+    prompt: &str,
+    fallback: &str,
+) -> Option<char> {
+    let mut line = read_line(&format!("{prompt} "))?;
+    loop {
+        let answer = line.trim().to_lowercase();
+        match answer.chars().next() {
+            None if !require => return letters.first().copied(),
+            Some(c) if letters.contains(&c) => return Some(c),
+            _ => line = read_line(&format!("{fallback} "))?,
+        }
+    }
+}
+
+/// beets' `input_select_objects`: ask "PROMPT? (Yes/no/select)" and return
+/// all, none, or (select) the objects confirmed one by one, after showing
+/// each with `show`.
+pub fn select_objects<T: Clone>(prompt: &str, objs: &[T], mut show: impl FnMut(&T)) -> Vec<T> {
+    let choice = input_options(
+        &['y', 'n', 's'],
+        false,
+        &format!("{prompt}? (Yes/no/select)"),
+        "Enter one of Y, N, S:",
+    );
+    println!();
+    match choice {
+        Some('y') => objs.to_vec(),
+        Some('s') => {
+            let mut out = vec![];
+            for obj in objs {
+                show(obj);
+                match input_options(
+                    &['y', 'n', 'q'],
+                    true,
+                    &format!("{prompt}? (yes/no/quit)"),
+                    "Enter Y or N:",
+                ) {
+                    Some('y') => out.push(obj.clone()),
+                    Some('n') => {}
+                    _ => return out,
+                }
+            }
+            out
+        }
+        _ => vec![],
+    }
+}
+
 pub fn yes_no(prompt: &str) -> bool {
     loop {
         match read_line(&format!("{prompt} (yes/no)? "))
