@@ -162,7 +162,7 @@ pub fn resolve_upgrade_target(new: &[Item], found: &[Found], keys: &[String]) ->
 }
 
 /// beets' `human_bytes`.
-fn human_bytes(size: u64) -> String {
+pub fn human_bytes(size: u64) -> String {
     let mut size = size as f64;
     let mut unit = "B";
     for power in ["", "K", "M", "G", "T", "P", "E", "Z", "Y", "H"] {

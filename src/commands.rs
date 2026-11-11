@@ -227,16 +227,18 @@ pub fn run(cli: Cli) -> Result<()> {
             if pretend {
                 return Ok(());
             }
+            // beets prints no summary after an import; keep ours for -v.
             let s = &imp.stats;
-            println!();
             let already = if s.already > 0 {
                 format!("; {} already imported earlier", s.already)
             } else {
                 String::new()
             };
-            println!(
+            crate::logging::debug!(
                 "Imported {} album(s), {} item(s); skipped {}{already}.",
-                s.albums, s.items, s.skipped
+                s.albums,
+                s.items,
+                s.skipped
             );
             Ok(())
         }
@@ -1789,33 +1791,34 @@ fn write(
     Ok(())
 }
 
-fn human_bytes(b: u64) -> String {
-    let units = ["B", "KiB", "MiB", "GiB", "TiB"];
-    let mut v = b as f64;
-    let mut i = 0;
-    while v >= 1024.0 && i < units.len() - 1 {
-        v /= 1024.0;
-        i += 1;
-    }
-    format!("{v:.1} {}", units[i])
-}
-
-fn human_seconds(s: f64) -> String {
-    let units = [
-        ("year", 31_536_000.0),
-        ("week", 604_800.0),
-        ("day", 86_400.0),
-        ("hour", 3600.0),
-        ("minute", 60.0),
+/// beets' `human_seconds`: an interval in the largest unit it reaches
+/// (a "year" is 52 weeks, as in beets).
+fn human_seconds(interval: f64) -> String {
+    let units: [(f64, &str); 7] = [
+        (1.0, "second"),
+        (60.0, "minute"),
+        (60.0, "hour"),
+        (24.0, "day"),
+        (7.0, "week"),
+        (52.0, "year"),
+        (10.0, "decade"),
     ];
-    for (name, size) in units {
-        if s >= size {
-            return format!("{:.1} {name}s", s / size);
+    let mut interval = interval;
+    for i in 0..units.len() - 1 {
+        let (increment, suffix) = units[i];
+        interval /= increment;
+        if interval < units[i + 1].0 {
+            return format!("{interval:.1} {suffix}s");
         }
     }
-    format!("{s:.1} seconds")
+    let (increment, suffix) = units[units.len() - 1];
+    format!("{:.1} {suffix}s", interval / increment)
 }
 
+/// beets' `show_stats`. Without `-e` the size is beets' estimate from
+/// bitrate × length, not the files' real size. beets prints the exact
+/// seconds on a line of their own, which is blank without `-e`; that blank
+/// line is kept so the output matches.
 fn stats(lib: &Library, exact: bool, q: &[String]) -> Result<()> {
     let items = lib.items(&Query::parse(Kind::Item, q)?)?;
     let mut total_time = 0.0;
@@ -1823,26 +1826,62 @@ fn stats(lib: &Library, exact: bool, q: &[String]) -> Result<()> {
     let (mut artists, mut albums, mut album_artists) =
         (HashSet::new(), HashSet::new(), HashSet::new());
     for i in &items {
-        total_time += i.float("length");
-        total_size += std::fs::metadata(i.path()).map(|m| m.len()).unwrap_or(0);
+        let length = i.float("length");
+        total_time += length;
+        total_size += if exact {
+            std::fs::metadata(i.path()).map(|m| m.len()).unwrap_or(0)
+        } else {
+            (length * i.int("bitrate") as f64 / 8.0).max(0.0) as u64
+        };
         artists.insert(i.str("artist").to_string());
         album_artists.insert(i.str("albumartist").to_string());
         if i.int("album_id") != 0 {
             albums.insert(i.int("album_id"));
         }
     }
-    println!("Tracks: {}", items.len());
+    let mut size_str = crate::duplicates::human_bytes(total_size);
     if exact {
-        println!("Total time: {total_time:.0} seconds");
-        println!("Total size: {total_size} bytes");
-    } else {
-        println!("Total time: {}", human_seconds(total_time));
-        println!("Approximate total size: {}", human_bytes(total_size));
+        size_str += &format!(" ({total_size} bytes)");
     }
+    println!("Tracks: {}", items.len());
+    println!("Total time: {}", human_seconds(total_time));
+    println!(
+        "{}",
+        if exact {
+            format!(" ({total_time:.2} seconds)")
+        } else {
+            String::new()
+        }
+    );
+    println!(
+        "{}: {size_str}",
+        if exact {
+            "Total size"
+        } else {
+            "Approximate total size"
+        }
+    );
     println!("Artists: {}", artists.len());
     println!("Albums: {}", albums.len());
     println!("Album artists: {}", album_artists.len());
     Ok(())
+}
+
+#[cfg(test)]
+mod stats_tests {
+    use super::human_seconds;
+
+    #[test]
+    fn human_seconds_matches_beets() {
+        // Values from beets' units: a year is 52 weeks, then decades.
+        assert_eq!(human_seconds(0.0), "0.0 seconds");
+        assert_eq!(human_seconds(59.0), "59.0 seconds");
+        assert_eq!(human_seconds(90.0), "1.5 minutes");
+        assert_eq!(human_seconds(3.0 * 3600.0), "3.0 hours");
+        assert_eq!(human_seconds(10_368.0), "2.9 hours");
+        assert_eq!(human_seconds(86_400.0 * 364.0), "1.0 years");
+        assert_eq!(human_seconds(86_400.0 * 7.0 * 52.0 * 25.0), "2.5 decades");
+    }
 }
 
 fn fields() -> Result<()> {

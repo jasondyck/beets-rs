@@ -6,7 +6,6 @@
 use crate::config::Config;
 use crate::library::Library;
 use crate::model::{ALBUM_FIELDS, Album, ITEM_FIELDS, Item, Kind, Record};
-use crate::query::Query;
 use crate::template::{Context, asciify_path};
 use anyhow::{Result, anyhow};
 use fancy_regex::Regex;
@@ -455,11 +454,14 @@ impl<'a> Formatted<'a> {
             .unwrap_or_default()
     }
 
-    /// beets' `_tmpl_unique`. The collision groups of the whole scope
-    /// (every album, every singleton, or one album's tracks) are computed
-    /// once and memoized in the library until it changes, as beets'
+    /// beets' `_tmpl_unique`. The candidates are the scope's records with
+    /// the same raw key values as this one (beets' `duplicates_query`, run
+    /// in SQL by `candidates`, which gets those values); their collision
+    /// groups are memoized in the library until it changes, as beets'
     /// `_group_memotable`: a group is the records with the same raw key
-    /// values (beets' `duplicates_query`) and the same path-normalized ones.
+    /// values and the same path-normalized ones. Narrowing first matters:
+    /// import writes after every album, which drops the memo, so grouping
+    /// the whole library each time made imports quadratic.
     #[allow(clippy::too_many_arguments)]
     fn unique(
         &self,
@@ -469,7 +471,7 @@ impl<'a> Formatted<'a> {
         id: i64,
         db_item: &Record,
         scope: i64,
-        candidates: impl FnOnce() -> Vec<Record>,
+        candidates: impl FnOnce(&[(String, Option<String>)]) -> Vec<Record>,
         keys_default: Option<&str>,
         album: Option<&Album>,
     ) -> String {
@@ -490,8 +492,29 @@ impl<'a> Formatted<'a> {
             (String::new(), String::new())
         };
         let env = &self.env;
-        let memo_key = format!("{name}\0{keys}\0{disam}\0{scope}\0{}", env.id);
-        let keys: Vec<&str> = keys.split_whitespace().collect();
+        let key_list: Vec<&str> = keys.split_whitespace().collect();
+        // The raw key values to narrow by. Only text values narrow (in SQL);
+        // other keys are left to the grouping below, which checks them all.
+        let want: Vec<(String, Option<String>)> = key_list
+            .iter()
+            .map(|k| {
+                let v = match db_item.get(k) {
+                    Some(crate::model::Value::Str(s)) => Some(s),
+                    _ => None,
+                };
+                (k.to_string(), v)
+            })
+            .collect();
+        let raw: Vec<String> = key_list
+            .iter()
+            .map(|k| format!("{:?}", db_item.get(k)))
+            .collect();
+        let memo_key = format!(
+            "{name}\0{keys}\0{disam}\0{scope}\0{}\0{}",
+            env.id,
+            raw.join("\0")
+        );
+        let keys = key_list;
         let disam: Vec<&str> = disam.split_whitespace().collect();
         let normalized = |rec: &Record, field: &str| {
             let view = Formatted::with_env(rec, self.lib, env.clone()).for_path();
@@ -513,7 +536,7 @@ impl<'a> Formatted<'a> {
             )
         };
         let groups = lib.memo(memo_key, || {
-            let candidates = candidates();
+            let candidates = candidates(&want);
             let mut members: HashMap<GroupKey, Vec<&Record>> = HashMap::new();
             for c in &candidates {
                 members.entry(group_key(c)).or_default().push(c);
@@ -588,7 +611,10 @@ impl<'a> Formatted<'a> {
             album_id,
             album,
             0,
-            || lib.all_albums().unwrap_or_default(),
+            |want| {
+                lib.duplicate_candidates(Kind::Album, want, false)
+                    .unwrap_or_default()
+            },
             None,
             None,
         )
@@ -607,9 +633,8 @@ impl<'a> Formatted<'a> {
         if self.rec.int("album_id") != 0 {
             return Ok(String::new());
         }
-        let singletons = || {
-            Query::parse(Kind::Item, &["singleton:true"])
-                .and_then(|q| lib.items(&q))
+        let singletons = |want: &[(String, Option<String>)]| {
+            lib.duplicate_candidates(Kind::Item, want, true)
                 .unwrap_or_default()
         };
         Ok(self.unique(
@@ -649,7 +674,7 @@ impl<'a> Formatted<'a> {
             id,
             self.rec,
             album_id,
-            || lib.album_items(album_id).unwrap_or_default(),
+            |_: &[(String, Option<String>)]| lib.album_items(album_id).unwrap_or_default(),
             Some(&keys),
             album,
         ))

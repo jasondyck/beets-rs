@@ -868,14 +868,21 @@ impl<'a> Importer<'a> {
         dir: &Path,
         paths: &[PathBuf],
     ) -> Result<Outcome> {
-        // As beets: the task's paths, one per line.
+        // As beets: the task's paths, one per line. With autotagging this is
+        // `choose_match`'s header on stdout; without it beets never calls
+        // `choose_match` and `import_asis` only logs the paths at info level,
+        // which goes to stderr, plain, even without -v.
         let shown: Vec<String> = paths.iter().map(|p| p.display().to_string()).collect();
-        println!();
-        println!(
-            "{} {}",
-            ui::colorize("import_path", &shown.join("\n")),
-            ui::colorize("import_path_items", &format!("({} items)", items.len()))
-        );
+        if self.opts.autotag {
+            println!();
+            println!(
+                "{} {}",
+                ui::colorize("import_path", &shown.join("\n")),
+                ui::colorize("import_path_items", &format!("({} items)", items.len()))
+            );
+        } else {
+            eprintln!("{}", shown.join("\n"));
+        }
 
         let decision = if self.opts.autotag {
             let d = self.choose_album(&items)?;
@@ -1122,8 +1129,14 @@ impl<'a> Importer<'a> {
     fn find_duplicates(&self, album: bool, task: &[Item], want: &KeyValues) -> Result<Vec<Found>> {
         let task_paths: HashSet<&Path> = task.iter().map(|i| i.path()).collect();
         let mut found = vec![];
+        // The library narrows the candidates in SQL (beets' duplicate query);
+        // `matches` still has the final say, so keys SQL can't check exactly
+        // behave as before.
         if album {
-            for a in self.lib.all_albums()? {
+            for a in self
+                .lib
+                .duplicate_candidates(crate::model::Kind::Album, want, false)?
+            {
                 if !duplicates::matches(&a, want) {
                     continue;
                 }
@@ -1136,8 +1149,10 @@ impl<'a> Importer<'a> {
                 }
             }
         } else {
-            let all = crate::query::Query::parse::<&str>(crate::model::Kind::Item, &[])?;
-            for it in self.lib.items(&all)? {
+            for it in self
+                .lib
+                .duplicate_candidates(crate::model::Kind::Item, want, true)?
+            {
                 if it.int("album_id") == 0
                     && !task_paths.contains(it.path())
                     && duplicates::matches(&it, want)
@@ -1564,8 +1579,14 @@ impl<'a> Importer<'a> {
     }
 
     fn import_singleton_item(&mut self, mut item: Item) -> Result<Outcome> {
-        println!();
-        println!("{}", item.path().display());
+        // beets: `choose_item`'s header when autotagging, else an info log
+        // line on stderr (see `import_album_items`).
+        if self.opts.autotag {
+            println!();
+            println!("{}", item.path().display());
+        } else {
+            eprintln!("{}", item.path().display());
+        }
         let paths = [item.path().to_path_buf()];
         let decision = if self.opts.autotag {
             let d = self.choose_item(&item)?;
@@ -2865,6 +2886,51 @@ mod tests {
 
     fn copy_op(o: &mut ImportOptions) {
         o.op = FileOp::Copy;
+    }
+
+    /// Import must not scale with library size: the duplicate check once
+    /// loaded every album (and every attribute row) per imported album, so
+    /// importing N albums into a big library was quadratic. With 50,000
+    /// albums already in the library, importing 20 more stays quick.
+    #[test]
+    #[ignore = "timing; run with --ignored"]
+    fn import_cost_does_not_grow_with_library_size() {
+        let (_d, cfg, lib, src) = setup(&[]);
+        lib.transaction(|lib| {
+            for n in 0..50_000 {
+                let mut it = Item::new_item();
+                it.set_str("albumartist", format!("Artist {}", n % 500));
+                it.set_str("album", format!("Album {n}"));
+                it.set_path(format!("/music/{n}.mp3"));
+                let mut a = lib.add_album(&mut [it])?;
+                a.flex.insert("source".into(), "cd".into());
+                lib.store(&a)?;
+            }
+            Ok(())
+        })
+        .unwrap();
+        let mut dirs = vec![];
+        for n in 0..20 {
+            let Some(d) = album_with(
+                &src,
+                &format!("new{n}"),
+                &format!("New {n}"),
+                &[("One", 128)],
+            ) else {
+                return; // no ffmpeg
+            };
+            dirs.push(d);
+        }
+        let start = std::time::Instant::now();
+        for d in &dirs {
+            import_dir(&cfg, &lib, d, |o| o.op = FileOp::Copy);
+        }
+        let took = start.elapsed();
+        assert_eq!(lib.all_albums().unwrap().len(), 50_020);
+        assert!(
+            took.as_secs_f64() < 2.0,
+            "20 imports into 50k albums took {took:?}"
+        );
     }
 
     #[test]

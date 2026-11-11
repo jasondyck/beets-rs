@@ -295,14 +295,23 @@ impl Library {
                 flex.entry(id).or_default().insert(k, v.unwrap_or_default());
             }
             None
-        } else {
+        } else if where_sql.is_empty() {
             Some(
                 self.conn
-                    .prepare(&format!("SELECT entity_id, key, value FROM {a}"))?,
+                    .prepare_cached(&format!("SELECT entity_id, key, value FROM {a}"))?,
             )
+        } else {
+            // Only the loaded rows' attributes: reading the whole attribute
+            // table here made every small load (an album's items, say) cost
+            // as much as the library is big.
+            Some(self.conn.prepare_cached(&format!(
+                "SELECT entity_id, key, value FROM {a} \
+                 WHERE entity_id IN (SELECT id FROM {t} {where_sql})"
+            ))?)
         };
+        let flex_args: &[SqlValue] = if where_sql.is_empty() { &[] } else { args };
         if let Some(s) = stmt.as_mut() {
-            let rows = s.query_map([], |r| {
+            let rows = s.query_map(rusqlite::params_from_iter(flex_args.iter()), |r| {
                 Ok((r.get(0)?, r.get(1)?, r.get::<_, Option<String>>(2)?))
             })?;
             for row in rows {
@@ -460,8 +469,62 @@ impl Library {
         Ok(out)
     }
 
+    #[allow(dead_code)] // tests, and handy for commands
     pub fn all_albums(&self) -> Result<Vec<Album>> {
         self.load(Kind::Album, "", &[])
+    }
+
+    /// Candidates for beets' duplicate query: the albums or items whose
+    /// text fields (fixed or flexible) among `want` hold exactly the wanted
+    /// values, narrowed in SQL. This is a superset filter only — keys that
+    /// aren't plain text (numbers, dates, …) or are wanted as missing are
+    /// left for the caller to check with `duplicates::matches`. With
+    /// `singletons_only`, items that belong to an album are skipped.
+    pub fn duplicate_candidates(
+        &self,
+        kind: Kind,
+        want: &[(String, Option<String>)],
+        singletons_only: bool,
+    ) -> Result<Vec<Record>> {
+        let a = attr_table(kind);
+        let mut conds: Vec<String> = vec![];
+        let mut args: Vec<SqlValue> = vec![];
+        if singletons_only {
+            conds.push("(album_id IS NULL OR album_id = 0)".into());
+        }
+        for (key, value) in want {
+            let Some(value) = value else { continue };
+            // A NULL column or attribute value reads back as "".
+            let empty = if value.is_empty() {
+                " OR {x} IS NULL"
+            } else {
+                ""
+            };
+            match crate::model::field_type(kind, key) {
+                Some(crate::model::FieldType::Str) => {
+                    let col = format!("\"{key}\"");
+                    conds.push(format!("({col} = ?{})", empty.replace("{x}", &col)));
+                    args.push(SqlValue::Text(value.clone()));
+                }
+                Some(_) => {}
+                None if key == "singleton" => {}
+                None => {
+                    // Flexible attribute: it must exist with this value.
+                    conds.push(format!(
+                        "id IN (SELECT entity_id FROM {a} WHERE key = ? AND (value = ?{}))",
+                        empty.replace("{x}", "value")
+                    ));
+                    args.push(SqlValue::Text(key.clone()));
+                    args.push(SqlValue::Text(value.clone()));
+                }
+            }
+        }
+        let where_sql = if conds.is_empty() {
+            String::new()
+        } else {
+            format!("WHERE {}", conds.join(" AND "))
+        };
+        self.load(kind, &where_sql, &args)
     }
 
     pub fn get_item(&self, id: i64) -> Result<Option<Item>> {
@@ -570,6 +633,119 @@ mod tests {
         assert_eq!(*lib.memo("n".into(), || 99usize), 99);
         lib.remove(&album).unwrap();
         assert_eq!(count(&lib), 0);
+    }
+
+    fn album(lib: &Library, artist: &str, title: &str, flex: &[(&str, &str)]) -> Album {
+        let mut it = Record::new_item();
+        it.set_str("albumartist", artist);
+        it.set_str("album", title);
+        let mut a = lib.add_album(&mut [it]).unwrap();
+        for (k, v) in flex {
+            a.flex.insert(k.to_string(), v.to_string());
+        }
+        lib.store(&a).unwrap();
+        a
+    }
+
+    fn want(pairs: &[(&str, Option<&str>)]) -> Vec<(String, Option<String>)> {
+        pairs
+            .iter()
+            .map(|(k, v)| (k.to_string(), v.map(str::to_string)))
+            .collect()
+    }
+
+    fn ids(recs: &[Record]) -> Vec<i64> {
+        let mut v: Vec<i64> = recs.iter().map(|r| r.id.unwrap()).collect();
+        v.sort();
+        v
+    }
+
+    #[test]
+    fn duplicate_candidates_narrow_by_text_and_flex_fields() {
+        let lib = Library::in_memory().unwrap();
+        let a = album(&lib, "AC/DC", "Back in Black", &[("source", "cd")]);
+        let b = album(&lib, "AC/DC", "Back in Black", &[("source", "vinyl")]);
+        let _c = album(&lib, "AC/DC", "Highway to Hell", &[]);
+        let _d = album(&lib, "ac/dc", "Back in Black", &[]);
+        let fixed = want(&[
+            ("albumartist", Some("AC/DC")),
+            ("album", Some("Back in Black")),
+        ]);
+        let got = lib
+            .duplicate_candidates(Kind::Album, &fixed, false)
+            .unwrap();
+        assert_eq!(ids(&got), vec![a.id.unwrap(), b.id.unwrap()]);
+        // Flexible keys narrow too, and the loaded rows carry their attributes.
+        let flex = want(&[("album", Some("Back in Black")), ("source", Some("vinyl"))]);
+        let got = lib.duplicate_candidates(Kind::Album, &flex, false).unwrap();
+        assert_eq!(ids(&got), vec![b.id.unwrap()]);
+        assert_eq!(got[0].flex.get("source").map(String::as_str), Some("vinyl"));
+    }
+
+    #[test]
+    fn duplicate_candidates_never_drop_what_matches_would_keep() {
+        let lib = Library::in_memory().unwrap();
+        let blank = album(&lib, "", "Untitled", &[]);
+        let named = album(&lib, "Someone", "Untitled", &[]);
+        // An empty wanted value also finds empty columns.
+        let w = want(&[("albumartist", Some("")), ("album", Some("Untitled"))]);
+        let got = lib.duplicate_candidates(Kind::Album, &w, false).unwrap();
+        assert_eq!(ids(&got), vec![blank.id.unwrap()]);
+        // Keys SQL doesn't check exactly (non-text, or wanted missing) don't
+        // narrow at all: the caller's `matches` decides those.
+        let w = want(&[
+            ("year", Some("0")),
+            ("label", None),
+            ("album", Some("Untitled")),
+        ]);
+        let got = lib.duplicate_candidates(Kind::Album, &w, false).unwrap();
+        assert_eq!(ids(&got), vec![blank.id.unwrap(), named.id.unwrap()]);
+        // No keys at all: every row.
+        assert_eq!(
+            lib.duplicate_candidates(Kind::Album, &[], false)
+                .unwrap()
+                .len(),
+            2
+        );
+    }
+
+    #[test]
+    fn duplicate_candidates_for_singletons_skip_album_tracks() {
+        let lib = Library::in_memory().unwrap();
+        let mut single = Record::new_item();
+        single.set_str("artist", "A");
+        single.set_str("title", "T");
+        single.set_path("/m/single.mp3");
+        lib.add(&mut single).unwrap();
+        let mut in_album = single.clone();
+        in_album.id = None;
+        in_album.set_path("/m/album/1.mp3");
+        lib.add_album(&mut [in_album]).unwrap();
+        let w = want(&[("artist", Some("A")), ("title", Some("T"))]);
+        assert_eq!(
+            lib.duplicate_candidates(Kind::Item, &w, false)
+                .unwrap()
+                .len(),
+            2
+        );
+        let got = lib.duplicate_candidates(Kind::Item, &w, true).unwrap();
+        assert_eq!(ids(&got), vec![single.id.unwrap()]);
+    }
+
+    #[test]
+    fn filtered_loads_attach_only_their_own_flex_attributes() {
+        let lib = Library::in_memory().unwrap();
+        let a = album(&lib, "X", "One", &[]);
+        let b = album(&lib, "X", "Two", &[]);
+        for (album, value) in [(&a, "a"), (&b, "b")] {
+            for mut it in lib.album_items(album.id.unwrap()).unwrap() {
+                it.flex.insert("tag".into(), value.into());
+                lib.store(&it).unwrap();
+            }
+        }
+        let items = lib.album_items(b.id.unwrap()).unwrap();
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].flex.get("tag").map(String::as_str), Some("b"));
     }
 
     #[test]
