@@ -114,7 +114,13 @@ pub enum Cmd {
         /// Start over instead of resuming an interrupted import
         #[arg(short = 'P', long)]
         noresume: bool,
-        #[arg(required = true)]
+        /// Retag items matching a library query instead of importing paths
+        #[arg(short = 'L', long)]
+        library: bool,
+        /// Erase existing metadata before applying new metadata
+        #[arg(long = "from-scratch")]
+        from_scratch: bool,
+        /// Paths to import (with -L: a library query)
         paths: Vec<PathBuf>,
     },
     /// Query the library

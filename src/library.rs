@@ -293,13 +293,13 @@ impl Library {
         Ok(items)
     }
 
-    pub fn has_path(&self, path: &Path) -> Result<bool> {
-        let n: i64 = self.conn.query_row(
-            "SELECT COUNT(*) FROM items WHERE path=?",
-            [SqlValue::Blob(path.as_os_str().as_bytes().to_vec())],
-            |r| r.get(0),
-        )?;
-        Ok(n > 0)
+    /// Items whose file is `path` (beets' `PathQuery` on reimport).
+    pub fn items_with_path(&self, path: &Path) -> Result<Vec<Item>> {
+        self.load(
+            Kind::Item,
+            "WHERE path=?",
+            &[SqlValue::Blob(path.as_os_str().as_bytes().to_vec())],
+        )
     }
 
     /// Create an album from items (album-level fields taken from the first item)
@@ -353,7 +353,12 @@ mod tests {
         assert_eq!(got.int("track"), 4);
         assert_eq!(got.path(), Path::new("/music/a/b.flac"));
         assert_eq!(got.str("mood"), "calm");
-        assert!(lib.has_path(Path::new("/music/a/b.flac")).unwrap());
+        assert_eq!(
+            lib.items_with_path(Path::new("/music/a/b.flac"))
+                .unwrap()
+                .len(),
+            1
+        );
 
         let mut items = vec![got];
         let album = lib.add_album(&mut items).unwrap();

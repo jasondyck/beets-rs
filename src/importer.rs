@@ -14,7 +14,7 @@ use crate::template::{self, Template};
 use crate::ui::{self, Choice};
 use anyhow::{Context, Result, bail};
 use regex::Regex;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 use std::io::Write as _;
 use std::path::{Path, PathBuf};
 use std::sync::LazyLock;
@@ -52,6 +52,95 @@ pub struct ImportOptions {
     pub none_rec_action: NoneRecAction,
     /// `import.detail`: list every track in a match, not just changed ones.
     pub detail: bool,
+    /// `import.from_scratch`: clear existing tags before applying a match.
+    pub from_scratch: bool,
+}
+
+/// Flexible attributes that a reimport takes from the new match instead of
+/// keeping the old value (beets' `REIMPORT_FRESH_FIELDS_ITEM`).
+const REIMPORT_FRESH_FIELDS_ITEM: &[&str] = &[
+    "data_source",
+    "bandcamp_album_id",
+    "spotify_album_id",
+    "deezer_album_id",
+    "beatport_album_id",
+    "tidal_album_id",
+    "tidal_track_id",
+    "tidal_artist_id",
+    "tidal_track_popularity",
+    "tidal_album_popularity",
+    "tidal_updated",
+    "data_url",
+];
+
+/// beets' `_reduce_and_log`: copy the old record's flexible attributes onto
+/// the new one, except fresh fields the new record sets to something else.
+fn preserve_flex(new: &mut Item, old: &Item, fresh: &[&str]) {
+    for (k, v) in &old.flex {
+        let overwritten = fresh.contains(&k.as_str())
+            && new
+                .get(k)
+                .is_some_and(|n| !n.raw().is_empty() && n.raw() != *v);
+        if !overwritten {
+            new.flex.insert(k.clone(), v.clone());
+        }
+    }
+}
+
+/// beets' `align_album_level_fields` for an as-is album: the most common
+/// (albumartist, or artist) becomes every item's albumartist if enough of
+/// the items share it (`SINGLE_ARTIST_THRESH`); otherwise it's a VA album.
+fn align_asis(items: &mut [Item], va_name: &str) {
+    const SINGLE_ARTIST_THRESH: f64 = 0.25;
+    let mut counts: Vec<(String, usize)> = vec![];
+    for i in items.iter() {
+        let a = match i.str("albumartist") {
+            "" => i.str("artist"),
+            aa => aa,
+        };
+        match counts.iter_mut().find(|(k, _)| k == a) {
+            Some((_, n)) => *n += 1,
+            None => counts.push((a.to_string(), 1)),
+        }
+    }
+    // Ties go to the first seen, as Python's `Counter.most_common`.
+    let Some((artist, freq)) = counts.into_iter().rev().max_by_key(|(_, n)| *n) else {
+        return;
+    };
+    let single = freq == items.len()
+        || (freq > 1 && freq as f64 / items.len() as f64 >= SINGLE_ARTIST_THRESH);
+    for i in items.iter_mut() {
+        i.set_str(
+            "albumartist",
+            if single { artist.as_str() } else { va_name },
+        );
+        i.set("comp", Value::Bool(!single));
+    }
+}
+
+/// beets' `clear()` for `from_scratch`: reset every tag-backed field.
+fn clear_tags(item: &mut Item) {
+    for f in media::TAG_FIELDS {
+        if let Some(ty) = item.field_type(f) {
+            item.set(f, ty.default_value());
+        }
+    }
+}
+
+/// Library rows a reimport replaces (beets' `record_replaced`): for each new
+/// item, the existing items with the same path, plus their albums.
+#[derive(Default)]
+struct Replaced {
+    items: Vec<Vec<Item>>,
+    albums: Vec<Album>,
+}
+
+/// What the duplicate check decided.
+enum DupOutcome {
+    Proceed,
+    Skip,
+    /// "Merge all": the duplicates' items, to import together with the new ones.
+    Merge(Vec<Item>),
 }
 
 /// `import.none_rec_action`: what to do, outside quiet mode, when the
@@ -145,6 +234,7 @@ impl ImportOptions {
                 _ => NoneRecAction::Ask,
             },
             detail: cfg.bool("import.detail"),
+            from_scratch: cfg.bool("import.from_scratch"),
         }
     }
 }
@@ -222,6 +312,8 @@ pub struct Importer<'a> {
     state: ImportState,
     state_path: PathBuf,
     log: Option<std::fs::File>,
+    /// Paths of library items already merged into another album this run.
+    merged: HashSet<PathBuf>,
 }
 
 static DISC_DIR: LazyLock<Regex> =
@@ -380,6 +472,7 @@ impl<'a> Importer<'a> {
         };
         Ok(Importer {
             log,
+            merged: HashSet::new(),
             cfg,
             lib,
             fmt: PathFormatter::new(cfg)?,
@@ -538,11 +631,9 @@ impl<'a> Importer<'a> {
     fn read_items(&mut self, files: &[PathBuf]) -> Result<Vec<Item>> {
         let mut items = vec![];
         for f in files {
-            if self.lib.has_path(f)? {
-                println!(
-                    "{}",
-                    ui::dim(&format!("Skipping {} (already in library)", f.display()))
-                );
+            // Files already in the library are reimported, replacing their
+            // rows, unless a merge already took them this run.
+            if self.merged.contains(f) {
                 continue;
             }
             match media::read(f) {
@@ -562,6 +653,73 @@ impl<'a> Importer<'a> {
     }
 
     // ------------------------------------------------------------- albums
+
+    /// `-L`: reimport library items matching `query`, grouped into their
+    /// albums (or one by one with `-s`), as beets' `query_tasks`. There is
+    /// no resume or incremental state for query imports.
+    pub fn run_library(&mut self, query: &[String]) -> Result<()> {
+        use crate::model::Kind;
+        use crate::query::Query;
+        if self.log.is_some() {
+            let now = chrono::Local::now().format("%a %b %e %H:%M:%S %Y");
+            self.log_line(&format!("import started {now}"));
+        }
+        self.roots.push(self.cfg.directory());
+        if self.opts.singletons {
+            for item in self.lib.items(&Query::parse(Kind::Item, query)?)? {
+                if self.opts.pretend {
+                    println!("Singleton: {}", item.path().display());
+                    continue;
+                }
+                let mut item = item;
+                item.id = None;
+                if self.import_singleton_item(item)? == Outcome::Aborted {
+                    println!("Import aborted.");
+                    return Ok(());
+                }
+            }
+            return Ok(());
+        }
+        for album in self.lib.albums(&Query::parse(Kind::Album, query)?)? {
+            // Re-read from the database: an earlier merge may have taken it.
+            let items: Vec<Item> = self
+                .lib
+                .album_items(album.id.unwrap())?
+                .into_iter()
+                .filter(|i| !self.merged.contains(i.path()))
+                .map(|mut i| {
+                    // beets' `_freshen_items`.
+                    i.id = None;
+                    i.set_int("album_id", 0);
+                    i
+                })
+                .collect();
+            let Some(dir) = items
+                .first()
+                .and_then(|i| i.path().parent())
+                .map(Path::to_path_buf)
+            else {
+                continue;
+            };
+            if self.opts.pretend {
+                println!("Album: {}", dir.display());
+                for i in &items {
+                    println!("  {}", i.path().display());
+                }
+                continue;
+            }
+            let outcome = if self.opts.group_albums {
+                self.import_groups(items, &dir)?
+            } else {
+                self.import_album_items(items, &dir, std::slice::from_ref(&dir))?
+            };
+            if outcome == Outcome::Aborted {
+                println!("Import aborted.");
+                return Ok(());
+            }
+        }
+        Ok(())
+    }
 
     /// `--pretend`: list what would be imported, as beets' `log_files`.
     fn log_files(&mut self, key: &Path, files: &[PathBuf]) -> Result<()> {
@@ -669,12 +827,31 @@ impl<'a> Importer<'a> {
             Decision::Group => return self.import_groups(items, dir),
         };
 
-        if !self.resolve_duplicates(&items, m.as_deref(), paths)? {
-            self.stats.skipped += 1;
-            return Ok(Outcome::Skipped);
+        match self.resolve_duplicates(&items, m.as_deref(), paths)? {
+            DupOutcome::Proceed => {}
+            DupOutcome::Skip => {
+                self.stats.skipped += 1;
+                return Ok(Outcome::Skipped);
+            }
+            DupOutcome::Merge(dups) => {
+                // As beets: tag the new and old items together as one album;
+                // the old rows are then replaced like any reimport.
+                let mut paths = paths.to_vec();
+                for d in &dups {
+                    self.merged.insert(d.path().to_path_buf());
+                    paths.push(d.path().to_path_buf());
+                }
+                items.extend(dups);
+                return self.import_album_items(items, dir, &paths);
+            }
         }
 
         if let Some(m) = &m {
+            if self.opts.from_scratch {
+                for &(i, _) in &m.mapping {
+                    clear_tags(&mut items[i]);
+                }
+            }
             // Items with no matching track are dropped, as in beets.
             autotag::apply_album(self.cfg, &mut items, m);
             let keep: Vec<usize> = m.mapping.iter().map(|(i, _)| *i).collect();
@@ -684,18 +861,8 @@ impl<'a> Importer<'a> {
                 idx += 1;
                 k
             });
-        } else if items.iter().all(|i| i.str("albumartist").is_empty()) {
-            let cur = autotag::current_metadata(&items);
-            for i in &mut items {
-                i.set_str(
-                    "albumartist",
-                    if cur.va {
-                        self.cfg.str("va_name")
-                    } else {
-                        cur.artist.clone()
-                    },
-                );
-            }
+        } else {
+            align_asis(&mut items, &self.cfg.str("va_name"));
         }
         self.finalize_album(items, m.is_some(), dir)?;
         Ok(Outcome::Done)
@@ -957,7 +1124,7 @@ impl<'a> Importer<'a> {
         items: &[Item],
         m: Option<&AlbumMatch>,
         paths: &[PathBuf],
-    ) -> Result<bool> {
+    ) -> Result<DupOutcome> {
         let (artist, album, mbid) = match m {
             Some(m) => (
                 if m.info.va {
@@ -973,19 +1140,25 @@ impl<'a> Importer<'a> {
                 (cur.artist, cur.album, String::new())
             }
         };
-        let dups: Vec<Album> = self
-            .lib
-            .all_albums()?
-            .into_iter()
-            .filter(|a| {
-                // Like beets' default duplicate_keys (albumartist album), plus same release ID.
-                (!mbid.is_empty() && a.str("mb_albumid") == mbid)
-                    || (a.str("albumartist").eq_ignore_ascii_case(&artist)
-                        && a.str("album").eq_ignore_ascii_case(&album))
-            })
-            .collect();
+        let task_paths: HashSet<&Path> = items.iter().map(|i| i.path()).collect();
+        let mut dups: Vec<(Album, Vec<Item>)> = vec![];
+        for a in self.lib.all_albums()? {
+            // Like beets' default duplicate_keys (albumartist album), plus same release ID.
+            let same = (!mbid.is_empty() && a.str("mb_albumid") == mbid)
+                || (a.str("albumartist").eq_ignore_ascii_case(&artist)
+                    && a.str("album").eq_ignore_ascii_case(&album));
+            if !same {
+                continue;
+            }
+            // An album whose files are all in this task is being reimported,
+            // not duplicated (it gets replaced).
+            let album_items = self.lib.album_items(a.id.unwrap())?;
+            if !album_items.iter().all(|i| task_paths.contains(i.path())) {
+                dups.push((a, album_items));
+            }
+        }
         if dups.is_empty() {
-            return Ok(true);
+            return Ok(DupOutcome::Proceed);
         }
         let action = self.cfg.str("import.duplicate_action");
         println!("{}", ui::yellow("This album is already in the library!"));
@@ -993,26 +1166,45 @@ impl<'a> Importer<'a> {
             "skip" => 's',
             "keep" => 'k',
             "remove" => 'r',
+            "merge" => 'm',
             _ if self.opts.quiet => 's',
-            _ => match ui::options(&["Skip new", "Keep all", "Remove old"], None, None) {
+            // beets' `DuplicateAction.strict_options()` order.
+            _ => match ui::options(
+                &["Skip new", "Merge all", "Remove old", "Keep all"],
+                None,
+                None,
+            ) {
                 Some(Choice::Letter(c)) => c,
                 _ => 's',
             },
         };
+        // As beets' `log_choice(task, duplicate=True)`: a merge keeps both.
         self.tag_log(
             match choice {
-                'k' => "duplicate-keep",
+                'k' | 'm' => "duplicate-keep",
                 'r' => "duplicate-replace",
                 _ => "duplicate-skip",
             },
             paths,
         );
         match choice {
-            'k' => Ok(true),
+            'k' => Ok(DupOutcome::Proceed),
+            'm' => {
+                let mut merged = vec![];
+                for (_, album_items) in dups {
+                    for mut it in album_items {
+                        // Make them look fresh, as beets' `_freshen_items`.
+                        it.id = None;
+                        it.set_int("album_id", 0);
+                        merged.push(it);
+                    }
+                }
+                Ok(DupOutcome::Merge(merged))
+            }
             'r' => {
                 let libdir = self.cfg.directory();
-                for a in dups {
-                    for it in self.lib.album_items(a.id.unwrap())? {
+                for (a, album_items) in dups {
+                    for it in album_items {
                         if it.path().starts_with(&libdir) {
                             std::fs::remove_file(it.path()).ok();
                             if let Some(p) = it.path().parent() {
@@ -1023,12 +1215,92 @@ impl<'a> Importer<'a> {
                     }
                     self.lib.remove(&a)?;
                 }
-                Ok(true)
+                Ok(DupOutcome::Proceed)
             }
             _ => {
                 println!("Skipping.");
-                Ok(false)
+                Ok(DupOutcome::Skip)
             }
+        }
+    }
+
+    /// beets' `record_replaced`.
+    fn record_replaced(&self, items: &[Item]) -> Result<Replaced> {
+        let mut r = Replaced::default();
+        let mut album_ids = HashSet::new();
+        for item in items {
+            let dups = self.lib.items_with_path(item.path())?;
+            for d in &dups {
+                let id = d.int("album_id");
+                if id != 0
+                    && album_ids.insert(id)
+                    && let Some(a) = self.lib.get_album(id)?
+                {
+                    r.albums.push(a);
+                }
+            }
+            r.items.push(dups);
+        }
+        Ok(r)
+    }
+
+    /// beets' `remove_replaced`: drop the old item rows, and their albums
+    /// once empty.
+    fn remove_replaced(&self, r: &Replaced) -> Result<()> {
+        for d in r.items.iter().flatten() {
+            self.lib.remove(d)?;
+        }
+        for a in &r.albums {
+            if self.lib.album_items(a.id.unwrap())?.is_empty() {
+                self.lib.remove(a)?;
+            }
+        }
+        Ok(())
+    }
+
+    /// beets' `reimport_metadata`: keep `added`, flexible attributes and
+    /// (for albums) the art path from the rows being replaced. The old album
+    /// is the one whose files were in the new album's directory.
+    fn reimport_metadata(&self, album: Option<&mut Album>, items: &mut [Item], r: &Replaced) {
+        if let Some(album) = album
+            && let Some(dir) = items.first().and_then(|i| i.path().parent())
+        {
+            let old = r.albums.iter().find(|a| {
+                r.items
+                    .iter()
+                    .flatten()
+                    .any(|d| d.int("album_id") == a.id.unwrap() && d.path().parent() == Some(dir))
+            });
+            if let Some(old) = old {
+                let mut fresh = REIMPORT_FRESH_FIELDS_ITEM.to_vec();
+                fresh.push("media");
+                album.set("added", Value::Float(old.float("added")));
+                preserve_flex(album, old, &fresh);
+                album.set(
+                    "artpath",
+                    Value::Path(old.path_field("artpath").to_path_buf()),
+                );
+            }
+        }
+        for (item, dups) in items.iter_mut().zip(&r.items) {
+            for d in dups {
+                if d.float("added") != 0.0 {
+                    item.set("added", Value::Float(d.float("added")));
+                }
+                preserve_flex(item, d, REIMPORT_FRESH_FIELDS_ITEM);
+            }
+        }
+    }
+
+    /// The file operation for one item: as beets' `manipulate_files`, in
+    /// copy mode a reimported file already inside the library is moved, so
+    /// it's never duplicated.
+    fn file_op(&self, item: &Item, replaces: bool) -> FileOp {
+        if self.opts.op == FileOp::Copy && replaces && item.path().starts_with(self.cfg.directory())
+        {
+            FileOp::Move
+        } else {
+            self.opts.op
         }
     }
 
@@ -1045,18 +1317,29 @@ impl<'a> Importer<'a> {
         }
         let n = items.len();
         let lib = self.lib;
+        let mut moved_in_library = false;
         let mut album = lib.transaction(|lib| {
+            let replaced = self.record_replaced(&items)?;
+            self.remove_replaced(&replaced)?;
             let mut album = lib.add_album(&mut items)?;
-            if !self.opts.set_fields.is_empty() {
-                self.apply_set_fields(Some(&mut album), &mut items);
-                lib.store(&album)?;
-            }
-            for item in &mut items {
-                self.place_and_write(item, Some(&album), tagged)?;
+            self.reimport_metadata(Some(&mut album), &mut items, &replaced);
+            self.apply_set_fields(Some(&mut album), &mut items);
+            lib.store(&album)?;
+            for (item, dups) in items.iter_mut().zip(&replaced.items) {
+                let op = self.file_op(item, !dups.is_empty());
+                moved_in_library |= op == FileOp::Move && !dups.is_empty();
+                self.place_and_write(item, Some(&album), tagged, op)?;
                 lib.store(item)?;
             }
             Ok(album)
         })?;
+        if moved_in_library {
+            // Kept art follows its reimported album, as beets' `Item.move`.
+            crate::commands::sync_art(self.cfg, lib, album.id.unwrap())?;
+            if let Some(a) = lib.get_album(album.id.unwrap())? {
+                album = a;
+            }
+        }
         let ctx = self.plugin_ctx();
         let op = self.opts.op;
         plugins::each(self.plugins, |p| {
@@ -1145,10 +1428,16 @@ impl<'a> Importer<'a> {
         }
     }
 
-    fn place_and_write(&self, item: &mut Item, album: Option<&Album>, tagged: bool) -> Result<()> {
+    fn place_and_write(
+        &self,
+        item: &mut Item,
+        album: Option<&Album>,
+        tagged: bool,
+        op: FileOp,
+    ) -> Result<()> {
         let src = item.path().to_path_buf();
         let dest = self.fmt.destination(item, album, Some(self.lib));
-        match self.opts.op {
+        match op {
             FileOp::None => {}
             _ if dest == src => {}
             FileOp::Copy => {
@@ -1160,7 +1449,14 @@ impl<'a> Importer<'a> {
                 let dest = unique_path(&dest);
                 move_file(&src, &dest)?;
                 item.set_path(dest);
-                if let (Some(parent), Some(root)) = (src.parent(), self.roots.last()) {
+                // Files moved within the library prune up to the library root.
+                let libdir = self.cfg.directory();
+                let root = if src.starts_with(&libdir) {
+                    Some(libdir.as_path())
+                } else {
+                    self.roots.last().map(PathBuf::as_path)
+                };
+                if let (Some(parent), Some(root)) = (src.parent(), root) {
                     prune_dirs(parent, root);
                 }
             }
@@ -1211,6 +1507,9 @@ impl<'a> Importer<'a> {
             }
             Decision::AsIs => false,
             Decision::Apply(m) => {
+                if self.opts.from_scratch {
+                    clear_tags(&mut item);
+                }
                 autotag::apply_track(&mut item, &m.info);
                 true
             }
@@ -1218,9 +1517,17 @@ impl<'a> Importer<'a> {
         };
         item.set("added", Value::Float(now()));
         item.set_int("album_id", 0);
-        self.apply_set_fields(None, std::slice::from_mut(&mut item));
-        self.place_and_write(&mut item, None, tagged)?;
-        self.lib.add(&mut item)?;
+        let lib = self.lib;
+        lib.transaction(|lib| {
+            let replaced = self.record_replaced(std::slice::from_ref(&item))?;
+            self.remove_replaced(&replaced)?;
+            self.reimport_metadata(None, std::slice::from_mut(&mut item), &replaced);
+            self.apply_set_fields(None, std::slice::from_mut(&mut item));
+            let op = self.file_op(&item, !replaced.items[0].is_empty());
+            self.place_and_write(&mut item, None, tagged, op)?;
+            lib.add(&mut item)?;
+            Ok(())
+        })?;
         let ctx = self.plugin_ctx();
         plugins::each(self.plugins, |p| p.item_imported(&ctx, &mut item));
         self.stats.items += 1;
@@ -1385,6 +1692,8 @@ mod tests {
         let d = tempfile::tempdir().unwrap();
         let mut cfg = Config::defaults();
         cfg.config_dir = d.path().join("cfg");
+        // Never let a test touch the real music directory.
+        cfg.set("directory", d.path().join("lib").to_string_lossy().into());
         let src = d.path().join("src");
         std::fs::create_dir_all(&src).unwrap();
         for a in albums {
@@ -1841,5 +2150,263 @@ mod tests {
         assert!(!cfg.state_path().exists());
         let text = std::fs::read_to_string(&log).unwrap();
         assert_eq!(text.lines().count(), 1, "only the start line: {text}");
+    }
+
+    fn import_dir(
+        cfg: &Config,
+        lib: &Library,
+        dir: &Path,
+        f: impl Fn(&mut ImportOptions),
+    ) -> Stats {
+        let mut o = opts(cfg);
+        f(&mut o);
+        let mut imp = Importer::new(cfg, lib, o, &[]).unwrap();
+        imp.run(&[dir.to_path_buf()]).unwrap();
+        imp.stats
+    }
+
+    fn all_items(lib: &Library) -> Vec<Item> {
+        lib.items(&crate::query::Query::parse::<&str>(crate::model::Kind::Item, &[]).unwrap())
+            .unwrap()
+    }
+
+    #[test]
+    fn reimport_by_path_replaces_rows_and_keeps_added_flex_and_art() {
+        let (_d, cfg, lib, src) = setup(&[]);
+        let Some(dir) = album_dir(&src, "a", "Album") else {
+            return;
+        };
+        import_dir(&cfg, &lib, &dir, |_| {});
+        // The user's own additions since the first import.
+        let mut album = lib.all_albums().unwrap().pop().unwrap();
+        album.set("added", Value::Float(1000.0));
+        album.flex.insert("mood".into(), "sunny".into());
+        album.set("artpath", Value::Path("/art/cover.jpg".into()));
+        lib.store(&album).unwrap();
+        for mut i in all_items(&lib) {
+            i.set("added", Value::Float(2000.0));
+            i.flex.insert("rating".into(), "5".into());
+            lib.store(&i).unwrap();
+        }
+
+        // Reimport: the album isn't a duplicate of itself (no prompt, so no
+        // skip), and the rows are replaced rather than added.
+        let mut o = opts(&cfg);
+        o.set_fields = vec![("mood".into(), "$mood and bright".into())];
+        let mut imp = Importer::new(&cfg, &lib, o, &[]).unwrap();
+        imp.run(std::slice::from_ref(&dir)).unwrap();
+        assert_eq!(
+            (imp.stats.skipped, imp.stats.albums, imp.stats.items),
+            (0, 1, 2)
+        );
+        let albums = lib.all_albums().unwrap();
+        assert_eq!(albums.len(), 1);
+        let items = all_items(&lib);
+        assert_eq!(items.len(), 2);
+        let a = &albums[0];
+        assert_eq!(a.float("added"), 1000.0);
+        assert_eq!(a.path_field("artpath"), Path::new("/art/cover.jpg"));
+        // set_fields runs after preservation, so it sees (and wins over) it.
+        assert_eq!(
+            a.flex.get("mood").map(String::as_str),
+            Some("sunny and bright")
+        );
+        for i in &items {
+            assert_eq!(i.int("album_id"), a.id.unwrap());
+            assert_eq!(i.float("added"), 2000.0);
+            assert_eq!(i.flex.get("rating").map(String::as_str), Some("5"));
+        }
+    }
+
+    #[test]
+    fn preserve_flex_lets_fresh_fields_from_the_new_match_win() {
+        // `data_source` is a fixed field here; the plugin IDs are flexible.
+        let mut old = Item::new_item();
+        old.flex.insert("spotify_album_id".into(), "old".into());
+        old.flex.insert("mood".into(), "sunny".into());
+        let mut new = Item::new_item();
+        new.flex.insert("spotify_album_id".into(), "new".into());
+        preserve_flex(&mut new, &old, REIMPORT_FRESH_FIELDS_ITEM);
+        assert_eq!(new.flex["spotify_album_id"], "new");
+        assert_eq!(new.flex["mood"], "sunny");
+        // A fresh field the new record leaves empty keeps the old value.
+        let mut empty = Item::new_item();
+        preserve_flex(&mut empty, &old, REIMPORT_FRESH_FIELDS_ITEM);
+        assert_eq!(empty.flex["spotify_album_id"], "old");
+    }
+
+    #[test]
+    fn copy_mode_reimport_moves_library_files_instead_of_copying() {
+        let (d, cfg, lib, src) = setup(&[]);
+        let Some(dir) = album_dir(&src, "a", "Album") else {
+            return;
+        };
+        let copy = |o: &mut ImportOptions| o.op = FileOp::Copy;
+        import_dir(&cfg, &lib, &dir, copy);
+        let libdir = d.path().join("lib");
+        let count = || walkdir_files(&libdir);
+        assert_eq!(count(), 2);
+        // Retag in place with a new path format: files move, never double.
+        let mut cfg2 = cfg.clone();
+        cfg2.set(
+            "paths",
+            serde_yaml::from_str("default: moved/$album/$track").unwrap(),
+        );
+        let s = import_dir(&cfg2, &lib, &libdir, copy);
+        assert_eq!((s.skipped, s.albums, s.items), (0, 1, 2));
+        assert_eq!(count(), 2);
+        assert_eq!(all_items(&lib).len(), 2);
+        for i in all_items(&lib) {
+            assert!(
+                i.path().starts_with(libdir.join("moved/Album")),
+                "{}",
+                i.path().display()
+            );
+            assert!(i.path().is_file());
+        }
+        // The old album folder was pruned.
+        assert!(!libdir.join("Artist").exists());
+    }
+
+    fn walkdir_files(dir: &Path) -> usize {
+        let mut n = 0;
+        if let Ok(rd) = std::fs::read_dir(dir) {
+            for e in rd.flatten() {
+                let p = e.path();
+                n += if p.is_dir() { walkdir_files(&p) } else { 1 };
+            }
+        }
+        n
+    }
+
+    #[test]
+    fn library_query_reimports_only_matching_albums() {
+        let (_d, cfg, lib, src) = setup(&[]);
+        let (Some(a), Some(b)) = (
+            album_dir(&src, "a", "First"),
+            album_dir(&src, "b", "Second"),
+        ) else {
+            return;
+        };
+        import_dir(&cfg, &lib, &a, |_| {});
+        import_dir(&cfg, &lib, &b, |_| {});
+        let mut o = opts(&cfg);
+        o.set_fields = vec![("comments".into(), "retagged".into())];
+        // What `beet import -L` sets up.
+        o.resume = Resume::No;
+        o.incremental = false;
+        let mut imp = Importer::new(&cfg, &lib, o, &[]).unwrap();
+        imp.run_library(&["album:First".to_string()]).unwrap();
+        assert_eq!(
+            (imp.stats.albums, imp.stats.items, imp.stats.skipped),
+            (1, 2, 0)
+        );
+        assert_eq!(lib.all_albums().unwrap().len(), 2);
+        let items = all_items(&lib);
+        assert_eq!(items.len(), 4);
+        for i in items {
+            let want = if i.str("album") == "First" {
+                "retagged"
+            } else {
+                ""
+            };
+            assert_eq!(i.str("comments"), want, "{}", i.str("album"));
+        }
+        // Nothing recorded for a query import.
+        assert_eq!(ImportState::load(&cfg.state_path()).history.len(), 0);
+        assert!(ImportState::load(&cfg.state_path()).progress.is_empty());
+    }
+
+    #[test]
+    fn from_scratch_clears_tags_not_set_by_the_match() {
+        let mut item = Item::new_item();
+        item.set_str("genre", "Polka");
+        item.set_str("comments", "old rip");
+        item.set_int("year", 1999);
+        item.flex.insert("rating".into(), "5".into());
+        item.set_path(PathBuf::from("/x/1.mp3"));
+        clear_tags(&mut item);
+        let t = crate::mb::TrackInfo {
+            title: "New Title".into(),
+            artist: "New Artist".into(),
+            ..Default::default()
+        };
+        autotag::apply_track(&mut item, &t);
+        assert_eq!(item.str("title"), "New Title");
+        assert_eq!(item.str("genre"), "");
+        assert_eq!(item.str("comments"), "");
+        assert_eq!(item.int("year"), 0);
+        // Only tag fields go: flexible attributes and the path stay.
+        assert_eq!(item.flex["rating"], "5");
+        assert_eq!(item.path(), Path::new("/x/1.mp3"));
+    }
+
+    #[test]
+    fn merge_combines_new_items_with_the_duplicate_album() {
+        let (_d, mut cfg, lib, src) = setup(&[]);
+        let (Some(a), Some(b)) = (album_dir(&src, "a", "Same"), album_dir(&src, "b", "Same"))
+        else {
+            return;
+        };
+        import_dir(&cfg, &lib, &a, |_| {});
+        for mut i in all_items(&lib) {
+            i.set("added", Value::Float(3000.0));
+            lib.store(&i).unwrap();
+        }
+        cfg.set("import.duplicate_action", "merge".into());
+        let log = src.join("import.log");
+        let s = import_dir(&cfg, &lib, &b, |o| o.log = Some(log.clone()));
+        assert_eq!((s.skipped, s.albums, s.items), (0, 1, 4));
+        let albums = lib.all_albums().unwrap();
+        assert_eq!(
+            albums.len(),
+            1,
+            "the old album was replaced by the merged one"
+        );
+        let items = all_items(&lib);
+        assert_eq!(items.len(), 4);
+        for i in &items {
+            assert_eq!(i.int("album_id"), albums[0].id.unwrap());
+            // The old album's items keep their `added`.
+            assert_eq!(
+                i.float("added") == 3000.0,
+                i.path().starts_with(&a),
+                "{}",
+                i.path().display()
+            );
+        }
+        let text = std::fs::read_to_string(&log).unwrap();
+        assert!(
+            text.contains(&format!("duplicate-keep {}", b.display())),
+            "{text}"
+        );
+    }
+
+    #[test]
+    fn as_is_albums_get_a_plurality_albumartist_or_va() {
+        let mk = |albumartist: &str, artist: &str| tagged(artist, albumartist, "X", 1);
+        // Mixed old/new items (as after a merge) align to one albumartist.
+        let mut items = vec![mk("A", "A"), mk("A", "A"), mk("", "A")];
+        align_asis(&mut items, "Various Artists");
+        assert!(
+            items
+                .iter()
+                .all(|i| i.str("albumartist") == "A" && !i.bool("comp"))
+        );
+        // Ties go to the first seen.
+        let mut items = vec![mk("", "B"), mk("", "C"), mk("", "C"), mk("", "B")];
+        align_asis(&mut items, "VA");
+        assert!(items.iter().all(|i| i.str("albumartist") == "B"));
+        // Five different artists: below the 25% threshold, so VA.
+        let mut items: Vec<Item> = ["P", "Q", "R", "S", "T"]
+            .iter()
+            .map(|a| mk("", a))
+            .collect();
+        align_asis(&mut items, "VA");
+        assert!(
+            items
+                .iter()
+                .all(|i| i.str("albumartist") == "VA" && i.bool("comp"))
+        );
     }
 }

@@ -78,6 +78,8 @@ pub fn run(cli: Cli) -> Result<()> {
             noincremental_skip_later,
             resume,
             noresume,
+            library,
+            from_scratch,
             paths,
         } => {
             let mut opts = ImportOptions::from_config(&cfg);
@@ -136,6 +138,14 @@ pub fn run(cli: Cli) -> Result<()> {
                 opts.set_fields.retain(|(f, _)| f != k);
                 opts.set_fields.push((k.to_string(), v.to_string()));
             }
+            opts.from_scratch |= from_scratch;
+            if library {
+                // As beets: a query import never resumes or records history.
+                opts.resume = Resume::No;
+                opts.incremental = false;
+            } else if paths.is_empty() {
+                bail!("no path specified");
+            }
             if incremental_skip_later {
                 opts.incremental_skip_later = true;
             }
@@ -159,7 +169,15 @@ pub fn run(cli: Cli) -> Result<()> {
             }
             let pretend = opts.pretend;
             let mut imp = Importer::new(&cfg, &lib, opts, &plugins)?;
-            imp.run(&paths)?;
+            if library {
+                let query: Vec<String> = paths
+                    .iter()
+                    .map(|p| p.to_string_lossy().into_owned())
+                    .collect();
+                imp.run_library(&query)?;
+            } else {
+                imp.run(&paths)?;
+            }
             if pretend {
                 return Ok(());
             }
@@ -683,7 +701,8 @@ fn update(cfg: &Config, lib: &Library, pretend: bool, mv: bool, q: &[String]) ->
 }
 
 /// Keep an album's art next to its items after they move.
-fn sync_art(cfg: &Config, lib: &Library, album_id: i64) -> Result<()> {
+/// Move an album's art next to its items, if it lives elsewhere.
+pub(crate) fn sync_art(cfg: &Config, lib: &Library, album_id: i64) -> Result<()> {
     let Some(mut album) = lib.get_album(album_id)? else {
         return Ok(());
     };

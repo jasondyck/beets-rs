@@ -19,6 +19,7 @@ import:
     timid: no
     log:
     detail: no
+    from_scratch: no
     flat: no
     pretend: no
     set_fields: {}
