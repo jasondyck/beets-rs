@@ -128,6 +128,8 @@ pub fn run(cli: Cli) -> Result<()> {
             paths,
         } => {
             let mut opts = ImportOptions::from_config(&cfg);
+            // Checked up front: beets fails on a bad value at the first prompt.
+            crate::importer::default_action(&cfg)?;
             // As beets: -c/-C and -m/-M override `copy` and `move`
             // separately, -c also turns move off, and move wins over copy.
             let mut do_copy = cfg.bool("import.copy");

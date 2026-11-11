@@ -48,6 +48,8 @@ pub struct ImportOptions {
     /// `--flat`: each import path is one album, however deep its files are.
     pub flat: bool,
     pub none_rec_action: NoneRecAction,
+    /// `import.default_action`: the confirm prompt's default letter, if any.
+    pub default_action: Option<char>,
     /// `import.detail`: list every track in a match, not just changed ones.
     pub detail: bool,
     /// `import.from_scratch`: clear existing tags before applying a match.
@@ -157,6 +159,20 @@ pub enum NoneRecAction {
     Skip,
 }
 
+/// `import.default_action` (apply, skip, asis or none) as the letter the
+/// confirm prompt defaults to; an unknown value is an error, as in beets.
+pub fn default_action(cfg: &Config) -> Result<Option<char>> {
+    match cfg.str("import.default_action").as_str() {
+        "apply" => Ok(Some('a')),
+        "skip" => Ok(Some('s')),
+        "asis" => Ok(Some('u')),
+        "none" => Ok(None),
+        v => bail!(
+            "import.default_action: must be one of ['apply', 'skip', 'asis', 'none'], not '{v}'"
+        ),
+    }
+}
+
 /// Split a `--set` argument into field and value, as beets' `_store_dict`.
 pub fn parse_set_field(kv: &str) -> Result<(&str, &str)> {
     match kv.split_once('=') {
@@ -232,6 +248,7 @@ impl ImportOptions {
                 "skip" => NoneRecAction::Skip,
                 _ => NoneRecAction::Ask,
             },
+            default_action: default_action(cfg).unwrap_or(Some('a')),
             detail: cfg.bool("import.detail"),
             from_scratch: cfg.bool("import.from_scratch"),
         }
@@ -331,19 +348,169 @@ pub struct Importer<'a> {
     walk: WalkFilter,
 }
 
-static DISC_DIR: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"(?i)^(cd|dis[ck]|side|part)[\s._-]*[0-9a-z]{1,3}\b").unwrap());
+/// beets' `_MULTIDISC_MARKERS`, as `MULTIDISC_PATTERNS`: a disc marker,
+/// optional punctuation, then a digit; group 1 is everything before it.
+static MULTIDISC_PATTERNS: LazyLock<Vec<Regex>> = LazyLock::new(|| {
+    [r"dis[ck]", r"cd", r"cassette", r"digital\s+media", r"vinyl"]
+        .iter()
+        .map(|m| Regex::new(&format!(r"(?i)^(.*{m}[\W_]*)\d")).unwrap())
+        .collect()
+});
 
-/// Group audio files into album-sized chunks: one per directory, merging
-/// "CD1"/"Disc 2" style subdirectories into their parent. Each group comes
-/// with its directory (or the file itself, for a single-file import), which
-/// identifies it in the import state. Directory walks skip what `filter`
-/// says to (`ignore`, `ignore_hidden`); a file given directly is never
-/// skipped.
-pub fn group_files(root: &Path, filter: &WalkFilter) -> Result<Vec<(PathBuf, Vec<PathBuf>)>> {
+/// beets' `get_numbered_variant_pattern`: the same prefix, then a digit.
+fn numbered_variant(prefix: &str) -> Regex {
+    Regex::new(&format!("(?i)^{}\\d", regex::escape(prefix))).unwrap()
+}
+
+/// beets' `sorted_walk`: depth-first, each directory before its
+/// subdirectories, names sorted case-insensitively, entries `filter` skips
+/// left out (the root itself never is). Yields (directory, subdirectory
+/// names, files). Symlinked directories are followed, once each.
+fn sorted_walk(root: &Path, filter: &WalkFilter) -> Vec<(PathBuf, Vec<String>, Vec<PathBuf>)> {
+    fn walk(
+        dir: &Path,
+        filter: &WalkFilter,
+        seen: &mut HashSet<PathBuf>,
+        out: &mut Vec<(PathBuf, Vec<String>, Vec<PathBuf>)>,
+    ) {
+        if let Ok(real) = std::fs::canonicalize(dir)
+            && !seen.insert(real)
+        {
+            return;
+        }
+        let entries = match std::fs::read_dir(dir) {
+            Ok(e) => e,
+            Err(e) => {
+                eprintln!("warning: could not list directory {}: {e}", dir.display());
+                return;
+            }
+        };
+        let mut dirs = vec![];
+        let mut files = vec![];
+        for e in entries.flatten() {
+            let name = e.file_name();
+            if filter.skips(&name) {
+                continue;
+            }
+            let name = name.to_string_lossy().into_owned();
+            if e.path().is_dir() {
+                dirs.push(name);
+            } else {
+                files.push(name);
+            }
+        }
+        let key = |n: &String| (n.to_lowercase(), n.clone());
+        dirs.sort_by_key(key);
+        files.sort_by_key(key);
+        let files = files.iter().map(|f| dir.join(f)).collect();
+        out.push((dir.to_path_buf(), dirs.clone(), files));
+        for d in dirs {
+            walk(&dir.join(d), filter, seen, out);
+        }
+    }
+    let mut out = vec![];
+    walk(root, filter, &mut HashSet::new(), &mut out);
+    out
+}
+
+/// beets' `albums_in_dir`: (directories, files) for each directory holding
+/// files, collapsing multi-disc albums: a directory with no files of its
+/// own whose subdirectories all look like discs of one sequence ("CD 1",
+/// "cd 3 - bonus"), or a run of directories named like numbered discs
+/// ("Album Disc 1", "Album Disc 2", "Album (CD 1)"); a collapsed album's
+/// directories include every subdirectory walked inside it.
+fn albums_in_dir(root: &Path, filter: &WalkFilter) -> Vec<(Vec<PathBuf>, Vec<PathBuf>)> {
+    let mut out = vec![];
+    let mut collapse_paths: Vec<PathBuf> = vec![];
+    let mut collapse_items: Vec<PathBuf> = vec![];
+    let mut collapse_pat: Option<Regex> = None;
+    let base = |p: &Path| {
+        p.file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default()
+    };
+    for (dir, dirs, items) in sorted_walk(root, filter) {
+        if !collapse_paths.is_empty() {
+            let inside = collapse_paths
+                .iter()
+                .any(|p| dir != *p && dir.starts_with(p));
+            if inside
+                || collapse_pat
+                    .as_ref()
+                    .is_some_and(|r| r.is_match(&base(&dir)))
+            {
+                collapse_paths.push(dir);
+                collapse_items.extend(items);
+                continue;
+            }
+            if !collapse_items.is_empty() {
+                out.push((
+                    std::mem::take(&mut collapse_paths),
+                    std::mem::take(&mut collapse_items),
+                ));
+            }
+            collapse_pat = None;
+            collapse_paths.clear();
+            collapse_items.clear();
+        }
+
+        let mut start = false;
+        for marker in MULTIDISC_PATTERNS.iter() {
+            if !dirs.is_empty() && items.is_empty() {
+                // A nested multi-disc album: the first subdirectory sets the
+                // pattern the others must follow.
+                start = true;
+                let mut sub_pat: Option<Regex> = None;
+                for sub in &dirs {
+                    match &sub_pat {
+                        None => match marker.captures(sub) {
+                            Some(c) => sub_pat = Some(numbered_variant(&c[1])),
+                            None => {
+                                start = false;
+                                break;
+                            }
+                        },
+                        Some(r) if !r.is_match(sub) => {
+                            start = false;
+                            break;
+                        }
+                        Some(_) => {}
+                    }
+                }
+                if start {
+                    break;
+                }
+            } else if let Some(c) = marker.captures(&base(&dir)) {
+                // The first directory of a flattened multi-disc album.
+                start = true;
+                collapse_pat = Some(numbered_variant(&c[1]));
+                break;
+            }
+        }
+        if start {
+            collapse_paths = vec![dir];
+            collapse_items = items;
+            continue;
+        }
+        if !items.is_empty() {
+            out.push((vec![dir], items));
+        }
+    }
+    if !collapse_paths.is_empty() && !collapse_items.is_empty() {
+        out.push((collapse_paths, collapse_items));
+    }
+    out
+}
+
+/// The import tasks under `root`, as beets' `ImportTaskFactory.paths`: each
+/// with its directories (or the file itself, for a single-file import) and
+/// its audio files; groups with no audio are dropped, as beets drops tasks
+/// with no readable items. Directory walks skip what `filter` says to
+/// (`ignore`, `ignore_hidden`); a file given directly is never skipped.
+pub fn group_files(root: &Path, filter: &WalkFilter) -> Result<Vec<(Vec<PathBuf>, Vec<PathBuf>)>> {
     if root.is_file() {
         return Ok(if media::is_audio(root) {
-            vec![(root.to_path_buf(), vec![root.to_path_buf()])]
+            vec![(vec![root.to_path_buf()], vec![root.to_path_buf()])]
         } else {
             vec![]
         });
@@ -351,73 +518,13 @@ pub fn group_files(root: &Path, filter: &WalkFilter) -> Result<Vec<(PathBuf, Vec
     if !root.is_dir() {
         bail!("no such file or directory: {}", root.display());
     }
-    let mut by_dir: BTreeMap<PathBuf, Vec<PathBuf>> = BTreeMap::new();
-    for entry in walkdir::WalkDir::new(root)
-        .follow_links(true)
-        .sort_by_file_name()
+    Ok(albums_in_dir(root, filter)
         .into_iter()
-        .filter_entry(|e| e.depth() == 0 || !filter.skips(e.file_name()))
-    {
-        let entry = match entry {
-            Ok(e) => e,
-            Err(e) => {
-                eprintln!("warning: {e}");
-                continue;
-            }
-        };
-        if entry.file_type().is_file() && media::is_audio(entry.path()) {
-            let dir = entry.path().parent().unwrap_or(root).to_path_buf();
-            by_dir
-                .entry(dir)
-                .or_default()
-                .push(entry.path().to_path_buf());
-        }
-    }
-    // Merge disc subdirectories into the parent when the parent has no audio
-    // of its own and every audio subdirectory looks like a disc.
-    let mut groups: BTreeMap<PathBuf, Vec<PathBuf>> = BTreeMap::new();
-    for (dir, files) in &by_dir {
-        let key = match dir.parent() {
-            Some(parent) if dir != root && !by_dir.contains_key(parent) => {
-                let siblings: Vec<&PathBuf> = by_dir
-                    .keys()
-                    .filter(|d| d.parent() == Some(parent))
-                    .collect();
-                let all_discs = siblings.iter().all(|d| {
-                    d.file_name()
-                        .and_then(|n| n.to_str())
-                        .is_some_and(|n| DISC_DIR.is_match(n))
-                });
-                if all_discs && siblings.len() > 1 {
-                    parent.to_path_buf()
-                } else {
-                    dir.clone()
-                }
-            }
-            _ => dir.clone(),
-        };
-        groups.entry(key).or_default().extend(files.iter().cloned());
-    }
-    Ok(groups.into_iter().collect())
-}
-
-/// The paths of the album task for the group `key` holding `files`, as
-/// beets' `albums_in_dir` yields them: the directory alone, or for discs
-/// merged into their parent, the parent followed by each disc directory.
-fn task_paths(key: &Path, files: &[PathBuf]) -> Vec<PathBuf> {
-    let mut paths = vec![key.to_path_buf()];
-    for f in files {
-        if let Some(d) = f.parent()
-            && d != key
-            && !paths.iter().any(|p| p == d)
-        {
-            paths.push(d.to_path_buf());
-        }
-    }
-    if key.is_file() {
-        paths.truncate(1);
-    }
-    paths
+        .filter_map(|(dirs, files)| {
+            let audio: Vec<PathBuf> = files.into_iter().filter(|f| media::is_audio(f)).collect();
+            (!audio.is_empty()).then_some((dirs, audio))
+        })
+        .collect())
 }
 
 impl<'a> Importer<'a> {
@@ -499,11 +606,15 @@ impl<'a> Importer<'a> {
                     .into_iter()
                     .flat_map(|(_, f)| f)
                     .collect();
-                vec![(p.clone(), files)]
+                vec![(vec![p.clone()], files)]
             } else {
                 group_files(&p, &self.walk)?
             };
-            for (key, group) in groups {
+            for (paths, group) in groups {
+                // The state (progress, history) keys a task by its first
+                // path: the album's directory, the parent of nested discs,
+                // or the first of a run of sibling disc directories.
+                let key = paths[0].clone();
                 if done.contains(&key) {
                     self.stats.already += 1;
                     continue;
@@ -531,7 +642,7 @@ impl<'a> Importer<'a> {
                     }
                     outcome
                 } else {
-                    self.import_album(&key, &group)?
+                    self.import_album(&paths, &group)?
                 };
                 if outcome == Outcome::Aborted {
                     // Progress so far stays recorded, so the import can resume.
@@ -720,26 +831,21 @@ impl<'a> Importer<'a> {
         self.log_line(&format!("{status} {}", paths.join("; ")));
     }
 
-    /// `key` is the album's directory (or the import path with `--flat`).
-    fn import_album(&mut self, key: &Path, files: &[PathBuf]) -> Result<Outcome> {
+    /// `paths`: the task's directories (the import path with `--flat`).
+    fn import_album(&mut self, paths: &[PathBuf], files: &[PathBuf]) -> Result<Outcome> {
         let items = self.read_items(files)?;
         if items.is_empty() {
             return Ok(Outcome::Done);
         }
-        let dir = if self.opts.flat && key.is_dir() {
-            key.to_path_buf()
+        let dir = if self.opts.flat && paths[0].is_dir() {
+            paths[0].clone()
         } else {
             files[0].parent().unwrap_or(Path::new("")).to_path_buf()
         };
         if self.opts.group_albums {
             self.import_groups(items, &dir)
         } else {
-            let paths = if self.opts.flat {
-                vec![key.to_path_buf()]
-            } else {
-                task_paths(key, files)
-            };
-            self.import_album_items(items, &dir, &paths)
+            self.import_album_items(items, &dir, paths)
         }
     }
 
@@ -874,8 +980,9 @@ impl<'a> Importer<'a> {
 
         // `fresh`: candidates just (re)fetched, so quiet/strong handling
         // applies. `focus`: the candidate shown for confirmation, with
-        // whether Apply is the default (beets requires an explicit choice
-        // for anything but the first); None shows the candidate list.
+        // whether the prompt may have a default (`default_action`): beets
+        // requires an explicit choice at low recommendations and for any
+        // candidate but the first. None shows the candidate list.
         let mut fresh = true;
         let mut focus: Option<(usize, bool)> = None;
         // As in beets, the summary judgment covers only the first lookup.
@@ -895,13 +1002,16 @@ impl<'a> Importer<'a> {
                     .then_some((0, rec > Recommendation::Low));
             }
 
-            let choice = if let Some((k, default_apply)) = focus {
+            let choice = if let Some((k, has_default)) = focus {
                 self.show_album_match(items, &cands[k]);
                 self.bell();
                 match ui::options(
                     &ALBUM_CONFIRM,
                     None,
-                    default_apply.then_some(Choice::Letter('a')),
+                    has_default
+                        .then_some(self.opts.default_action)
+                        .flatten()
+                        .map(Choice::Letter),
                 ) {
                     Some(Choice::Letter('a')) => {
                         return Ok(Decision::Apply(Box::new(cands.swap_remove(k))));
@@ -1590,14 +1700,17 @@ impl<'a> Importer<'a> {
                     .then_some((0, rec > Recommendation::Low));
             }
 
-            let choice = if let Some((k, default_apply)) = focus {
+            let choice = if let Some((k, has_default)) = focus {
                 disp.show_track_change(item, &cands[k]);
                 disp.flush();
                 self.bell();
                 match ui::options(
                     &ITEM_CONFIRM,
                     None,
-                    default_apply.then_some(Choice::Letter('a')),
+                    has_default
+                        .then_some(self.opts.default_action)
+                        .flatten()
+                        .map(Choice::Letter),
                 ) {
                     Some(Choice::Letter('a')) => {
                         return Ok(Decision::Apply(Box::new(cands.swap_remove(k))));
@@ -1698,24 +1811,179 @@ mod tests {
         let groups = group_files(d.path(), &WalkFilter::default()).unwrap();
         let sizes: Vec<usize> = groups.iter().map(|(_, g)| g.len()).collect();
         assert_eq!(sizes, vec![2, 2, 1, 1]);
-        let keys: Vec<PathBuf> = groups.iter().map(|(k, _)| k.clone()).collect();
-        assert_eq!(keys[1], d.path().join("B"));
-
         // The task's paths, shown in the import header: the parent then
         // each disc directory for a merged album, else the directory.
-        let (key, files) = &groups[1];
         let b = d.path().join("B");
-        assert_eq!(
-            task_paths(key, files),
-            vec![b.clone(), b.join("CD1"), b.join("CD2")]
-        );
-        let (key, files) = &groups[0];
-        assert_eq!(task_paths(key, files), vec![d.path().join("A")]);
+        assert_eq!(groups[1].0, vec![b.clone(), b.join("CD1"), b.join("CD2")]);
+        assert_eq!(groups[0].0, vec![d.path().join("A")]);
         let one = d.path().join("A/01.mp3");
         assert_eq!(
-            task_paths(&one, std::slice::from_ref(&one)),
-            vec![one.clone()]
+            group_files(&one, &WalkFilter::default()).unwrap(),
+            [(vec![one.clone()], vec![one])]
         );
+    }
+
+    fn touch(p: &Path) {
+        std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+        std::fs::write(p, b"").unwrap();
+    }
+
+    /// Upstream's `AlbumsInDirTest`.
+    #[test]
+    fn albums_in_dir_finds_each_album() {
+        let d = tempfile::tempdir().unwrap();
+        for f in [
+            "album1/album1song1.mp3",
+            "album1/album1song2.mp3",
+            "album2/album2song.mp3",
+            "more/album3/album3song.mp3",
+            "more/album4/album4song.mp3",
+        ] {
+            touch(&d.path().join(f));
+        }
+        let albums = group_files(d.path(), &WalkFilter::default()).unwrap();
+        let found: Vec<(String, usize)> = albums
+            .iter()
+            .map(|(_, f)| {
+                let name = f[0].file_name().unwrap().to_string_lossy();
+                (name[..6].to_string(), f.len())
+            })
+            .collect();
+        assert_eq!(
+            found,
+            [
+                ("album1".to_string(), 2),
+                ("album2".into(), 1),
+                ("album3".into(), 1),
+                ("album4".into(), 1)
+            ]
+        );
+    }
+
+    /// Upstream's `MultiDiscAlbumsInDirTest.create_music`: the directories
+    /// and, with `files`, a song in each but the two nested-album roots.
+    fn multidisc_tree(base: &Path, files: bool, name: &str, alt: &str) -> Vec<PathBuf> {
+        let dirs: Vec<PathBuf> = [
+            // Nested, several subdirectories; a false-positive marker in
+            // the root and a subtitle for disc 3.
+            "ABCD1234".to_string(),
+            "ABCD1234/cd 1".into(),
+            "ABCD1234/cd 3 - bonus".into(),
+            // Nested, one subdirectory; punctuation before the number.
+            "album".into(),
+            "album/cd _ 1".into(),
+            // Flattened, with a case typo; false positive in the parent.
+            "artist [CD5]".into(),
+            format!("artist [CD5]/{name} disc 1"),
+            format!("artist [CD5]/{alt} disc 2"),
+            // A single-disc album sorted between the discs.
+            format!("artist [CD5]/{name} S"),
+        ]
+        .iter()
+        .map(|d| base.join(d))
+        .collect();
+        for d in &dirs {
+            std::fs::create_dir_all(d).unwrap();
+        }
+        if files {
+            for (i, d) in [0, 1, 2, 4, 6, 7, 8].iter().enumerate() {
+                touch(&dirs[*d].join(format!("song{i}.mp3")));
+            }
+        }
+        dirs
+    }
+
+    #[test]
+    fn albums_in_dir_coalesces_multidisc_albums_as_beets() {
+        for (name, alt) in [("CAT", "CAt"), ("C\u{c1}T", "C\u{c1}t")] {
+            let d = tempfile::tempdir().unwrap();
+            let dirs = multidisc_tree(d.path(), true, name, alt);
+            let albums = group_files(d.path(), &WalkFilter::default()).unwrap();
+            let got: Vec<(Vec<PathBuf>, usize)> =
+                albums.into_iter().map(|(p, f)| (p, f.len())).collect();
+            assert_eq!(
+                got,
+                [
+                    (dirs[0..3].to_vec(), 3),
+                    (dirs[3..5].to_vec(), 1),
+                    (dirs[6..8].to_vec(), 2),
+                    (dirs[8..].to_vec(), 1),
+                ],
+                "{name}"
+            );
+        }
+        // No empty albums.
+        let d = tempfile::tempdir().unwrap();
+        multidisc_tree(d.path(), false, "CAT", "CAt");
+        assert!(
+            group_files(d.path(), &WalkFilter::default())
+                .unwrap()
+                .is_empty()
+        );
+    }
+
+    /// Upstream's `test_coalesce_markers`, plus "Album (CD 1)" siblings and
+    /// a subfolder without audio, which still counts as one of the paths.
+    #[test]
+    fn albums_in_dir_coalesces_every_marker() {
+        for (marker, s1, s2) in [
+            ("Disc", " 1", " 02"),
+            ("disk 757", " 1", " 02"),
+            ("CD", "01", "02"),
+            ("disc", "_1", "_2"),
+            ("cAsSeTtE", " 1", " 02"),
+            ("Digital   Media", " 1", " 02"),
+            ("vinyl", " 1", " 02"),
+            ("12 vinyl", " 1", " 02"),
+        ] {
+            let d = tempfile::tempdir().unwrap();
+            let album = d.path().join("Album Name");
+            let discs: Vec<PathBuf> = [s1, s2]
+                .iter()
+                .map(|s| album.join(format!("{marker}{s}")))
+                .collect();
+            for disc in &discs {
+                touch(&disc.join("song.mp3"));
+            }
+            let albums = group_files(d.path(), &WalkFilter::default()).unwrap();
+            assert_eq!(albums.len(), 1, "{marker}");
+            for disc in &discs {
+                assert!(albums[0].0.contains(disc), "{marker}");
+            }
+            assert_eq!(albums[0].1.len(), 2);
+        }
+
+        let d = tempfile::tempdir().unwrap();
+        let p = |s: &str| d.path().join(s);
+        touch(&p("Album (CD 1)/01.mp3"));
+        touch(&p("Album (CD 1)/Scans/front.jpg"));
+        touch(&p("Album (CD 2)/01.mp3"));
+        touch(&p("Other/01.mp3"));
+        let albums = group_files(d.path(), &WalkFilter::default()).unwrap();
+        assert_eq!(
+            albums,
+            [
+                (
+                    vec![
+                        p("Album (CD 1)"),
+                        p("Album (CD 1)/Scans"),
+                        p("Album (CD 2)")
+                    ],
+                    vec![p("Album (CD 1)/01.mp3"), p("Album (CD 2)/01.mp3")]
+                ),
+                (vec![p("Other")], vec![p("Other/01.mp3")]),
+            ]
+        );
+        // As in beets, a parent holding a file of its own isn't a nested
+        // multi-disc root, but its disc folders still collapse as siblings.
+        let d = tempfile::tempdir().unwrap();
+        let p = |s: &str| d.path().join(s);
+        touch(&p("A/cover.jpg"));
+        touch(&p("A/Disc 1/01.mp3"));
+        touch(&p("A/Disc 2/01.mp3"));
+        let albums = group_files(d.path(), &WalkFilter::default()).unwrap();
+        assert_eq!(albums.len(), 1);
+        assert_eq!(albums[0].0, [p("A/Disc 1"), p("A/Disc 2")]);
     }
 
     #[test]
@@ -1752,7 +2020,7 @@ mod tests {
         // A hidden file given directly is imported.
         let direct = d.path().join("A/._01.mp3");
         let g = group_files(&direct, &WalkFilter::from_config(&cfg)).unwrap();
-        assert_eq!(g, [(direct.clone(), vec![direct])]);
+        assert_eq!(g, [(vec![direct.clone()], vec![direct])]);
         // The import root itself is never filtered.
         let g = group_files(&d.path().join(".Trash"), &WalkFilter::from_config(&cfg)).unwrap();
         assert_eq!(g.len(), 1);
@@ -2031,6 +2299,23 @@ mod tests {
         // The state key is still the directory, not the tag groups.
         let st = ImportState::load(&cfg.state_path());
         assert_eq!(st.history.iter().collect::<Vec<_>>(), [&mixed]);
+    }
+
+    #[test]
+    fn default_action_is_the_confirm_prompts_default_letter() {
+        let mut cfg = Config::defaults();
+        assert_eq!(default_action(&cfg).unwrap(), Some('a'));
+        for (v, want) in [("skip", Some('s')), ("asis", Some('u')), ("none", None)] {
+            cfg.set("import.default_action", v.into());
+            assert_eq!(default_action(&cfg).unwrap(), want);
+            assert_eq!(ImportOptions::from_config(&cfg).default_action, want);
+        }
+        cfg.set("import.default_action", "later".into());
+        let e = default_action(&cfg).unwrap_err().to_string();
+        assert!(
+            e.starts_with("import.default_action: must be one of"),
+            "{e}"
+        );
     }
 
     #[test]

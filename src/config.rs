@@ -24,6 +24,7 @@ import:
     quiet: no
     quiet_fallback: skip
     none_rec_action: ask
+    default_action: apply
     timid: no
     log:
     detail: no
