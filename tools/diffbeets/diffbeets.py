@@ -45,6 +45,7 @@ from cases import (  # noqa: E402
     EXPECTED,
     EXTRA_CONFIGS,
     IMPORTS,
+    LAME_CORPUS,
     MODIFIES,
     TAG_TEMPLATE,
     TAG_WRITES,
@@ -59,6 +60,7 @@ from cases import (  # noqa: E402
 FORMATS = {
     "mp3": ["-ar", "44100", "-ac", "2", "-c:a", "libmp3lame", "-b:a", "128k"],
     "mp3vbr": ["-ar", "44100", "-ac", "1", "-c:a", "libmp3lame", "-q:a", "4"],
+    "mp3abr": ["-ar", "44100", "-ac", "2", "-c:a", "libmp3lame", "-abr", "1", "-b:a", "96k"],
     "mp3noxing": ["-ar", "22050", "-ac", "1", "-c:a", "libmp3lame", "-b:a", "32k",
                   "-write_xing", "0"],
     "flac": ["-ar", "48000", "-ac", "2", "-c:a", "flac", "-sample_fmt", "s16"],
@@ -89,9 +91,24 @@ def ffmpeg(path, fmt, tags):
     subprocess.run(cmd, check=True)
 
 
+def lame(path, opts, tags):
+    """An MP3 encoded by the `lame` tool (a real LAME header, which ffmpeg
+    doesn't write), with `title`/`artist` tags."""
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    wav = path + ".wav"
+    subprocess.run(["ffmpeg", "-nostdin", "-loglevel", "error", "-y", "-f", "lavfi",
+                    "-i", "sine=frequency=440:duration=2.3", "-ac", "2", wav], check=True)
+    subprocess.run(["lame", "--quiet", *opts, "--tt", tags["title"], "--ta", tags["artist"],
+                    wav, path], check=True)
+    os.remove(wav)
+
+
 def build_corpus(src):
     for rel, fmt, tags in CORPUS:
         ffmpeg(os.path.join(src, rel), fmt, tags)
+    if shutil.which("lame"):
+        for rel, opts, tags in LAME_CORPUS:
+            lame(os.path.join(src, rel), opts, tags)
 
 
 # ---------------------------------------------------------------------------

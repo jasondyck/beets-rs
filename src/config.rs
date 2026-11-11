@@ -8,6 +8,7 @@ pub const DEFAULT_CONFIG: &str = r#"
 directory: ~/Music
 library: library.db
 statefile: state.json
+create_backup_before_migrations: yes
 
 clutter: ["Thumbs.DB", ".DS_Store"]
 ignore: [".*", "*~", "System Volume Information", "lost+found"]

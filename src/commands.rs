@@ -72,7 +72,6 @@ pub fn run(cli: Cli) -> Result<()> {
     match &cmd {
         Cmd::Help { command } => return help(command.as_deref()),
         Cmd::Version => return version(&cfg),
-        Cmd::Fields => return fields(),
         Cmd::Config {
             paths,
             defaults,
@@ -96,7 +95,10 @@ pub fn run(cli: Cli) -> Result<()> {
         _ => {}
     }
 
-    let lib = Library::open(&cfg.library_path())?;
+    let lib = Library::open_with(
+        &cfg.library_path(),
+        cfg.bool("create_backup_before_migrations"),
+    )?;
     debug!(
         "library database: {}\nlibrary directory: {}",
         cfg.library_path().display(),
@@ -356,7 +358,8 @@ pub fn run(cli: Cli) -> Result<()> {
             force,
             query,
         } => lyrics(&cfg, &lib, print, force, &query),
-        Cmd::Fields | Cmd::Config { .. } | Cmd::Version | Cmd::Help { .. } => unreachable!(),
+        Cmd::Fields => fields(&lib),
+        Cmd::Config { .. } | Cmd::Version | Cmd::Help { .. } => unreachable!(),
     }
 }
 
@@ -1947,19 +1950,41 @@ mod stats_tests {
     }
 }
 
-fn fields() -> Result<()> {
-    println!("Item fields:");
-    println!("  id");
-    for (n, _) in ITEM_FIELDS {
-        println!("  {n}");
-    }
-    println!("  singleton");
-    println!("\nAlbum fields:");
-    println!("  id");
-    for (n, _) in ALBUM_FIELDS {
-        println!("  {n}");
+fn fields(lib: &Library) -> Result<()> {
+    for line in fields_lines(lib)? {
+        println!("{line}");
     }
     Ok(())
+}
+
+/// beets' `fields_func`: each model's fixed and computed fields (sorted),
+/// then the flexible attributes the library holds (in the order SQLite's
+/// `SELECT DISTINCT` gives them). No loaded plugin adds template fields.
+fn fields_lines(lib: &Library) -> Result<Vec<String>> {
+    // beets 2.14 keeps `data_source` as a flexible attribute.
+    let names = |fields: &[(&str, FieldType)], computed: &[&'static str]| {
+        let mut v: Vec<&str> = fields
+            .iter()
+            .map(|(n, _)| *n)
+            .filter(|n| *n != "data_source")
+            .chain(std::iter::once("id"))
+            .chain(computed.iter().copied())
+            .collect();
+        v.sort_unstable();
+        v.into_iter().map(|n| format!("  {n}")).collect::<Vec<_>>()
+    };
+    let mut out = vec!["Item fields:".to_string()];
+    out.extend(names(
+        ITEM_FIELDS,
+        &["singleton", "filesize", "has_cover_art"],
+    ));
+    out.push("Album fields:".into());
+    out.extend(names(ALBUM_FIELDS, &["path", "albumtotal"]));
+    for (title, kind) in [("Item", Kind::Item), ("Album", Kind::Album)] {
+        out.push(format!("{title} flexible attributes:"));
+        out.extend(lib.flex_keys(kind)?.into_iter().map(|k| format!("  {k}")));
+    }
+    Ok(out)
 }
 
 #[cfg(test)]
@@ -2034,6 +2059,48 @@ mod tests {
                 ("^artist", None, "z"),
             ]
         );
+    }
+
+    /// beets' `fields`: sorted fixed and computed fields per model, then the
+    /// library's flexible attributes (`data_source` is one in beets 2.14).
+    #[test]
+    fn fields_as_beets() {
+        let lib = Library::in_memory().unwrap();
+        let mut it = Record::new_item();
+        it.flex.insert("mood".into(), "x".into());
+        it.set_str("data_source", "MusicBrainz");
+        lib.add(&mut it).unwrap();
+        let lines = fields_lines(&lib).unwrap();
+        let at = |s: &str| lines.iter().position(|l| l == s).unwrap();
+        let items = &lines[1..at("Album fields:")];
+        let mut sorted = items.to_vec();
+        sorted.sort();
+        assert_eq!(items, sorted.as_slice());
+        for f in [
+            "  id",
+            "  singleton",
+            "  filesize",
+            "  has_cover_art",
+            "  genres",
+        ] {
+            assert!(items.iter().any(|l| l == f), "{f}");
+        }
+        assert!(
+            !lines[..at("Item flexible attributes:")]
+                .iter()
+                .any(|l| l == "  data_source")
+        );
+        assert_eq!(
+            &lines[at("Item flexible attributes:")..],
+            [
+                "Item flexible attributes:",
+                "  mood",
+                "  data_source",
+                "Album flexible attributes:"
+            ]
+        );
+        let albums = &lines[at("Album fields:") + 1..at("Item flexible attributes:")];
+        assert!(albums.iter().any(|l| l == "  albumtotal") && albums.iter().any(|l| l == "  path"));
     }
 
     #[test]

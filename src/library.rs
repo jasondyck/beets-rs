@@ -113,7 +113,7 @@ const MULTI_VALUE_MIGRATIONS: &[(&str, &str, &str, &[&str])] = &[
 /// Backfill list fields from the old single-valued columns (a library
 /// from before beets-rs had them), once per table, recorded in beets'
 /// `migrations` table. Values with a "; ", ", " or " / " are split there.
-fn migrate_multi_value_fields(conn: &Connection) -> Result<()> {
+fn migrate_multi_value_fields(conn: &Connection, backup: Option<&Path>) -> Result<()> {
     conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS migrations (
             name TEXT NOT NULL,
@@ -148,6 +148,9 @@ fn migrate_multi_value_fields(conn: &Connection) -> Result<()> {
                     .filter(|(_, _, l)| l.as_deref().is_none_or(str::is_empty))
                     .collect();
                 if !todo.is_empty() {
+                    if let Some(db) = backup {
+                        backup_before_migration(conn, db, t, name)?;
+                    }
                     let mut migrated = total - todo.len();
                     println!("Migrating {new} for {total} {t}...");
                     for chunk in todo.chunks(1000) {
@@ -174,6 +177,28 @@ fn migrate_multi_value_fields(conn: &Connection) -> Result<()> {
     Ok(())
 }
 
+/// beets' `Migration._before_migration_backup`: a copy of the database at
+/// `<library>-before-<table>-<migration>.bak` (replacing an older one),
+/// made with SQLite so it's consistent, and beets' message.
+fn backup_before_migration(conn: &Connection, db: &Path, table: &str, name: &str) -> Result<()> {
+    let mut dest = db.as_os_str().to_owned();
+    dest.push(format!("-before-{table}-{name}.bak"));
+    let dest = PathBuf::from(dest);
+    // `VACUUM INTO` won't overwrite: write beside it, then rename over.
+    let mut tmp = dest.as_os_str().to_owned();
+    tmp.push(".tmp");
+    let tmp = PathBuf::from(tmp);
+    let _ = std::fs::remove_file(&tmp);
+    conn.execute("VACUUM INTO ?", [tmp.to_string_lossy()])
+        .with_context(|| format!("backing up the library to {}", dest.display()))?;
+    std::fs::rename(&tmp, &dest)?;
+    println!(
+        "Created database backup at: {}.",
+        crate::template::py_repr(&dest.to_string_lossy())
+    );
+    Ok(())
+}
+
 /// `MultiValueFieldMigration.convert_to_list_value`: the first of the
 /// known separators the value holds becomes the list delimiter.
 fn legacy_to_list_value(value: &str) -> String {
@@ -186,21 +211,29 @@ fn legacy_to_list_value(value: &str) -> String {
 }
 
 impl Library {
+    #[cfg(test)]
     pub fn open(path: &Path) -> Result<Self> {
+        Self::open_with(path, true)
+    }
+
+    /// `open` with `create_backup_before_migrations`.
+    pub fn open_with(path: &Path, backup: bool) -> Result<Self> {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent).ok();
         }
         let conn = Connection::open(path)
             .with_context(|| format!("opening library {}", path.display()))?;
-        Self::init(conn)
+        Self::init(conn, backup.then_some(path))
     }
 
     #[cfg(test)]
     pub fn in_memory() -> Result<Self> {
-        Self::init(Connection::open_in_memory()?)
+        Self::init(Connection::open_in_memory()?, None)
     }
 
-    fn init(conn: Connection) -> Result<Self> {
+    /// `backup`: the database file, to back up before a migration changes
+    /// data (None: no backups).
+    fn init(conn: Connection, backup: Option<&Path>) -> Result<Self> {
         conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;")?;
         for kind in [Kind::Item, Kind::Album] {
             let t = table(kind);
@@ -232,7 +265,7 @@ impl Library {
             "CREATE INDEX IF NOT EXISTS items_album_id ON items(album_id);
              CREATE INDEX IF NOT EXISTS items_path ON items(path);",
         )?;
-        migrate_multi_value_fields(&conn)?;
+        migrate_multi_value_fields(&conn, backup)?;
         Ok(Library {
             conn,
             memo: RefCell::new(HashMap::new()),
@@ -255,6 +288,29 @@ impl Library {
     /// Drop memoized values (after any write).
     fn invalidate(&self) {
         self.memo.borrow_mut().clear();
+    }
+
+    /// beets' `SELECT DISTINCT key` over a model's flexible attributes
+    /// (`fields`), plus `data_source` (a flexible attribute in beets 2.14,
+    /// a column here) when any record has one.
+    pub fn flex_keys(&self, kind: Kind) -> Result<Vec<String>> {
+        let mut keys: Vec<String> = self
+            .conn
+            .prepare(&format!("SELECT DISTINCT key FROM ({})", attr_table(kind)))?
+            .query_map([], |r| r.get(0))?
+            .collect::<Result<_, _>>()?;
+        let has_source: bool = self.conn.query_row(
+            &format!(
+                "SELECT EXISTS(SELECT 1 FROM {} WHERE data_source IS NOT NULL AND data_source != '')",
+                table(kind)
+            ),
+            [],
+            |r| r.get(0),
+        )?;
+        if has_source && !keys.iter().any(|k| k == "data_source") {
+            keys.push("data_source".into());
+        }
+        Ok(keys)
     }
 
     pub fn transaction<T>(&self, f: impl FnOnce(&Self) -> Result<T>) -> Result<T> {
@@ -719,6 +775,23 @@ mod tests {
         assert!(get(2, "composers").is_empty());
         assert_eq!(get(3, "genres"), ["Kept"]);
         assert_eq!(lib.all_albums().unwrap()[0].list("genres"), ["Rock", "Pop"]);
+        // Each migration that changed data backed the database up first,
+        // as beets names it; the copy has the data from before.
+        let bak = |table: &str, name: &str| {
+            d.path()
+                .join(format!("library.db-before-{table}-{name}.bak"))
+        };
+        let c = Connection::open(bak("items", "multi_genre_field")).unwrap();
+        let (genre, genres): (String, Option<String>) = c
+            .query_row("SELECT genre, genres FROM items WHERE id = 1", [], |r| {
+                Ok((r.get(0)?, r.get(1)?))
+            })
+            .unwrap();
+        assert_eq!((genre.as_str(), genres), ("Rock, Pop", None));
+        assert!(bak("albums", "multi_genre_field").exists());
+        assert!(bak("items", "multi_composer_field").exists());
+        // Nothing to migrate, no backup.
+        assert!(!bak("items", "multi_lyricist_field").exists());
         // Once only: a later change to the old column isn't migrated again.
         lib.conn
             .execute(
@@ -738,6 +811,21 @@ mod tests {
                 .unwrap()
                 .list("genres")
                 .is_empty()
+        );
+        // `create_backup_before_migrations: no`.
+        let db2 = d.path().join("other.db");
+        Connection::open(&db2)
+            .unwrap()
+            .execute_batch(
+                "CREATE TABLE items (id INTEGER PRIMARY KEY, genre TEXT);
+                 INSERT INTO items VALUES (1, 'Rock');",
+            )
+            .unwrap();
+        Library::open_with(&db2, false).unwrap();
+        assert!(
+            !d.path()
+                .join("other.db-before-items-multi_genre_field.bak")
+                .exists()
         );
     }
 

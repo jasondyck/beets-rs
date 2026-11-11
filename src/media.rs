@@ -143,7 +143,7 @@ pub fn read(path: &Path) -> Result<Item> {
     let props = file.properties();
     // beets' exact values (mutagen's, per format); lofty's (rounded to ms
     // and kbps) for formats `props` doesn't cover.
-    let (length, bitrate) = crate::props::read(path, file.file_type()).unwrap_or_else(|| {
+    let (length, bitrate, enc) = crate::props::read(path, file.file_type()).unwrap_or_else(|| {
         (
             props.duration().as_secs_f64(),
             props
@@ -151,8 +151,12 @@ pub fn read(path: &Path) -> Result<Item> {
                 .or(props.overall_bitrate())
                 .unwrap_or(0) as i64
                 * 1000,
+            Default::default(),
         )
     });
+    item.set_str("bitrate_mode", enc.bitrate_mode);
+    item.set_str("encoder_info", enc.info);
+    item.set_str("encoder_settings", enc.settings);
     item.set("length", Value::Float(length));
     item.set_int("bitrate", bitrate);
     item.set_int("samplerate", props.sample_rate().unwrap_or(0) as i64);

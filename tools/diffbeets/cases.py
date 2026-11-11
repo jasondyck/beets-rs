@@ -140,7 +140,7 @@ CORPUS = (
            ("mp3", "mp3", "1.37"), ("mp3", "mp3vbr", "2.71"), ("mp3", "mp3noxing", "1.9"),
            ("flac", "flac", "1.37"), ("m4a", "m4a", "1.37"), ("m4a", "alac", "0.5"),
            ("ogg", "ogg", "3.33"), ("opus", "opus", "1.37"), ("wv", "wv", "2.05"),
-           ("aiff", "aiff", "1.37")], 1)]
+           ("aiff", "aiff", "1.37"), ("mp3", "mp3abr", "1.6")], 1)]
     # Tags for MediaFile's other fields, as ffmpeg writes them per format
     # (MP3 frames and TXXX, Vorbis comments, APEv2): alternative keys
     # ("ALBUM ARTIST" before "ALBUMARTIST"), "; " in a genre (a list in
@@ -166,10 +166,23 @@ CORPUS = (
         ("s01/star.mp3", "mp3", {"artist": "Solo Artist",
                                  "title": "What? Now: *star*", "date": "2020-07"}),
         ("s01/untagged.mp3", "mp3", {}),
+        # ID3 genres as numbers and ID3v1 references (mutagen's TCON.genres).
+        ("s05/g1.mp3", "mp3", {"title": "Genre Num", "artist": "G", "genre": "80"}),
+        ("s05/g2.mp3", "mp3", {"title": "Genre Ref", "artist": "G", "genre": "(17)(RX)Live"}),
+        ("s05/g3.mp3", "mp3", {"title": "Genre RX", "artist": "G", "genre": "RX"}),
+        ("s05/g4.mp3", "mp3", {"title": "Genre Mixed", "artist": "G", "genre": "Rock; 255"}),
         ("s02/stray.mp3", "mp3", {"artist": "Artist A", "title": "Stray Single",
                                   "album": "Album One", "date": "2001"}),
     ]
 )
+
+# MP3s from the `lame` tool, when it's installed (real LAME headers: version,
+# VBR method, preset): (path under src/, lame options, tags).
+LAME_CORPUS = [
+    (f"s04/lame{n:02d}.mp3", opts.split(), {"title": f"Lame {opts}", "artist": "Lame"})
+    for n, opts in enumerate(["-b 128", "-V 2", "-V 9", "--abr 160", "--preset insane",
+                              "--preset 128", "-V 4 --vbr-old", "-t -b 96"], 1)
+]
 
 # Import steps: args to `beet`; the last one is a directory under src/.
 IMPORTS = [
@@ -180,6 +193,8 @@ IMPORTS = [
     ["import", "-A", "-q", "-s", "s01"],
     ["import", "-A", "-q", "-s", "s02"],
     ["import", "-A", "-q", "-s", "s03"],
+    ["import", "-A", "-q", "-s", "s04"],
+    ["import", "-A", "-q", "-s", "s05"],
 ]
 
 MODIFIES = [
@@ -513,6 +528,8 @@ QUERIES = [
     "original_year:1999",
     "script:Latn",
     "albumtype:album",
+    "genres:Folk",
+    "genres:Remix artist:G",
 ]
 
 # ---------------------------------------------------------------------------
@@ -678,6 +695,7 @@ TEMPLATES = [
     "$albumartist $albumartists $grouping $comp",
     "$lyricists $remixers $subtitle $work $trackdisambig",
     "%if{$genres,$genres,none}",
+    "$title|$bitrate_mode|$encoder_info|$encoder_settings",
 ]
 
 # Path formats for `mv -p -d <root>/dest`, given with `-c` so they replace
@@ -764,7 +782,8 @@ PROPERTY_QUERIES = [
     "bitrate:32000", "bitrate:100000..", "length:..0.6", "length:0.5",
 ]
 PROPERTY_FORMATS = ["$title $length $bitrate $format $samplerate $bitdepth $channels",
-                    "${length}|${bitrate}"]
+                    "${length}|${bitrate}",
+                    "$title|$bitrate_mode|$encoder_info|$encoder_settings"]
 STATS_FORMATS = ["MP3", "FLAC", "AAC", "ALAC", "OGG", "Opus", "WavPack", "AIFF", "WAVE"]
 
 # `stats` options and queries (beets' show_stats; -l is beets' limit option).
@@ -827,6 +846,7 @@ def cases():
         out.append((f"ls props:{q}", ["ls", "-f", "$title", q]))
     for f in PROPERTY_FORMATS:
         out.append((f"ls -f props:{f}", ["ls", "-f", f, "album:Every Format", ",", "format:WAV"]))
+    out.append(("fields", ["fields"]))
     out.append(("mv -p", ["mv", "-p"]))
     out.append(("mv -p -d", ["mv", "-p", "-d", DEST]))
     out.append(("mv -p -a -d", ["mv", "-p", "-a", "-d", DEST]))

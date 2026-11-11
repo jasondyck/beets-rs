@@ -19,13 +19,29 @@ pub struct Info {
     pub bitrate: i64,
 }
 
-/// beets' `length` and `bitrate` for `path`, or `None` when the format
-/// isn't covered or its headers can't be parsed (use lofty's then).
-pub fn read(path: &Path, ft: FileType) -> Option<(f64, i64)> {
+/// mutagen's MP3 encoder details, as MediaFile reports them: the
+/// `bitrate_mode` ("CBR", "VBR", "ABR" or "" when unknown), `encoder_info`
+/// (e.g. "LAME 3.100.0+", "FhG") and `encoder_settings` (a guess such as
+/// "-V 4" or "-b 128"). Empty for other formats.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct Encoder {
+    pub bitrate_mode: &'static str,
+    pub info: String,
+    pub settings: String,
+}
+
+/// beets' `length` and `bitrate` for `path` and, for MP3s, the encoder
+/// details; `None` when the format isn't covered or its headers can't be
+/// parsed (use lofty's then).
+pub fn read(path: &Path, ft: FileType) -> Option<(f64, i64, Encoder)> {
     let mut f = File::open(path).ok()?;
     let size = f.metadata().ok()?.len();
+    let mut enc = Encoder::default();
     let info = match ft {
-        FileType::Mpeg => mpeg(&head(&mut f, 1 << 20)?, size),
+        FileType::Mpeg => mpeg_full(&head(&mut f, 1 << 20)?, size).map(|(i, e)| {
+            enc = e;
+            i
+        }),
         FileType::Flac => flac(&mut f, size),
         FileType::Mp4 => mp4(&mut f, size),
         FileType::Vorbis => ogg(&mut f, size, Ogg::Vorbis),
@@ -36,7 +52,7 @@ pub fn read(path: &Path, ft: FileType) -> Option<(f64, i64)> {
         FileType::Aiff => aiff(&mut f, size),
         _ => None,
     }?;
-    Some((info.length, mediafile_bitrate(info, size)))
+    Some((info.length, mediafile_bitrate(info, size), enc))
 }
 
 /// MediaFile's `bitrate`: the format's own, else estimated from the size.
@@ -84,7 +100,13 @@ fn le16(d: &[u8], at: usize) -> Option<u16> {
 /// frame's nominal bitrate; the length from the Xing frame count less
 /// LAME's encoder delay and padding, a VBRI header's frame count, or else
 /// the stream size at the nominal bitrate.
+#[cfg(test)]
 pub fn mpeg(data: &[u8], size: u64) -> Option<Info> {
+    mpeg_full(data, size).map(|(i, _)| i)
+}
+
+/// `mpeg` with mutagen's encoder details (`_parse_vbr_header`).
+pub fn mpeg_full(data: &[u8], size: u64) -> Option<(Info, Encoder)> {
     // Skip ID3v2 tags (there can be several).
     let mut pos = 0;
     while data.len() >= pos + 10 && &data[pos..pos + 3] == b"ID3" {
@@ -134,12 +156,25 @@ pub fn mpeg(data: &[u8], size: u64) -> Option<Info> {
             (true, true) | (false, false) => 21,
             (false, true) => 13,
         };
-    match data.get(off..off + 4) {
-        Some(b"Xing" | b"Info") => {}
-        _ => return Some(vbri(data, start + 36, frame_size, sample_rate).unwrap_or(estimate)),
-    }
+    // No (complete) Xing header: a VBRI header, else the estimate.
+    let fallback = || match vbri(data, start + 36, frame_size, sample_rate) {
+        Some(i) => (
+            i,
+            Encoder {
+                bitrate_mode: "VBR",
+                info: "FhG".into(),
+                settings: String::new(),
+            },
+        ),
+        None => (estimate, Encoder::default()),
+    };
+    let is_info = match data.get(off..off + 4) {
+        Some(b"Xing") => false,
+        Some(b"Info") => true,
+        _ => return Some(fallback()),
+    };
     let Some(flags) = be32(data, off + 4) else {
-        return Some(estimate);
+        return Some(fallback());
     };
     let mut p = off + 8;
     let mut field = |flag: u32, len: usize| -> Option<Option<i64>> {
@@ -152,15 +187,22 @@ pub fn mpeg(data: &[u8], size: u64) -> Option<Info> {
         Some(Some(v))
     };
     // A truncated Xing header counts as none.
-    let Some((frames, bytes)) = (|| {
+    let Some((frames, bytes, vbr_scale)) = (|| {
         let frames = field(1, 4)?;
         let bytes = field(2, 4)?;
         field(4, 100)?; // TOC
-        field(8, 4)?; // VBR scale
-        Some((frames, bytes))
+        let scale = field(8, 4)?;
+        Some((frames, bytes, scale))
     })() else {
-        return Some(estimate);
+        return Some(fallback());
     };
+    let vbr_scale = vbr_scale.unwrap_or(-1);
+    let lame = lame_version(data, p);
+    let header = lame.as_ref().and_then(|l| {
+        l.has_header
+            .then(|| lame_header(data, p + 9, vbr_scale))
+            .flatten()
+    });
     let mut info = estimate;
     if let Some(frames) = frames {
         let mut samples = frames * frame_size;
@@ -171,26 +213,51 @@ pub fn mpeg(data: &[u8], size: u64) -> Option<Info> {
             info.bitrate =
                 ((audio_bytes * 8 * sample_rate) as f64 / samples as f64).round_ties_even() as i64;
         }
-        if let Some((delay, pad)) = lame_delay(data, p) {
-            samples -= delay + pad;
+        if let Some(h) = &header {
+            samples -= h.delay + h.padding;
         }
         info.length = samples.max(0) as f64 / sample_rate as f64;
     }
-    Some(info)
+    // `_guess_xing_bitrate_mode`.
+    let bitrate_mode = match header.as_ref().map(|h| h.vbr_method) {
+        Some(1 | 8) => "CBR",
+        Some(2 | 9) => "ABR",
+        Some(3..=6) => "VBR",
+        _ if is_info => "CBR",
+        _ if vbr_scale != -1 || lame.as_ref().is_some_and(|l| !l.desc.is_empty()) => "VBR",
+        _ => "",
+    };
+    let enc = Encoder {
+        bitrate_mode,
+        info: lame
+            .as_ref()
+            .map(|l| format!("LAME {}", l.desc))
+            .unwrap_or_default(),
+        settings: match (&header, &lame) {
+            (Some(h), Some(l)) => h.guess_settings(l.major, l.minor),
+            _ => String::new(),
+        },
+    };
+    Some((info, enc))
 }
 
-/// The encoder delay and padding from a LAME extended header at `p`
-/// (right after the Xing header), as mutagen's `LAMEHeader.parse_version`
-/// and `LAMEHeader` accept it.
-fn lame_delay(data: &[u8], p: usize) -> Option<(i64, i64)> {
+/// mutagen's `LAMEHeader.parse_version`: the LAME version string after
+/// the Xing header.
+struct LameVersion {
+    major: u32,
+    minor: u32,
+    desc: String,
+    /// An extended LAME header follows (9 bytes into the version string).
+    has_header: bool,
+}
+
+fn lame_version(data: &[u8], p: usize) -> Option<LameVersion> {
     let v = data.get(p..p + 20)?;
     if !(v.starts_with(b"LAME") || v.starts_with(b"L3.99")) {
         return None;
     }
-    let rest = {
-        let n = v.iter().take_while(|c| b"EMAL".contains(c)).count();
-        &v[n..]
-    };
+    // `lstrip(b"EMAL")`.
+    let rest = &v[v.iter().take_while(|c| b"EMAL".contains(c)).count()..];
     let major = (*rest.first()? as char).to_digit(10)?;
     let rest = &rest[1..];
     let rest = &rest[rest.iter().take_while(|&&c| c == b'.').count()..];
@@ -198,16 +265,175 @@ fn lame_delay(data: &[u8], p: usize) -> Option<(i64, i64)> {
     let minor: u32 = std::str::from_utf8(&rest[..digits]).ok()?.parse().ok()?;
     let rest = &rest[digits..];
     let alpha_390 = rest.len() >= 11 && rest[rest.len() - 11] == b'(';
-    if (major, minor) < (3, 90) || ((major, minor) == (3, 90) && alpha_390) || rest.len() < 11 {
+    if (major, minor) < (3, 90) || ((major, minor) == (3, 90) && alpha_390) {
+        // `data.strip(b"\x00").rstrip()`, as ASCII.
+        let flag = trim_bytes(rest, |c| c == 0);
+        let flag = trim_end_bytes(flag, |c| c.is_ascii_whitespace());
+        let flag = if flag.is_ascii() {
+            String::from_utf8_lossy(flag).into_owned()
+        } else {
+            " (?)".into()
+        };
+        return Some(LameVersion {
+            major,
+            minor,
+            desc: format!("{major}.{minor}{flag}"),
+            has_header: false,
+        });
+    }
+    if rest.len() < 11 {
         return None;
     }
-    // The extended header starts 9 bytes into the version string.
-    let h = data.get(p + 9..p + 9 + 27)?;
+    let flag = trim_end_bytes(&rest[..rest.len() - 11], |c| c == 0);
+    let (patch, flag_string) = match flag {
+        b"a" => ("", " (alpha)"),
+        b"b" => ("", " (beta)"),
+        b"r" => (".1+", ""),
+        b" " if (major, minor) > (3, 96) => (".0", ""),
+        b" " => (".0+", ""),
+        b"" | b"." => (".0+", ""),
+        _ => ("", " (?)"),
+    };
+    Some(LameVersion {
+        major,
+        minor,
+        desc: format!("{major}.{minor}{patch}{flag_string}"),
+        has_header: true,
+    })
+}
+
+fn trim_bytes(b: &[u8], f: impl Fn(u8) -> bool + Copy) -> &[u8] {
+    let start = b.iter().take_while(|&&c| f(c)).count();
+    trim_end_bytes(&b[start..], f)
+}
+
+fn trim_end_bytes(b: &[u8], f: impl Fn(u8) -> bool) -> &[u8] {
+    let end = b.len() - b.iter().rev().take_while(|&&c| f(c)).count();
+    &b[..end]
+}
+
+/// The fields of mutagen's `LAMEHeader` beets uses.
+struct LameHeader {
+    vbr_method: u8,
+    lowpass_filter: u32,
+    quality: i64,
+    vbr_quality: i64,
+    encoding_flags: u8,
+    ath_type: u8,
+    bitrate: u32,
+    delay: i64,
+    padding: i64,
+    preset_used: u32,
+}
+
+/// The extended LAME header at `h` (27 bytes); None for an unsupported
+/// revision.
+fn lame_header(data: &[u8], h: usize, vbr_scale: i64) -> Option<LameHeader> {
+    let h = data.get(h..h + 27)?;
     if h[0] >> 4 != 0 {
-        return None; // unsupported revision
+        return None;
     }
     let d = u32::from_be_bytes([0, h[12], h[13], h[14]]);
-    Some(((d >> 12) as i64, (d & 0xfff) as i64))
+    Some(LameHeader {
+        vbr_method: h[0] & 0xf,
+        lowpass_filter: h[1] as u32 * 100,
+        quality: (100 - vbr_scale).rem_euclid(10),
+        vbr_quality: (100 - vbr_scale).div_euclid(10),
+        encoding_flags: h[10] >> 4,
+        ath_type: h[10] & 0xf,
+        bitrate: h[11] as u32,
+        delay: (d >> 12) as i64,
+        padding: (d & 0xfff) as i64,
+        preset_used: ((h[17] as u32 & 0x07) << 8) | h[18] as u32,
+    })
+}
+
+impl LameHeader {
+    /// mutagen's `LAMEHeader.guess_settings`.
+    fn guess_settings(&self, major: u32, minor: u32) -> String {
+        let v = (major, minor);
+        let old = matches!(v, (3, 90) | (3, 91) | (3, 92));
+        let vq = self.vbr_quality;
+        match self.vbr_method {
+            2 => {
+                if old && self.encoding_flags != 0 {
+                    return if self.bitrate < 255 {
+                        format!("--alt-preset {}", self.bitrate)
+                    } else {
+                        format!("--alt-preset {}+", self.bitrate)
+                    };
+                }
+                return if self.preset_used != 0 {
+                    format!("--preset {}", self.preset_used)
+                } else if self.bitrate < 255 {
+                    format!("--abr {}", self.bitrate)
+                } else {
+                    format!("--abr {}+", self.bitrate)
+                };
+            }
+            1 => {
+                return match self.preset_used {
+                    0 if self.bitrate < 255 => format!("-b {}", self.bitrate),
+                    0 => "-b 255+".into(),
+                    1003 => "--preset insane".into(),
+                    p => format!("-b {p}"),
+                };
+            }
+            _ => {}
+        }
+        let m = self.vbr_method;
+        if old {
+            let key = (vq, self.quality, m, self.lowpass_filter, self.ath_type);
+            match key {
+                (1, 2, 4, 19500, 3) => return "--preset r3mix".into(),
+                (2, 2, 3, 19000, 4) => return "--alt-preset standard".into(),
+                (2, 2, 3, 19500, 2) => return "--alt-preset extreme".into(),
+                _ => {}
+            }
+            match m {
+                3 => return format!("-V {vq}"),
+                4 | 5 => return format!("-V {vq} --vbr-new"),
+                _ => {}
+            }
+        } else if matches!(v, (3, 93..=97)) {
+            match self.preset_used {
+                1001 => return "--preset standard".into(),
+                1002 => return "--preset extreme".into(),
+                1004 => return "--preset fast standard".into(),
+                1005 => return "--preset fast extreme".into(),
+                1006 => return "--preset medium".into(),
+                1007 => return "--preset fast medium".into(),
+                _ => {}
+            }
+            match m {
+                3 => return format!("-V {vq}"),
+                4 | 5 => return format!("-V {vq} --vbr-new"),
+                _ => {}
+            }
+        } else if v == (3, 98) {
+            match m {
+                3 => return format!("-V {vq} --vbr-old"),
+                4 | 5 => return format!("-V {vq}"),
+                _ => {}
+            }
+        } else if v >= (3, 99) {
+            match m {
+                3 => return format!("-V {vq} --vbr-old"),
+                4 | 5 => {
+                    // https://sourceforge.net/p/lame/bugs/455/
+                    let p = match (vq, self.bitrate, self.lowpass_filter) {
+                        (5, 32, 0) => 7,
+                        (5, 8, 0) => 8,
+                        (6, 8, 0) => 9,
+                        _ => vq,
+                    };
+                    return format!("-V {p}");
+                }
+                _ => {}
+            }
+        }
+        String::new()
+    }
 }
 
 /// mutagen's VBRI header (Fraunhofer) at `off`.
@@ -804,6 +1030,65 @@ mod tests {
     // rounded half to even; frames * 1152 less LAME's delay and padding
     // over the rate; without a Xing/Info header, the frame's own bitrate
     // and the stream size at that rate.
+    /// mutagen's `LAMEHeader.parse_version` (expected values from mutagen).
+    #[test]
+    fn lame_versions_as_mutagen() {
+        type Want = Option<(u32, u32, &'static str, bool)>;
+        let cases: &[(&[u8], Want)] = &[
+            (b"LAME3.99r", Some((3, 99, "3.99.1+", true))),
+            (b"LAME3.100", Some((3, 100, "3.100.0+", true))),
+            (b"LAME3.97 ", Some((3, 97, "3.97.0", true))),
+            (b"LAME3.96 ", Some((3, 96, "3.96.0+", true))),
+            (b"LAME3.90a", Some((3, 90, "3.90 (alpha)", true))),
+            (b"LAME3.92b", Some((3, 92, "3.92 (beta)", true))),
+            (b"L3.99r", Some((3, 99, "3.99.1+", true))),
+            (b"LAME3.88 (beta)", Some((3, 88, "3.88 (beta)", false))),
+            (b"LAME3.90 (alpha)", Some((3, 90, "3.90 (alpha)", false))),
+            (b"LAME3.98.", Some((3, 98, "3.98.0+", true))),
+            (b"LAME3.93x", Some((3, 93, "3.93 (?)", true))),
+            (b"LAME4.0 ", Some((4, 0, "4.0.0", true))),
+            (b"Lavc61.3", None),
+        ];
+        for (s, want) in cases {
+            let mut d = s.to_vec();
+            d.resize(20, 0);
+            let got = lame_version(&d, 0).map(|v| (v.major, v.minor, v.desc, v.has_header));
+            let want = want.map(|(a, b, c, h)| (a, b, c.to_string(), h));
+            assert_eq!(got, want, "{}", String::from_utf8_lossy(s));
+        }
+    }
+
+    /// mutagen's `LAMEHeader.guess_settings` (expected values from mutagen).
+    #[test]
+    fn lame_settings_as_mutagen() {
+        let h = |vbr_method, preset_used, vbr_quality, bitrate, lowpass_filter, ath_type, flags| {
+            LameHeader {
+                vbr_method,
+                lowpass_filter,
+                quality: 2,
+                vbr_quality,
+                encoding_flags: flags,
+                ath_type,
+                bitrate,
+                delay: 0,
+                padding: 0,
+                preset_used,
+            }
+        };
+        for (hdr, (major, minor), want) in [
+            (h(4, 1001, 2, 0, 0, 0, 0), (3, 97), "--preset standard"),
+            (h(4, 0, 1, 0, 19500, 3, 0), (3, 90), "--preset r3mix"),
+            (h(2, 0, 1, 255, 19500, 3, 1), (3, 91), "--alt-preset 255+"),
+            (h(4, 0, 5, 32, 0, 3, 1), (3, 99), "-V 7"),
+            (h(5, 0, 3, 32, 0, 3, 1), (3, 92), "-V 3 --vbr-new"),
+            (h(3, 0, 3, 32, 0, 3, 1), (3, 98), "-V 3 --vbr-old"),
+            (h(1, 0, 3, 255, 0, 3, 1), (3, 99), "-b 255+"),
+            (h(3, 0, 3, 255, 0, 3, 1), (3, 89), ""),
+        ] {
+            assert_eq!(hdr.guess_settings(major, minor), want);
+        }
+    }
+
     #[test]
     fn mpeg_as_mutagen() {
         let d = mpeg_data(None, None);

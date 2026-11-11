@@ -924,6 +924,260 @@ fn sc_encode(gain: f64, peak: f64) -> String {
         .collect()
 }
 
+// ------------------------------------------------------------------ genres
+
+/// mutagen's ID3v1 genre names (`mutagen._constants.GENRES`; lofty's
+/// table words some of them differently).
+const GENRES: [&str; 192] = [
+    "Blues",
+    "Classic Rock",
+    "Country",
+    "Dance",
+    "Disco",
+    "Funk",
+    "Grunge",
+    "Hip-Hop",
+    "Jazz",
+    "Metal",
+    "New Age",
+    "Oldies",
+    "Other",
+    "Pop",
+    "R&B",
+    "Rap",
+    "Reggae",
+    "Rock",
+    "Techno",
+    "Industrial",
+    "Alternative",
+    "Ska",
+    "Death Metal",
+    "Pranks",
+    "Soundtrack",
+    "Euro-Techno",
+    "Ambient",
+    "Trip-Hop",
+    "Vocal",
+    "Jazz+Funk",
+    "Fusion",
+    "Trance",
+    "Classical",
+    "Instrumental",
+    "Acid",
+    "House",
+    "Game",
+    "Sound Clip",
+    "Gospel",
+    "Noise",
+    "Alt. Rock",
+    "Bass",
+    "Soul",
+    "Punk",
+    "Space",
+    "Meditative",
+    "Instrumental Pop",
+    "Instrumental Rock",
+    "Ethnic",
+    "Gothic",
+    "Darkwave",
+    "Techno-Industrial",
+    "Electronic",
+    "Pop-Folk",
+    "Eurodance",
+    "Dream",
+    "Southern Rock",
+    "Comedy",
+    "Cult",
+    "Gangsta Rap",
+    "Top 40",
+    "Christian Rap",
+    "Pop/Funk",
+    "Jungle",
+    "Native American",
+    "Cabaret",
+    "New Wave",
+    "Psychedelic",
+    "Rave",
+    "Showtunes",
+    "Trailer",
+    "Lo-Fi",
+    "Tribal",
+    "Acid Punk",
+    "Acid Jazz",
+    "Polka",
+    "Retro",
+    "Musical",
+    "Rock & Roll",
+    "Hard Rock",
+    "Folk",
+    "Folk-Rock",
+    "National Folk",
+    "Swing",
+    "Fast-Fusion",
+    "Bebop",
+    "Latin",
+    "Revival",
+    "Celtic",
+    "Bluegrass",
+    "Avantgarde",
+    "Gothic Rock",
+    "Progressive Rock",
+    "Psychedelic Rock",
+    "Symphonic Rock",
+    "Slow Rock",
+    "Big Band",
+    "Chorus",
+    "Easy Listening",
+    "Acoustic",
+    "Humour",
+    "Speech",
+    "Chanson",
+    "Opera",
+    "Chamber Music",
+    "Sonata",
+    "Symphony",
+    "Booty Bass",
+    "Primus",
+    "Porn Groove",
+    "Satire",
+    "Slow Jam",
+    "Club",
+    "Tango",
+    "Samba",
+    "Folklore",
+    "Ballad",
+    "Power Ballad",
+    "Rhythmic Soul",
+    "Freestyle",
+    "Duet",
+    "Punk Rock",
+    "Drum Solo",
+    "A Cappella",
+    "Euro-House",
+    "Dance Hall",
+    "Goa",
+    "Drum & Bass",
+    "Club-House",
+    "Hardcore",
+    "Terror",
+    "Indie",
+    "BritPop",
+    "Afro-Punk",
+    "Polsk Punk",
+    "Beat",
+    "Christian Gangsta Rap",
+    "Heavy Metal",
+    "Black Metal",
+    "Crossover",
+    "Contemporary Christian",
+    "Christian Rock",
+    "Merengue",
+    "Salsa",
+    "Thrash Metal",
+    "Anime",
+    "JPop",
+    "Synthpop",
+    "Abstract",
+    "Art Rock",
+    "Baroque",
+    "Bhangra",
+    "Big Beat",
+    "Breakbeat",
+    "Chillout",
+    "Downtempo",
+    "Dub",
+    "EBM",
+    "Eclectic",
+    "Electro",
+    "Electroclash",
+    "Emo",
+    "Experimental",
+    "Garage",
+    "Global",
+    "IDM",
+    "Illbient",
+    "Industro-Goth",
+    "Jam Band",
+    "Krautrock",
+    "Leftfield",
+    "Lounge",
+    "Math Rock",
+    "New Romantic",
+    "Nu-Breakz",
+    "Post-Punk",
+    "Post-Rock",
+    "Psytrance",
+    "Shoegaze",
+    "Space Rock",
+    "Trop Rock",
+    "World Music",
+    "Neoclassical",
+    "Audiobook",
+    "Audio Theatre",
+    "Neue Deutsche Welle",
+    "Podcast",
+    "Indie Rock",
+    "G-Funk",
+    "Dubstep",
+    "Garage Rock",
+    "Psybient",
+];
+
+/// mutagen's `TCON.genres`, which mutagen applies to every ID3 tag it
+/// loads (and before saving ID3v2.3): ID3v1 genre numbers become names
+/// ("17" or "(17)" is "Rock", past the table "Unknown"), "RX"/"CR" are
+/// "Remix"/"Cover", "(17)Rock" is one genre.
+fn tcon_genres(values: &[String]) -> Vec<String> {
+    static GENRE_RE: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
+        regex::Regex::new(r"^((?:\((?:[0-9]+|RX|CR)\))*)(.+)?").unwrap()
+    });
+    let name = |i: usize| GENRES.get(i).copied().unwrap_or("Unknown").to_string();
+    let mut genres = vec![];
+    for value in values {
+        // `str.isdecimal()` (ASCII digits here: Python also takes other
+        // scripts' decimal digits).
+        let decimal: Option<usize> = (!value.is_empty()
+            && value.chars().all(|c| c.is_ascii_digit()))
+        .then(|| value.parse().ok())
+        .flatten();
+        match decimal {
+            Some(i) if i < 256 => genres.push(name(i)),
+            _ if value == "CR" => genres.push("Cover".into()),
+            _ if value == "RX" => genres.push("Remix".into()),
+            _ if value.is_empty() => {}
+            _ => {
+                let c = GENRE_RE.captures(value).unwrap();
+                let ids = c.get(1).map_or("", |m| m.as_str());
+                let mut new: Vec<String> = vec![];
+                if !ids.is_empty() {
+                    for gid in ids[1..ids.len() - 1].split(")(") {
+                        new.push(match gid {
+                            "CR" => "Cover".into(),
+                            "RX" => "Remix".into(),
+                            _ => match gid.parse::<usize>() {
+                                Ok(i) if i < GENRES.len() => GENRES[i].into(),
+                                _ => "Unknown".into(),
+                            },
+                        });
+                    }
+                }
+                if let Some(rest) = c.get(2) {
+                    let mut rest = rest.as_str();
+                    // "Unescaping" the first parenthesis.
+                    if rest.starts_with("((") {
+                        rest = &rest[1..];
+                    }
+                    if !new.iter().any(|g| g == rest) {
+                        new.push(rest.to_string());
+                    }
+                }
+                genres.extend(new);
+            }
+        }
+    }
+    genres
+}
+
 // -------------------------------------------------------------------- tags
 
 /// The file's tag of the kind MediaFile uses for its format.
@@ -1035,6 +1289,7 @@ impl Tags {
                 continue;
             }
             match fr {
+                Frame::Text(t) if id == "TCON" => return Some(tcon_genres(&id3_split(&t.value))),
                 Frame::Text(t) => return Some(id3_split(&t.value)),
                 Frame::Timestamp(t) => return Some(vec![t.timestamp.to_string()]),
                 _ => {}
@@ -1055,7 +1310,10 @@ impl Tags {
                 .track_number
                 .filter(|t| *t != 0)
                 .map(|t| vec![t.to_string()]),
-            "TCON" => v1.genre.filter(|g| *g != 255).map(|g| vec![g.to_string()]),
+            "TCON" => v1
+                .genre
+                .filter(|g| *g != 255)
+                .map(|g| tcon_genres(&[g.to_string()])),
             _ => None,
         }
     }
@@ -2036,7 +2294,11 @@ impl MediaFile {
                     v1.save_to_path(path, WriteOptions::default())
                         .with_context(ctx)?;
                 }
+                let placeholder = if v23 { hide_v23_genre(&mut tag) } else { None };
                 tag.save_to_path(path, opts).with_context(ctx)?;
+                if let Some(id) = placeholder {
+                    rename_v23_frame(path, id.as_bytes(), b"TCON").with_context(ctx)?;
+                }
             }
             Tags::Mp4(t) => t
                 .save_to_path(path, WriteOptions::default())
@@ -2058,6 +2320,10 @@ impl MediaFile {
 fn to_v23(tag: &mut Id3v2Tag) {
     tag.retain_mut(|fr| {
         match fr {
+            // `update_to_v23` first rewrites the genres (`TCON.genres`).
+            Frame::Text(t) if t.id().as_str() == "TCON" => {
+                t.value = Cow::Owned(tcon_genres(&id3_split(&t.value)).join("/"));
+            }
             Frame::Text(t) if t.value.contains('\0') => {
                 t.value = Cow::Owned(id3_split(&t.value).join("/"));
             }
@@ -2071,6 +2337,76 @@ fn to_v23(tag: &mut Id3v2Tag) {
         }
         true
     });
+}
+
+/// lofty writes an ID3v2.3 `TCON` its own way (a number or "Remix" in
+/// parentheses, "(80)"), where mutagen writes the text as it is ("80").
+/// So the genre goes out under an unused text frame ID, which
+/// `rename_v23_frame` turns back into `TCON` in the file. Returns that ID
+/// (None without a genre, or for an unsynchronised tag, where frame
+/// headers can't be found by walking them).
+fn hide_v23_genre(tag: &mut Id3v2Tag) -> Option<&'static str> {
+    if tag.flags().unsynchronisation {
+        return None;
+    }
+    let id = ["TCOX", "TCOY", "TCOZ", "TXGN"]
+        .into_iter()
+        .find(|id| !tag.iter().any(|f| f.id_str() == *id))?;
+    let mut found = None;
+    tag.retain(|f| match f {
+        Frame::Text(t) if f.id_str() == "TCON" => {
+            found = Some((t.encoding, t.value.to_string()));
+            false
+        }
+        _ => true,
+    });
+    let (encoding, value) = found?;
+    tag.insert(Frame::Text(TextInformationFrame::new(
+        fid(id),
+        encoding,
+        value,
+    )));
+    Some(id)
+}
+
+/// Rename the frame `from` of the ID3v2.3 tag at the start of `path` to
+/// `to` (same length: nothing else in the file moves).
+fn rename_v23_frame(path: &Path, from: &[u8], to: &[u8]) -> Result<()> {
+    use std::io::{Read, Seek, SeekFrom, Write};
+    let mut f = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(path)?;
+    let mut h = [0u8; 10];
+    f.read_exact(&mut h)?;
+    if &h[..3] != b"ID3" || h[3] != 3 {
+        bail!("no ID3v2.3 tag after writing");
+    }
+    let size = h[6..10]
+        .iter()
+        .fold(0usize, |acc, &b| (acc << 7) | (b & 0x7f) as usize);
+    let mut body = vec![0u8; size];
+    f.read_exact(&mut body)?;
+    let mut pos = 0;
+    if h[5] & 0x40 != 0 {
+        // Extended header: its size (excluding these 4 bytes), then it.
+        let n = u32::from_be_bytes(body.get(..4).context("bad tag")?.try_into()?) as usize;
+        pos = 4 + n;
+    }
+    while pos + 10 <= body.len() && body[pos] != 0 {
+        let id = &body[pos..pos + 4];
+        let len = u32::from_be_bytes(body[pos + 4..pos + 8].try_into()?) as usize;
+        if id == from {
+            f.seek(SeekFrom::Start(10 + pos as u64))?;
+            f.write_all(to)?;
+            return Ok(());
+        }
+        pos += 10 + len;
+    }
+    bail!(
+        "frame {} not found after writing",
+        String::from_utf8_lossy(from)
+    )
 }
 
 /// mutagen's `MakeID3v1`: an existing ID3v1 tag is updated from the
@@ -2094,10 +2430,8 @@ fn update_v1(v1: &mut Id3v1Tag, tag: &Id3v2Tag) {
     v1.comment = None;
     v1.track_number = text("TRCK").and_then(|t| t.split('/').next()?.trim().parse::<u8>().ok());
     v1.genre = text("TCON").and_then(|g| {
-        lofty::id3::v1::GENRES
-            .iter()
-            .position(|n| *n == g)
-            .map(|i| i as u8)
+        let first = tcon_genres(&id3_split(&g)).into_iter().next()?;
+        GENRES.iter().position(|n| *n == first).map(|i| i as u8)
     });
     v1.year = text("TDRC").and_then(|y| y.chars().take(4).collect::<String>().parse().ok());
 }
@@ -2409,6 +2743,79 @@ mod tests {
         .unwrap();
         assert_eq!(f.id3v1().unwrap().title.as_deref(), Some("New"));
         assert_eq!(read(&p).str("title"), "New");
+    }
+
+    /// mutagen's `TCON.genres` (expected values from mutagen).
+    #[test]
+    fn tcon_genres_as_mutagen() {
+        let g = |v: &[&str]| tcon_genres(&v.iter().map(|s| s.to_string()).collect::<Vec<_>>());
+        assert_eq!(g(&["80"]), ["Folk"]);
+        assert_eq!(g(&["255"]), ["Unknown"]);
+        assert_eq!(g(&["300"]), ["300"]);
+        assert_eq!(g(&["RX", "CR"]), ["Remix", "Cover"]);
+        assert_eq!(g(&["(17)Rock"]), ["Rock"]);
+        assert_eq!(g(&["(17)(RX)Foo"]), ["Rock", "Remix", "Foo"]);
+        assert_eq!(g(&["((foo)"]), ["(foo)"]);
+        assert_eq!(g(&["(999)x"]), ["Unknown", "x"]);
+        assert_eq!(g(&["(foo) bar", "", "1"]), ["(foo) bar", "Classic Rock"]);
+        assert_eq!(g(&["29"]), ["Jazz+Funk"]);
+    }
+
+    /// The raw text of the first `TCON` frame of an ID3v2.3 tag.
+    fn raw_v23_tcon(p: &Path) -> String {
+        let d = std::fs::read(p).unwrap();
+        assert_eq!((&d[..3], d[3]), (&b"ID3"[..], 3));
+        let size = d[6..10]
+            .iter()
+            .fold(0usize, |a, &b| (a << 7) | (b & 0x7f) as usize);
+        let body = &d[10..10 + size];
+        let mut pos = 0;
+        while pos + 10 <= body.len() && body[pos] != 0 {
+            let n = u32::from_be_bytes(body[pos + 4..pos + 8].try_into().unwrap()) as usize;
+            if &body[pos..pos + 4] == b"TCON" {
+                let c = &body[pos + 10..pos + 10 + n];
+                assert_eq!(c[0], 1, "UTF-16");
+                let units: Vec<u16> = c[3..]
+                    .chunks(2)
+                    .map(|b| u16::from_le_bytes([b[0], b[1]]))
+                    .collect();
+                return String::from_utf16(&units).unwrap();
+            }
+            pos += 10 + n;
+        }
+        panic!("no TCON")
+    }
+
+    /// ID3v2.3 genres as mutagen saves them: through `TCON.genres` and
+    /// joined with "/", without lofty's "(80)"/"(RX)" forms; read back
+    /// (in any version) through `TCON.genres` too.
+    #[test]
+    fn id3v23_genres_as_mutagen() {
+        let d = tempfile::tempdir().unwrap();
+        let Some(p) = make(d.path(), "t.mp3", &[]) else {
+            return;
+        };
+        for (genres, raw, back) in [
+            (&["80"][..], "Folk", &["Folk"][..]),
+            (&["Remix"], "Remix", &["Remix"]),
+            (&["Rock", "80"], "Rock/Folk", &["Rock/Folk"]),
+            (&["(17)Pop"], "Rock/Pop", &["Rock/Pop"]),
+            (&["(foo) bar"], "(foo) bar", &["(foo) bar"]),
+        ] {
+            let mut it = read(&p);
+            it.set_list("genres", genres);
+            it.set_str("title", "kept");
+            crate::media::write_with(&it, &p, true).unwrap();
+            assert_eq!(raw_v23_tcon(&p), raw, "{genres:?}");
+            let back_item = read(&p);
+            assert_eq!(back_item.list("genres"), back, "{genres:?}");
+            assert_eq!(back_item.str("title"), "kept");
+        }
+        // ID3v2.4 keeps the text; reading it maps the number.
+        let mut it = read(&p);
+        it.set_list("genres", &["80"]);
+        crate::media::write_with(&it, &p, false).unwrap();
+        assert_eq!(read(&p).list("genres"), ["Folk"]);
     }
 
     #[test]
