@@ -224,6 +224,7 @@ impl MusicBrainz {
 
     fn get(&self, path: &str, query: &[(&str, &str)]) -> Result<J> {
         let url = format!("{}/{}", self.base, path);
+        crate::logging::trace!("musicbrainz: GET {url} {query:?}");
         let mut attempt = 0;
         loop {
             self.throttle();
@@ -260,6 +261,7 @@ impl MusicBrainz {
         }
         let q = parts.join(" AND ");
         let limit = self.search_limit.to_string();
+        crate::logging::debug!("Searching for MusicBrainz releases with: {q}");
         let res = self.get("release/", &[("query", &q), ("limit", &limit)])?;
         Ok(res
             .get("releases")
@@ -274,6 +276,7 @@ impl MusicBrainz {
     }
 
     pub fn release(&self, id: &str) -> Result<AlbumInfo> {
+        crate::logging::debug!("Requesting MusicBrainz release {id}");
         let j = self.get(
             &format!("release/{id}"),
             &[(
@@ -296,6 +299,10 @@ impl MusicBrainz {
             return Ok(vec![]);
         }
         let limit = self.search_limit.to_string();
+        crate::logging::debug!(
+            "Searching for MusicBrainz recordings with: {}",
+            parts.join(" AND ")
+        );
         let res = self.get(
             "recording/",
             &[("query", &parts.join(" AND ")), ("limit", &limit)],
@@ -312,6 +319,7 @@ impl MusicBrainz {
     }
 
     pub fn recording(&self, id: &str) -> Result<TrackInfo> {
+        crate::logging::debug!("Requesting MusicBrainz recording {id}");
         let j = self.get(
             &format!("recording/{id}"),
             &[("inc", "artist-credits isrcs aliases")],

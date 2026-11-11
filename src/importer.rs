@@ -1196,6 +1196,13 @@ impl<'a> Importer<'a> {
         if found.is_empty() {
             return Ok(DupOutcome::Proceed);
         }
+        crate::logging::debug!(
+            "found duplicates: {:?}",
+            found
+                .iter()
+                .map(|f| f.album_id.or(f.items[0].id).unwrap_or(0))
+                .collect::<Vec<_>>()
+        );
         let mut action = DuplicateAction::from_config(&self.cfg.str("import.duplicate_action"));
         if action == DuplicateAction::Ask {
             let what = if album { "album" } else { "track" };

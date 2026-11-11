@@ -60,9 +60,23 @@ pub trait Plugin {
 
 pub const AVAILABLE: &[&str] = &["embedart", "fetchart", "lyrics"];
 
+/// The plugins to load: `plugins` (or `-p`) minus `disabled_plugins` (`-P`),
+/// as beets' `get_plugin_names`.
+pub fn names(cfg: &Config) -> Vec<String> {
+    let disabled = cfg.list("disabled_plugins");
+    cfg.list("plugins")
+        .into_iter()
+        .filter(|p| !disabled.contains(p))
+        .collect()
+}
+
 pub fn load(cfg: &Config) -> Result<Vec<Box<dyn Plugin>>> {
     let mut out: Vec<Box<dyn Plugin>> = vec![];
-    for name in cfg.list("plugins") {
+    let names = names(cfg);
+    let mut sorted = names.clone();
+    sorted.sort();
+    crate::logging::debug!("Loading plugins: {}", sorted.join(", "));
+    for name in names {
         match name.as_str() {
             "fetchart" => out.push(Box::new(fetchart::FetchArt::new(cfg))),
             "lyrics" => out.push(Box::new(lyrics::Lyrics::new(cfg))),
@@ -80,7 +94,7 @@ pub fn load(cfg: &Config) -> Result<Vec<Box<dyn Plugin>>> {
 }
 
 pub fn enabled(cfg: &Config, name: &str) -> bool {
-    cfg.list("plugins").iter().any(|p| p == name)
+    names(cfg).iter().any(|p| p == name)
 }
 
 /// Run a hook on every plugin; failures are warnings, never fatal to import.

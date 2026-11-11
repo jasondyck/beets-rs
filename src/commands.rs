@@ -4,6 +4,7 @@ use crate::config::{Config, DEFAULT_CONFIG, default_config_dir};
 use crate::fileops::{self, FileOp};
 use crate::importer::{self, ImportOptions, Importer, Resume};
 use crate::library::Library;
+use crate::logging::debug;
 use crate::media;
 use crate::model::{
     ALBUM_FIELDS, Album, ITEM_FIELDS, Item, Kind, Record, album_item_shared_fields,
@@ -21,16 +22,39 @@ use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 
 pub fn run(cli: Cli) -> Result<()> {
+    crate::logging::set_verbosity(cli.verbose);
+    let config_file = cli
+        .config
+        .clone()
+        .unwrap_or_else(|| default_config_dir().join("config.yaml"));
+    debug!("user configuration: {}", config_file.display());
     let mut cfg = Config::load(cli.config.as_deref())?;
+    debug!("data directory: {}", cfg.config_dir.display());
     if let Some(l) = &cli.library {
         cfg.set("library", Y::String(l.to_string_lossy().into()));
     }
     if let Some(d) = &cli.directory {
         cfg.set("directory", Y::String(d.to_string_lossy().into()));
     }
+    let csl = |s: &str| Y::Sequence(crate::comma_list(s).into_iter().map(Y::String).collect());
+    if let Some(p) = &cli.plugins {
+        cfg.set("plugins", csl(p));
+    }
+    if let Some(p) = &cli.disable_plugins {
+        cfg.set("disabled_plugins", csl(p));
+    }
+    // As beets: `--version` runs the version command, and no command at
+    // all shows the help.
+    let cmd = match cli.cmd {
+        _ if cli.version => Cmd::Version,
+        Some(cmd) => cmd,
+        None => Cmd::Help { command: None },
+    };
 
     // Commands that don't need the library.
-    match &cli.cmd {
+    match &cmd {
+        Cmd::Help { command } => return help(command.as_deref()),
+        Cmd::Version => return version(&cfg),
         Cmd::Fields => return fields(),
         Cmd::Config { paths, defaults } => {
             if *paths {
@@ -52,8 +76,13 @@ pub fn run(cli: Cli) -> Result<()> {
     }
 
     let lib = Library::open(&cfg.library_path())?;
+    debug!(
+        "library database: {}\nlibrary directory: {}",
+        cfg.library_path().display(),
+        cfg.directory().display()
+    );
     let plugins = plugins::load(&cfg)?;
-    match cli.cmd {
+    match cmd {
         Cmd::Import {
             copy,
             nocopy,
@@ -244,7 +273,7 @@ pub fn run(cli: Cli) -> Result<()> {
             force,
             query,
         } => lyrics(&cfg, &lib, print, force, &query),
-        Cmd::Fields | Cmd::Config { .. } => unreachable!(),
+        Cmd::Fields | Cmd::Config { .. } | Cmd::Version | Cmd::Help { .. } => unreachable!(),
     }
 }
 
@@ -253,6 +282,46 @@ impl Context for RecCtx<'_> {
     fn field(&self, name: &str) -> Option<String> {
         self.0.formatted(name)
     }
+}
+
+/// `beet help [COMMAND]`: the main help, or a command's (by name or alias),
+/// exactly as `beet COMMAND --help` shows it.
+fn help(command: Option<&str>) -> Result<()> {
+    use clap::CommandFactory;
+    let Some(name) = command else {
+        crate::Cli::command().print_help()?;
+        return Ok(());
+    };
+    match crate::parse_cli(["beet", name, "--help"]) {
+        Err(e) if e.kind() == clap::error::ErrorKind::DisplayHelp => {
+            e.print()?;
+            Ok(())
+        }
+        _ => bail!("unknown command '{name}'"),
+    }
+}
+
+/// `beet version`: our version, the compiler's (where beets shows Python's)
+/// and the loaded plugins.
+fn version(cfg: &Config) -> Result<()> {
+    for line in version_lines(cfg)? {
+        println!("{line}");
+    }
+    Ok(())
+}
+
+fn version_lines(cfg: &Config) -> Result<Vec<String>> {
+    let mut names: Vec<&str> = plugins::load(cfg)?.iter().map(|p| p.name()).collect();
+    names.sort_unstable();
+    Ok(vec![
+        format!("beets-rs version {}", env!("CARGO_PKG_VERSION")),
+        format!("Rust version {}", env!("BEETS_RS_RUSTC_VERSION")),
+        if names.is_empty() {
+            "no plugins loaded".into()
+        } else {
+            format!("plugins: {}", names.join(", "))
+        },
+    ])
 }
 
 pub fn format_record(t: &Template, r: &Record) -> String {
@@ -1029,6 +1098,35 @@ fn fields() -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn version_lists_loaded_plugins() {
+        let mut cfg = Config::defaults();
+        let lines = version_lines(&cfg).unwrap();
+        assert_eq!(
+            lines[0],
+            format!("beets-rs version {}", env!("CARGO_PKG_VERSION"))
+        );
+        assert!(lines[1].starts_with("Rust version "));
+        assert_eq!(lines[2], "no plugins loaded");
+        cfg.set(
+            "plugins",
+            serde_yaml::from_str("[lyrics, fetchart, embedart]").unwrap(),
+        );
+        cfg.set(
+            "disabled_plugins",
+            serde_yaml::from_str("[embedart]").unwrap(),
+        );
+        assert_eq!(version_lines(&cfg).unwrap()[2], "plugins: fetchart, lyrics");
+        assert!(plugins::enabled(&cfg, "lyrics"));
+        assert!(!plugins::enabled(&cfg, "embedart"));
+    }
+
+    #[test]
+    fn help_for_unknown_commands_is_an_error() {
+        let e = help(Some("frob")).unwrap_err();
+        assert_eq!(e.to_string(), "unknown command 'frob'");
+    }
 
     #[test]
     fn modify_args() {

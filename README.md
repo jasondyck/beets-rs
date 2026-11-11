@@ -32,7 +32,8 @@ beet update                                         # re-read changed tags, drop
 | Queries | substring, `field:`, `:=` / `:=~` exact, `::regex`, numeric/duration/date ranges (`..`), bools, `path:`, `-`/`^` negation, `,` OR, `field+`/`field-` sort, flexible attributes |
 | Templates | `$f`, `${f}`, escapes, `%lower %upper %capitalize %title %left %right %if %ifdef %asciify %initial %first %time %aunique` |
 | Paths | `paths:` with `default`/`singleton`/`comp`/query keys, `replace:` rules, `asciify_paths`, `max_filename_length`, unique-path suffixes, empty-dir pruning (directories holding only `clutter` files count as empty) |
-| Commands | `import ls modify rm mv update write stats fields config` |
+| Commands | `import` (`imp`, `im`), `list` (`ls`), `modify` (`mod`), `remove` (`rm`), `move` (`mv`), `update` (`upd`, `up`), `write`, `stats`, `fields`, `config`, `version`, `help [COMMAND]` (`?`), with beets' aliases; no command shows the help, and an unknown one gives beets' `unknown command 'x'` error |
+| Global options | before the command, as in beets: `-l/--library`, `-d/--directory`, `-c/--config`, `-v/--verbose` (repeatable: `-v` logs config/library paths, plugin loading, MusicBrainz searches and lookups, duplicates found; `-vv` also each MusicBrainz request), `-p/--plugins LIST` and `-P/--disable-plugins LIST` (comma-separated; also the `disabled_plugins` config key), `-h/--help`, `--version` |
 | Tags | MP3, FLAC, M4A/ALAC, Ogg/Opus, WavPack, APE, AIFF, WAV via lofty |
 | Release preferences | `match.preferred.countries` / `media` (regex lists, earlier = better) and `original_year`, as in beets |
 | Plugins | enabled with `plugins:`; import hooks + subcommands. **fetchart** (folder image, then Cover Art Archive; `beet fetchart [-f]`), **lyrics** (LRCLIB, plain or synced; `beet lyrics [-p] [-f]`), **embedart** (embeds the album art on import, always after fetchart; `beet embedart [-f IMAGE] [-y]`, `beet extractart [-o PATH] [-a] [-n NAME]`, `beet clearart [-y]`; options `ifempty`, `remove_art_file`) |
@@ -63,4 +64,4 @@ reading or writing beets' own `library.db`.
 
 `model` (typed fields + flex attrs) · `library` (SQLite) · `query` · `template` ·
 `paths` · `duplicates` (duplicate keys, Upgrade, prompt summaries) · `fileops` (copy/move/link/reflink, pruning, ignore globs) · `media` (lofty tags) · `mb` (MusicBrainz) · `autotag` · `importer` ·
-`commands` · `state` (import resume/history) · `ui` · `plugins/` (`fetchart`, `embedart`, `lyrics`).
+`commands` · `logging` (`-v`) · `state` (import resume/history) · `ui` · `plugins/` (`fetchart`, `embedart`, `lyrics`).

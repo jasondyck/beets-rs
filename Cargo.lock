@@ -104,6 +104,7 @@ dependencies = [
  "deunicode",
  "dirs",
  "glob",
+ "libc",
  "lofty",
  "pathfinding",
  "reflink-copy",

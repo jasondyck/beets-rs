@@ -5,6 +5,7 @@ mod duplicates;
 mod fileops;
 mod importer;
 mod library;
+mod logging;
 mod mb;
 mod media;
 mod model;
@@ -15,27 +16,56 @@ mod state;
 mod template;
 mod ui;
 
-use clap::{Parser, Subcommand};
+use clap::error::{ContextKind, ContextValue, ErrorKind};
+use clap::{ArgAction, Parser, Subcommand};
 use std::path::PathBuf;
 
 /// A Rust port of the beets music library manager.
-#[derive(Parser)]
-#[command(name = "beet", version, about)]
+///
+/// Global options go before the command, as in beets.
+#[derive(Parser, Debug)]
+#[command(
+    name = "beet",
+    about,
+    disable_version_flag = true,
+    disable_help_subcommand = true
+)]
 pub struct Cli {
-    /// Path to the configuration file
-    #[arg(short = 'c', long = "config")]
-    pub config: Option<PathBuf>,
-    /// Library database file
+    /// Library database file to use
     #[arg(short = 'l', long = "library")]
     pub library: Option<PathBuf>,
     /// Destination music directory
     #[arg(short = 'd', long = "directory")]
     pub directory: Option<PathBuf>,
+    /// Log more details (use twice for even more)
+    #[arg(short = 'v', long = "verbose", action = ArgAction::Count)]
+    pub verbose: u8,
+    /// Path to configuration file
+    #[arg(short = 'c', long = "config")]
+    pub config: Option<PathBuf>,
+    /// A comma-separated list of plugins to load
+    #[arg(short = 'p', long = "plugins", value_name = "PLUGINS")]
+    pub plugins: Option<String>,
+    /// A comma-separated list of plugins to disable
+    #[arg(short = 'P', long = "disable-plugins", value_name = "PLUGINS")]
+    pub disable_plugins: Option<String>,
+    /// Same as the version command
+    #[arg(long = "version", hide = true)]
+    pub version: bool,
+    /// The command; with none, show help (as beets does)
     #[command(subcommand)]
-    pub cmd: Cmd,
+    pub cmd: Option<Cmd>,
 }
 
-#[derive(Subcommand)]
+/// beets' comma-separated list options (`-p`, `-P`): empty entries dropped.
+pub fn comma_list(s: &str) -> Vec<String> {
+    s.split(',')
+        .filter(|p| !p.is_empty())
+        .map(String::from)
+        .collect()
+}
+
+#[derive(Subcommand, Debug)]
 pub enum Cmd {
     /// Import new music
     #[command(visible_alias = "imp", visible_alias = "im")]
@@ -266,6 +296,14 @@ pub enum Cmd {
         #[arg(allow_hyphen_values = true)]
         query: Vec<String>,
     },
+    /// Output version information
+    Version,
+    /// Give detailed help on a specific sub-command
+    #[command(visible_alias = "?")]
+    Help {
+        /// The command to explain
+        command: Option<String>,
+    },
     /// Show the effective configuration
     Config {
         /// Print the config file path
@@ -277,10 +315,138 @@ pub enum Cmd {
     },
 }
 
+/// Parse the command line; unknown commands get beets' error message.
+pub fn parse_cli<I, T>(args: I) -> Result<Cli, clap::Error>
+where
+    I: IntoIterator<Item = T>,
+    T: Into<std::ffi::OsString> + Clone,
+{
+    Cli::try_parse_from(args)
+}
+
+/// The command name in a clap "unrecognized subcommand" error.
+pub fn unknown_command(e: &clap::Error) -> Option<String> {
+    if e.kind() != ErrorKind::InvalidSubcommand {
+        return None;
+    }
+    match e.get(ContextKind::InvalidSubcommand) {
+        Some(ContextValue::String(s)) => Some(s.clone()),
+        _ => None,
+    }
+}
+
 fn main() {
-    let cli = Cli::parse();
+    // A closed pipe (`beet ls | head`) ends the program quietly, as beets
+    // does on EPIPE, instead of panicking in `println!`.
+    #[cfg(unix)]
+    // SAFETY: restoring the default disposition of a signal before any other
+    // threads exist.
+    unsafe {
+        libc::signal(libc::SIGPIPE, libc::SIG_DFL);
+    }
+    let cli = match parse_cli(std::env::args_os()) {
+        Ok(cli) => cli,
+        Err(e) => match unknown_command(&e) {
+            Some(name) => {
+                eprintln!("error: unknown command '{name}'");
+                std::process::exit(1);
+            }
+            None => e.exit(),
+        },
+    };
     if let Err(e) = commands::run(cli) {
         eprintln!("error: {e:#}");
         std::process::exit(1);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use clap::CommandFactory;
+
+    fn parse(args: &[&str]) -> Result<Cli, clap::Error> {
+        parse_cli(std::iter::once("beet").chain(args.iter().copied()))
+    }
+
+    #[test]
+    fn cli_definition_is_valid() {
+        Cli::command().debug_assert();
+    }
+
+    #[test]
+    fn global_options_go_before_the_command() {
+        let cli = parse(&[
+            "-vv",
+            "-l",
+            "lib.db",
+            "-d",
+            "/music",
+            "-c",
+            "c.yaml",
+            "-p",
+            "fetchart,,lyrics",
+            "-P",
+            "lyrics",
+            "ls",
+            "-a",
+        ])
+        .unwrap();
+        assert_eq!(cli.verbose, 2);
+        assert_eq!(cli.library, Some(PathBuf::from("lib.db")));
+        assert_eq!(cli.directory, Some(PathBuf::from("/music")));
+        assert_eq!(cli.config, Some(PathBuf::from("c.yaml")));
+        assert_eq!(
+            comma_list(cli.plugins.as_deref().unwrap()),
+            ["fetchart", "lyrics"]
+        );
+        assert_eq!(
+            comma_list(cli.disable_plugins.as_deref().unwrap()),
+            ["lyrics"]
+        );
+        assert!(matches!(cli.cmd, Some(Cmd::List { album: true, .. })));
+        assert_eq!(parse(&["--verbose", "-v", "stats"]).unwrap().verbose, 2);
+        // As in beets, they aren't accepted after the command.
+        assert!(parse(&["ls", "-v"]).is_err());
+        assert!(parse(&["version", "-P", "lyrics"]).is_err());
+        assert!(comma_list("").is_empty());
+    }
+
+    #[test]
+    fn beets_command_aliases() {
+        let cmd = |args: &[&str]| parse(args).unwrap().cmd.unwrap();
+        assert!(matches!(cmd(&["ls"]), Cmd::List { .. }));
+        assert!(matches!(cmd(&["rm", "x"]), Cmd::Remove { .. }));
+        assert!(matches!(cmd(&["mv"]), Cmd::Move { .. }));
+        assert!(matches!(cmd(&["upd"]), Cmd::Update { .. }));
+        assert!(matches!(cmd(&["up"]), Cmd::Update { .. }));
+        assert!(matches!(cmd(&["mod", "x=y"]), Cmd::Modify { .. }));
+        assert!(matches!(cmd(&["imp", "dir"]), Cmd::Import { .. }));
+        assert!(matches!(cmd(&["im", "dir"]), Cmd::Import { .. }));
+        assert!(matches!(cmd(&["?", "ls"]), Cmd::Help { command: Some(c) } if c == "ls"));
+        assert!(matches!(cmd(&["help"]), Cmd::Help { command: None }));
+        assert!(matches!(cmd(&["version"]), Cmd::Version));
+        // Commands beets gives no alias don't get one.
+        for name in ["stat", "wr", "conf", "fetch", "upgrade"] {
+            assert!(parse(&[name]).is_err(), "{name}");
+        }
+    }
+
+    #[test]
+    fn no_command_version_flag_and_unknown_commands() {
+        let cli = parse(&[]).unwrap();
+        assert!(cli.cmd.is_none());
+        assert!(parse(&["--version"]).unwrap().version);
+        let e = parse(&["frob", "x"]).unwrap_err();
+        assert_eq!(unknown_command(&e).as_deref(), Some("frob"));
+        // Other errors keep clap's message.
+        assert_eq!(
+            unknown_command(&parse(&["ls", "--bogus"]).unwrap_err()),
+            None
+        );
+        // `beet help CMD` is `beet CMD --help`.
+        let e = parse(&["mv", "--help"]).unwrap_err();
+        assert_eq!(e.kind(), ErrorKind::DisplayHelp);
+        assert!(e.to_string().contains("Usage: beet move"));
     }
 }
