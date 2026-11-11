@@ -32,11 +32,11 @@ config`, plugins fetchart / lyrics / embedart, release preferences.
 
 ## 3. Core: queries, templates, library
 
-- [ ] **3.1 Queries**: relative dates (`added:-1w..`, `-2d`, `-1y..`), item queries matching album-level fields and album flex attrs, `sort_case_insensitive`, regex case flags, `^`/`-` edge cases, `path:` with relative/`~` paths, `:` escaping in values
+- [x] **3.1 Queries**: relative dates (`added:-1w..`, `-2d`, `-1y..`), item queries matching album-level fields and album flex attrs, `sort_case_insensitive`, regex case flags, `^`/`-` edge cases, `path:` with relative/`~` paths, `:` escaping in values
 - [ ] **3.2 Templates**: `%sunique`; `$format`/`$bitrate`/`$samplerate` and other computed fields in path formats; `path_sep_replace`; `overwrite_null`
 - [ ] **3.3 Tag field coverage**: every MediaFile field beets reads/writes (composer, lyricist, arranger, work, mb_workid, artist_sort/credit, albumartists multi-valued, genres, R128 gains, barcode, isrc, asin, script, language, etc.); `id3v23`; multi-valued fields
-- [ ] **3.4 library.db compatibility**: schema identical to beets' (column names, types, path as BLOB, `added`/`mtime` floats, flex tables), so beets' own `library.db` format is readable and writable; plus a migration command (decided by the maintainer) that opens a beets `library.db` at a path the user passes **read-only** (SQLite `mode=ro`/`immutable=1`, never written) and copies items, albums and flex attributes into the beets-rs DB. Tests use synthetic beets-format DBs only; never point it at `~/.config/beets/library.db`
-- [ ] **3.5 Performance**: push query filtering/sorting into SQL where possible (currently in-memory), so 50k+ item libraries stay fast; import pipeline threading (`threaded`)
+- [ ] **3.4 library.db compatibility**: schema identical to beets' (column names, types, path as BLOB relative to the library directory as beets stores it (ours are absolute), singleton album_id NULL (ours 0), `added`/`mtime` floats, flex tables), so beets' own `library.db` format is readable and writable; plus a migration command (decided by the maintainer) that opens a beets `library.db` at a path the user passes **read-only** (SQLite `mode=ro`/`immutable=1`, never written) and copies items, albums and flex attributes into the beets-rs DB. Tests use synthetic beets-format DBs only; never point it at `~/.config/beets/library.db`
+- [ ] **3.5 Performance**: query filtering/sorting in SQL done in 3.1 (50k items: 0.03–0.6s); remaining: import pipeline threading (`threaded`)
 
 ## 4. Core: autotagger
 

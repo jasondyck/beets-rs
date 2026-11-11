@@ -108,18 +108,6 @@ pub fn parse_bool(s: &str) -> Option<bool> {
     }
 }
 
-/// "3:45", "1:02:03" or plain seconds.
-pub fn parse_duration(s: &str) -> Option<f64> {
-    if s.is_empty() {
-        return Some(0.0);
-    }
-    let mut total = 0.0;
-    for part in s.split(':') {
-        total = total * 60.0 + part.parse::<f64>().ok()?;
-    }
-    Some(total)
-}
-
 pub fn format_duration(secs: f64) -> String {
     let secs = secs.max(0.0).round() as i64;
     if secs >= 3600 {
@@ -349,6 +337,17 @@ impl Record {
             kind,
             id: None,
             values,
+            flex: BTreeMap::new(),
+        }
+    }
+
+    /// A record from values already of the schema's types, in schema order
+    /// (as the library reads them).
+    pub fn from_values(kind: Kind, id: i64, values: Vec<Value>) -> Self {
+        Record {
+            kind,
+            id: Some(id),
+            values: schema(kind).iter().map(|(n, _)| *n).zip(values).collect(),
             flex: BTreeMap::new(),
         }
     }

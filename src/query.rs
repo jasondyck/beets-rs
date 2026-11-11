@@ -1,514 +1,1435 @@
-//! beets query language.
+//! beets' query language: a port of `dbcore/query.py`, `dbcore/queryparse.py`,
+//! `dbcore/sort.py` and `library/queries.py`.
 //!
-//! Supported syntax (per command-line argument):
-//! - `term`               case-insensitive substring over the default fields
-//! - `field:term`         substring on one field
-//! - `field:=term`        exact, case-sensitive; `field:=~term` exact, case-insensitive
-//! - `field::regex`       regular expression (`::regex` searches the default fields)
-//! - `year:1990..1999`    numeric range (open ends allowed: `1990..`, `..1999`)
-//! - `length:3:00..4:00`  durations in M:SS
-//! - `added:2024-01..`    dates (YYYY, YYYY-MM, YYYY-MM-DD)
-//! - `comp:true`          booleans
-//! - `path:/some/dir`     everything under a directory
-//! - `-term` / `^term`    negation
-//! - `,`                  separates OR-ed groups of terms
-//! - `field+` / `field-`  sort ascending / descending
+//! As in beets, a query compiles to an SQL `WHERE` clause when every part of
+//! it is on a fixed field of the model or of its related model (items ↔
+//! albums, through a join); otherwise ("slow" queries on flexible or computed
+//! fields) every row is loaded and matched here, with Python's semantics.
+//! Sorting works the same way: a trailing run of fixed-field sorts goes to
+//! SQL, the rest is sorted here.
 
-use crate::model::{FieldType, Kind, Record, Value, field_type, parse_bool, parse_duration};
-use anyhow::{Context, Result, bail};
-use chrono::{Datelike, Local, NaiveDate, TimeZone};
+use crate::config::Config;
+use crate::model::{FieldType, Kind, Record, Value, schema};
+use chrono::{Duration, Local, NaiveDate, NaiveDateTime, TimeZone};
 use regex::Regex;
+use rusqlite::types::Value as SqlValue;
+use std::cell::RefCell;
 use std::cmp::Ordering;
-use std::path::PathBuf;
+use std::fmt;
+use std::os::unix::ffi::OsStrExt;
+use std::path::{Path, PathBuf};
+use std::sync::LazyLock;
+use unicode_normalization::UnicodeNormalization;
 
-const ITEM_SEARCH_FIELDS: &[&str] = &[
-    "artist",
-    "title",
-    "comments",
-    "album",
-    "albumartist",
-    "genre",
-];
-const ALBUM_SEARCH_FIELDS: &[&str] = &["album", "albumartist", "genre"];
+// ------------------------------------------------------------------ context
 
-#[derive(Debug, Clone)]
+/// What query parsing takes from the configuration (beets reads these from
+/// its global config and `context.music_dir`).
+#[derive(Clone, Debug)]
+pub struct Context {
+    /// The library directory: relative `path:` queries are relative to it.
+    pub music_dir: Option<PathBuf>,
+    /// `sort_case_insensitive`, for sorts given in a query.
+    pub sort_case_insensitive: bool,
+    /// `sort_item` / `sort_album`: the default sorts.
+    pub sort_item: Vec<String>,
+    pub sort_album: Vec<String>,
+}
+
+impl Default for Context {
+    fn default() -> Self {
+        Context {
+            music_dir: None,
+            sort_case_insensitive: true,
+            sort_item: ["artist+", "album+", "disc+", "track+"]
+                .map(String::from)
+                .to_vec(),
+            sort_album: ["albumartist+", "album+"].map(String::from).to_vec(),
+        }
+    }
+}
+
+thread_local! {
+    static CONTEXT: RefCell<Context> = RefCell::new(Context::default());
+}
+
+/// Take the query settings from the configuration (for this thread).
+pub fn configure(cfg: &Config) {
+    set_context(Context {
+        music_dir: Some(normpath(&cfg.directory())),
+        sort_case_insensitive: cfg.bool("sort_case_insensitive"),
+        sort_item: cfg.list("sort_item"),
+        sort_album: cfg.list("sort_album"),
+    });
+}
+
+pub fn set_context(c: Context) {
+    CONTEXT.with(|ctx| *ctx.borrow_mut() = c);
+}
+
+pub fn context() -> Context {
+    CONTEXT.with(|c| c.borrow().clone())
+}
+
+// ------------------------------------------------------------------- errors
+
+/// beets' `InvalidQueryError`: "'QUERY': EXPLANATION".
+#[derive(Debug)]
+pub struct InvalidQueryError(pub String);
+
+impl fmt::Display for InvalidQueryError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl std::error::Error for InvalidQueryError {}
+
+/// beets' `InvalidQueryArgumentValueError`: "'WHAT' is not EXPECTED[: DETAIL]".
+fn bad_arg(what: &str, expected: &str, detail: Option<String>) -> String {
+    match detail {
+        Some(d) => format!("'{what}' is not {expected}: {d}"),
+        None => format!("'{what}' is not {expected}"),
+    }
+}
+
+// ----------------------------------------------------------- Python values
+
+/// A field value as beets' models hand it to queries.
+#[derive(Clone, Debug, PartialEq)]
+pub enum PyVal {
+    None,
+    Bool(bool),
+    Int(i64),
+    Float(f64),
+    Str(String),
+    Bytes(Vec<u8>),
+}
+
+impl PyVal {
+    fn from_value(v: Value) -> PyVal {
+        match v {
+            Value::Str(s) => PyVal::Str(s),
+            Value::Int(i) => PyVal::Int(i),
+            Value::Float(f) => PyVal::Float(f),
+            Value::Bool(b) => PyVal::Bool(b),
+            Value::Path(p) => PyVal::Bytes(p.as_os_str().as_bytes().to_vec()),
+        }
+    }
+
+    fn number(&self) -> Option<f64> {
+        match self {
+            PyVal::Bool(b) => Some(*b as i64 as f64),
+            PyVal::Int(i) => Some(*i as f64),
+            PyVal::Float(f) => Some(*f),
+            _ => None,
+        }
+    }
+
+    /// beets' `util.as_string`.
+    fn as_string(&self) -> String {
+        match self {
+            PyVal::None => String::new(),
+            PyVal::Bool(b) => if *b { "True" } else { "False" }.into(),
+            PyVal::Int(i) => i.to_string(),
+            PyVal::Float(f) => py_float(*f),
+            PyVal::Str(s) => s.clone(),
+            PyVal::Bytes(b) => String::from_utf8_lossy(b).into_owned(),
+        }
+    }
+
+    /// Python's `==`.
+    fn py_eq(&self, other: &PyVal) -> bool {
+        match (self.number(), other.number()) {
+            (Some(a), Some(b)) => a == b,
+            _ => self == other,
+        }
+    }
+}
+
+/// Python's `repr(float)`.
+fn py_float(f: f64) -> String {
+    if f.is_nan() {
+        return "nan".into();
+    }
+    if f.is_infinite() {
+        return if f > 0.0 { "inf" } else { "-inf" }.into();
+    }
+    let a = f.abs();
+    if a != 0.0 && !(1e-4..1e16).contains(&a) {
+        // Python: shortest digits, exponent with at least two digits.
+        let s = format!("{f:e}");
+        let (m, e) = s.split_once('e').unwrap();
+        let (sign, digits) = match e.strip_prefix('-') {
+            Some(d) => ("-", d),
+            None => ("+", e),
+        };
+        return format!("{m}e{sign}{digits:0>2}");
+    }
+    if f.fract() == 0.0 {
+        format!("{f:.1}")
+    } else {
+        format!("{f}")
+    }
+}
+
+/// Python's `str.lower()`.
+fn lower(s: &str) -> String {
+    s.to_lowercase()
+}
+
+// ------------------------------------------------------------ model shapes
+
+fn table(kind: Kind) -> &'static str {
+    match kind {
+        Kind::Item => "items",
+        Kind::Album => "albums",
+    }
+}
+
+fn other(kind: Kind) -> Kind {
+    match kind {
+        Kind::Item => Kind::Album,
+        Kind::Album => Kind::Item,
+    }
+}
+
+/// The model's fixed (database) fields, `id` included.
+fn has_own(kind: Kind, f: &str) -> bool {
+    f == "id" || schema(kind).iter().any(|(n, _)| *n == f)
+}
+
+fn own_type(kind: Kind, f: &str) -> Option<FieldType> {
+    if f == "id" {
+        return Some(FieldType::Int);
+    }
+    schema(kind).iter().find(|(n, _)| *n == f).map(|(_, t)| *t)
+}
+
+/// `all_db_fields`: fixed fields of the model or its relation.
+fn in_all_db(kind: Kind, f: &str) -> bool {
+    has_own(kind, f) || has_own(other(kind), f)
+}
+
+/// `other_db_fields`: fields only the related model has.
+fn in_other_db(kind: Kind, f: &str) -> bool {
+    has_own(other(kind), f) && !has_own(kind, f)
+}
+
+/// Computed fields (`_getters`).
+fn is_getter(kind: Kind, f: &str) -> bool {
+    match kind {
+        Kind::Item => matches!(f, "singleton" | "filesize" | "has_cover_art"),
+        Kind::Album => matches!(f, "path" | "albumtotal"),
+    }
+}
+
+/// The SQL column for a fixed field, qualified with its table.
+fn column(kind: Kind, f: &str) -> String {
+    if has_own(kind, f) {
+        format!("{}.{f}", table(kind))
+    } else if has_own(other(kind), f) {
+        format!("{}.{f}", table(other(kind)))
+    } else {
+        f.to_string()
+    }
+}
+
+/// `Model._type(field)` is a path type (falling back to the relation).
+fn is_path_typed(kind: Kind, f: &str) -> bool {
+    let path =
+        |k: Kind| own_type(k, f) == Some(FieldType::Path) || (k == Kind::Album && f == "path");
+    path(kind) || path(other(kind))
+}
+
+/// The default fields an unqualified term searches (`_search_fields`).
+fn search_fields(kind: Kind) -> &'static [&'static str] {
+    match kind {
+        Kind::Item => &[
+            "artist",
+            "title",
+            "comments",
+            "album",
+            "albumartist",
+            "genre",
+        ],
+        Kind::Album => &["album", "albumartist", "genre"],
+    }
+}
+
+/// Query classes, as beets' `FieldQueryType`s.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Class {
+    Substring,
+    String,
+    Match,
+    Regexp,
+    Numeric,
+    Duration,
+    Date,
+    Boolean,
+    Path,
+    Singleton,
+}
+
+/// The query class for a field named `key` (as typed: beets doesn't
+/// lowercase it for this lookup): its own fixed fields' types, the
+/// album's `path`, the item's `singleton`; anything else is a substring.
+fn field_class(kind: Kind, key: &str) -> Class {
+    if kind == Kind::Item && key == "singleton" {
+        return Class::Singleton;
+    }
+    if kind == Kind::Album && key == "path" {
+        return Class::Path;
+    }
+    match own_type(kind, key) {
+        Some(FieldType::Duration) => Class::Duration,
+        Some(FieldType::Date) => Class::Date,
+        Some(FieldType::Bool) => Class::Boolean,
+        Some(FieldType::Path) => Class::Path,
+        Some(t) if t.is_numeric() => Class::Numeric,
+        _ => Class::Substring,
+    }
+}
+
+// ------------------------------------------------------------ the objects
+
+/// A record being matched, with what beets' models would reach through it:
+/// an item's album (for album fields and flexible attributes) and an
+/// album's directory (its computed `path`).
+#[derive(Clone, Copy)]
+pub struct Obj<'a> {
+    pub rec: &'a Record,
+    pub album: Option<&'a Record>,
+    pub album_dir: Option<&'a Path>,
+}
+
+impl<'a> Obj<'a> {
+    pub fn new(rec: &'a Record) -> Self {
+        Obj {
+            rec,
+            album: None,
+            album_dir: None,
+        }
+    }
+
+    /// beets' `Model.get(key)` (with an item's album fallback); None when
+    /// the field doesn't exist.
+    pub fn get(&self, key: &str) -> Option<PyVal> {
+        let rec = self.rec;
+        match rec.kind {
+            Kind::Item => match key {
+                "singleton" => return Some(PyVal::Bool(rec.int("album_id") == 0)),
+                "filesize" => {
+                    let n = std::fs::metadata(rec.path()).map(|m| m.len()).unwrap_or(0);
+                    return Some(PyVal::Int(n as i64));
+                }
+                "has_cover_art" => {
+                    return Some(PyVal::Bool(
+                        crate::media::has_art(rec.path()).unwrap_or(false),
+                    ));
+                }
+                // Singletons have no album (beets stores NULL).
+                "album_id" if rec.int("album_id") == 0 => return Some(PyVal::None),
+                _ => {}
+            },
+            Kind::Album => match key {
+                "path" => {
+                    return Some(PyVal::Bytes(
+                        self.album_dir
+                            .map(|p| p.as_os_str().as_bytes().to_vec())
+                            .unwrap_or_default(),
+                    ));
+                }
+                "albumtotal" => return None,
+                _ => {}
+            },
+        }
+        if has_own(rec.kind, key) {
+            return rec.get(key).map(PyVal::from_value);
+        }
+        if let Some(v) = rec.flex.get(key) {
+            return Some(PyVal::Str(v.clone()));
+        }
+        // Query keys are lowercased; flexible attributes keep their case.
+        let lk = lower(key);
+        if let Some((_, v)) = rec.flex.iter().find(|(k, _)| lower(k) == lk) {
+            return Some(PyVal::Str(v.clone()));
+        }
+        if rec.kind == Kind::Item
+            && let Some(a) = self.album
+        {
+            return Obj::new(a).get(key);
+        }
+        None
+    }
+}
+
+// ---------------------------------------------------------------- queries
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum Num {
+    Int(i64),
+    Float(f64),
+}
+
+impl Num {
+    fn f(self) -> f64 {
+        match self {
+            Num::Int(i) => i as f64,
+            Num::Float(f) => f,
+        }
+    }
+    fn sql(self) -> SqlValue {
+        match self {
+            Num::Int(i) => SqlValue::Integer(i),
+            Num::Float(f) => SqlValue::Real(f),
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+enum Test {
+    /// `SubstringQuery`.
+    Substring(String),
+    /// `StringQuery` (`=~`): whole string, ignoring case.
+    String(String),
+    /// `MatchQuery` (`=`, and booleans).
+    Match(PyVal),
+    /// `RegexpQuery`: the NFC-normalized pattern.
+    Regexp(fancy_regex::Regex),
+    /// `NumericQuery` / `DurationQuery`.
+    Numeric {
+        point: Option<Num>,
+        min: Option<Num>,
+        max: Option<Num>,
+    },
+    /// `DateQuery`: a closed-open interval of timestamps.
+    Date {
+        start: Option<f64>,
+        end: Option<f64>,
+    },
+    /// `PathQuery`.
+    Path {
+        pattern: Vec<u8>,
+        dir: Vec<u8>,
+        case_sensitive: bool,
+    },
+    /// `NoneQuery`.
+    IsNone,
+}
+
+#[derive(Clone, Debug)]
+pub struct FieldQuery {
+    field: String,
+    col: String,
+    fast: bool,
+    /// A string query on a path field: it sees the path as beets stores
+    /// it, relative to the library directory when inside it.
+    db_path: bool,
+    test: Test,
+}
+
+#[derive(Clone, Debug)]
 pub enum Pred {
     True,
-    Substr {
-        field: Option<String>,
-        pat: String,
-    },
-    Exact {
-        field: String,
-        pat: String,
-        ci: bool,
-    },
-    Regex {
-        field: Option<String>,
-        re: Regex,
-    },
-    Numeric {
-        field: String,
-        lo: Option<f64>,
-        hi: Option<f64>,
-    },
-    Bool {
-        field: String,
-        val: bool,
-    },
-    Date {
-        field: String,
-        lo: Option<f64>,
-        hi: Option<f64>,
-    },
-    Path {
-        prefix: PathBuf,
-    },
+    #[cfg_attr(not(test), allow(dead_code))]
+    False,
+    Field(FieldQuery),
     Not(Box<Pred>),
     And(Vec<Pred>),
     Or(Vec<Pred>),
 }
 
-#[derive(Debug, Clone)]
-pub struct SortKey {
-    pub field: String,
-    pub asc: bool,
-}
-
-#[derive(Debug, Clone)]
-pub struct Query {
-    pub pred: Pred,
-    pub sort: Vec<SortKey>,
-}
-
-impl Query {
-    pub fn parse<S: AsRef<str>>(kind: Kind, args: &[S]) -> Result<Self> {
-        let mut groups: Vec<Vec<Pred>> = vec![vec![]];
-        let mut sort = vec![];
-        for arg in args {
-            let arg = arg.as_ref();
-            if arg == "," {
-                groups.push(vec![]);
-                continue;
-            }
-            if let Some(k) = parse_sort(arg) {
-                sort.push(k);
-                continue;
-            }
-            groups.last_mut().unwrap().push(parse_term(kind, arg)?);
-        }
-        let groups: Vec<Pred> = groups
-            .into_iter()
-            .map(|g| match g.len() {
-                0 => Pred::True,
-                1 => g.into_iter().next().unwrap(),
-                _ => Pred::And(g),
-            })
-            .collect();
-        let pred = if groups.len() == 1 {
-            groups.into_iter().next().unwrap()
-        } else {
-            Pred::Or(groups)
-        };
-        if sort.is_empty() {
-            sort = default_sort(kind);
-        }
-        Ok(Query { pred, sort })
-    }
-
-    pub fn matches(&self, rec: &Record) -> bool {
-        self.pred.matches(rec)
-    }
-
-    pub fn sort(&self, recs: &mut [Record]) {
-        let keys = &self.sort;
-        recs.sort_by(|a, b| {
-            for k in keys {
-                let ord = compare_field(a, b, &k.field);
-                let ord = if k.asc { ord } else { ord.reverse() };
-                if ord != Ordering::Equal {
-                    return ord;
-                }
-            }
-            a.id.cmp(&b.id)
-        });
-    }
-}
-
-fn default_sort(kind: Kind) -> Vec<SortKey> {
-    let fields: &[&str] = match kind {
-        Kind::Item => &["albumartist", "album", "disc", "track"],
-        Kind::Album => &["albumartist", "album"],
-    };
-    fields
-        .iter()
-        .map(|f| SortKey {
-            field: f.to_string(),
-            asc: true,
+/// The SQL functions queries use; registered per connection.
+pub fn register_sql_functions(conn: &rusqlite::Connection) -> rusqlite::Result<()> {
+    use rusqlite::functions::FunctionFlags;
+    let flags = FunctionFlags::SQLITE_UTF8 | FunctionFlags::SQLITE_DETERMINISTIC;
+    // beets' `regexp(value, pattern)`: a search in `str(value)`.
+    conn.create_scalar_function("regexp", 2, flags, |ctx| {
+        let re = ctx.get_or_create_aux(1, |v| -> Result<fancy_regex::Regex, BoxError> {
+            Ok(fancy_regex::Regex::new(v.as_str()?)?)
+        })?;
+        let value = sql_str(ctx.get_raw(0));
+        Ok(re.is_match(&value).unwrap_or(false))
+    })?;
+    // `bytelower`: ASCII-lowercase a path blob.
+    conn.create_scalar_function("bytelower", 1, flags, |ctx| {
+        Ok(match ctx.get::<SqlValue>(0)? {
+            SqlValue::Blob(b) => SqlValue::Blob(b.to_ascii_lowercase()),
+            SqlValue::Text(t) => SqlValue::Text(t.to_lowercase()),
+            v => v,
         })
-        .collect()
+    })?;
+    // `dbpath`: a path as beets stores it (relative to the library root).
+    conn.create_scalar_function("dbpath", 1, FunctionFlags::SQLITE_UTF8, |ctx| {
+        Ok(match ctx.get::<SqlValue>(0)? {
+            SqlValue::Blob(b) => SqlValue::Text(String::from_utf8_lossy(&db_path(&b)).into_owned()),
+            v => v,
+        })
+    })?;
+    Ok(())
 }
 
-fn compare_field(a: &Record, b: &Record, field: &str) -> Ordering {
-    let ty = field_type(a.kind, field);
-    let (va, vb) = (a.get(field), b.get(field));
-    if ty.is_some_and(|t| t.is_numeric() || matches!(t, FieldType::Date | FieldType::Bool)) {
-        let fa = va.and_then(|v| v.as_f64()).unwrap_or(0.0);
-        let fb = vb.and_then(|v| v.as_f64()).unwrap_or(0.0);
-        return fa.partial_cmp(&fb).unwrap_or(Ordering::Equal);
+type BoxError = Box<dyn std::error::Error + Send + Sync + 'static>;
+
+/// Python's `str(value)` for an SQLite value (as beets' `regexp` sees it).
+fn sql_str(v: rusqlite::types::ValueRef) -> String {
+    use rusqlite::types::ValueRef as V;
+    match v {
+        V::Null => "None".into(),
+        V::Integer(i) => i.to_string(),
+        V::Real(f) => py_float(f),
+        V::Text(t) => String::from_utf8_lossy(t).into_owned(),
+        V::Blob(b) => String::from_utf8_lossy(b).into_owned(),
     }
-    let sa = va.map(|v| v.raw().to_lowercase()).unwrap_or_default();
-    let sb = vb.map(|v| v.raw().to_lowercase()).unwrap_or_default();
-    sa.cmp(&sb)
 }
 
-fn parse_sort(term: &str) -> Option<SortKey> {
-    let re = Regex::new(r"^([A-Za-z_][A-Za-z0-9_]*)([+-])$").unwrap();
-    let c = re.captures(term)?;
-    Some(SortKey {
-        field: c[1].to_string(),
-        asc: &c[2] == "+",
-    })
-}
-
-pub fn parse_term(kind: Kind, term: &str) -> Result<Pred> {
-    if term.len() > 1 && (term.starts_with('-') || term.starts_with('^')) {
-        return Ok(Pred::Not(Box::new(parse_term(kind, &term[1..])?)));
-    }
-    let field_re = Regex::new(r"^([A-Za-z_][A-Za-z0-9_]*):(.*)$").unwrap();
-    let (field, rest) = match field_re.captures(term) {
-        Some(c) => (
-            Some(c[1].to_string()),
-            c.get(2).unwrap().as_str().to_string(),
-        ),
-        None => (None, term.to_string()),
-    };
-
-    // Regex: `field::re` or `::re` (the latter lands here as field=None, rest="::re"
-    // because an empty field name doesn't match the field regex).
-    if let Some(re) = rest.strip_prefix(':').filter(|_| field.is_some()) {
-        return Ok(Pred::Regex {
-            field,
-            re: Regex::new(re).with_context(|| format!("bad regex {re:?}"))?,
-        });
-    }
-    if field.is_none()
-        && let Some(re) = rest.strip_prefix("::")
-    {
-        return Ok(Pred::Regex {
-            field: None,
-            re: Regex::new(re).with_context(|| format!("bad regex {re:?}"))?,
-        });
-    }
-
-    let Some(field) = field else {
-        // A bare term that names an existing path is a path query, like beets.
-        if rest.contains('/') && std::path::Path::new(&rest).exists() {
-            return Ok(Pred::Path {
-                prefix: absolute(&rest),
-            });
+impl Pred {
+    /// The fields the query looks at (`field_names`).
+    fn field_names(&self, out: &mut Vec<String>) {
+        match self {
+            Pred::Field(q) => out.push(q.field.clone()),
+            Pred::Not(p) => p.field_names(out),
+            Pred::And(ps) | Pred::Or(ps) => ps.iter().for_each(|p| p.field_names(out)),
+            Pred::True | Pred::False => {}
         }
-        return Ok(Pred::Substr {
-            field: None,
-            pat: rest.to_lowercase(),
-        });
-    };
-
-    if let Some(p) = rest.strip_prefix("=~") {
-        return Ok(Pred::Exact {
-            field,
-            pat: p.to_lowercase(),
-            ci: true,
-        });
-    }
-    if let Some(p) = rest.strip_prefix('=') {
-        return Ok(Pred::Exact {
-            field,
-            pat: p.to_string(),
-            ci: false,
-        });
     }
 
-    let ty = if field == "singleton" && kind == Kind::Item {
-        Some(FieldType::Bool)
-    } else {
-        field_type(kind, &field)
-    };
-    Ok(match ty {
-        Some(FieldType::Path) => Pred::Path {
-            prefix: absolute(&rest),
-        },
-        Some(FieldType::Bool) => Pred::Bool {
-            val: parse_bool(&rest).with_context(|| format!("{field}: not a boolean: {rest:?}"))?,
-            field,
-        },
-        Some(FieldType::Date) => {
-            let (lo, hi) =
-                parse_date_range(&rest).with_context(|| format!("{field}: bad date {rest:?}"))?;
-            Pred::Date { field, lo, hi }
-        }
-        Some(t) if t.is_numeric() => {
-            let parse = |s: &str| -> Result<Option<f64>> {
-                if s.is_empty() {
-                    return Ok(None);
-                }
-                let v = if t == FieldType::Duration {
-                    parse_duration(s)
+    /// Whether running it in SQL needs the related table joined in.
+    pub fn needs_join(&self, kind: Kind) -> bool {
+        let mut names = vec![];
+        self.field_names(&mut names);
+        names.iter().any(|f| in_other_db(kind, f))
+    }
+
+    /// beets' `clause()`: an SQL expression with its parameters, or None
+    /// when part of the query can only be matched in memory.
+    pub fn clause(&self) -> Option<(String, Vec<SqlValue>)> {
+        match self {
+            Pred::True => Some(("1".into(), vec![])),
+            Pred::False => Some(("0".into(), vec![])),
+            Pred::Field(q) => q.clause(),
+            Pred::Not(p) => p.clause().map(|(c, v)| (format!("not ({c})"), v)),
+            Pred::And(ps) | Pred::Or(ps) => {
+                let joiner = if matches!(self, Pred::And(_)) {
+                    " and "
                 } else {
-                    s.parse().ok()
+                    " or "
                 };
-                v.map(Some)
-                    .with_context(|| format!("{field}: not a number: {s:?}"))
-            };
-            match rest.split_once("..") {
-                Some((a, b)) => Pred::Numeric {
-                    lo: parse(a)?,
-                    hi: parse(b)?,
-                    field,
-                },
-                None if rest.is_empty() => Pred::Substr {
-                    field: Some(field),
-                    pat: String::new(),
-                },
-                None => {
-                    let v = parse(&rest)?;
-                    Pred::Numeric {
-                        lo: v,
-                        hi: v,
-                        field,
-                    }
+                let mut parts = vec![];
+                let mut vals = vec![];
+                for p in ps {
+                    let (c, v) = p.clause()?;
+                    parts.push(format!("({c})"));
+                    vals.extend(v);
                 }
+                Some((parts.join(joiner), vals))
             }
         }
-        _ => Pred::Substr {
-            field: Some(field),
-            pat: rest.to_lowercase(),
-        },
-    })
+    }
+
+    pub fn matches(&self, obj: &Obj) -> bool {
+        match self {
+            Pred::True => true,
+            Pred::False => false,
+            Pred::Field(q) => q.matches(obj),
+            Pred::Not(p) => !p.matches(obj),
+            Pred::And(ps) => ps.iter().all(|p| p.matches(obj)),
+            Pred::Or(ps) => ps.iter().any(|p| p.matches(obj)),
+        }
+    }
 }
 
-fn absolute(p: &str) -> PathBuf {
-    let p = crate::config::expand_tilde(p);
+/// `%`, `_` and `\` escaped for `LIKE ... ESCAPE '\'`.
+fn like_escape(s: &str) -> String {
+    s.replace('\\', "\\\\")
+        .replace('%', "\\%")
+        .replace('_', "\\_")
+}
+
+impl FieldQuery {
+    fn clause(&self) -> Option<(String, Vec<SqlValue>)> {
+        if !self.fast {
+            return None;
+        }
+        let col = if self.db_path {
+            format!("dbpath({})", self.col)
+        } else {
+            self.col.clone()
+        };
+        Some(match &self.test {
+            Test::Substring(p) => (
+                format!("{col} like ? escape '\\'"),
+                vec![SqlValue::Text(format!("%{}%", like_escape(p)))],
+            ),
+            Test::String(p) => (
+                format!("{col} like ? escape '\\'"),
+                vec![SqlValue::Text(like_escape(p))],
+            ),
+            Test::Match(v) => (
+                format!("{col} = ?"),
+                vec![match v {
+                    PyVal::Int(i) => SqlValue::Integer(*i),
+                    PyVal::Bool(b) => SqlValue::Integer(*b as i64),
+                    PyVal::Float(f) => SqlValue::Real(*f),
+                    PyVal::Bytes(b) => SqlValue::Blob(b.clone()),
+                    PyVal::None => SqlValue::Null,
+                    PyVal::Str(s) => SqlValue::Text(s.clone()),
+                }],
+            ),
+            Test::Regexp(re) => (
+                format!("regexp({col}, ?)"),
+                vec![SqlValue::Text(re.as_str().to_string())],
+            ),
+            Test::Numeric { point, min, max } => match (point, min, max) {
+                (Some(p), _, _) => (format!("{col}=?"), vec![p.sql()]),
+                (None, Some(a), Some(b)) => {
+                    (format!("{col} >= ? AND {col} <= ?"), vec![a.sql(), b.sql()])
+                }
+                (None, Some(a), None) => (format!("{col} >= ?"), vec![a.sql()]),
+                (None, None, Some(b)) => (format!("{col} <= ?"), vec![b.sql()]),
+                (None, None, None) => ("1".into(), vec![]),
+            },
+            Test::Date { start, end } => {
+                let mut parts = vec![];
+                let mut vals = vec![];
+                // beets binds `int(datetime.timestamp())`.
+                if let Some(s) = start {
+                    parts.push(format!("{col} >= ?"));
+                    vals.push(SqlValue::Integer(s.trunc() as i64));
+                }
+                if let Some(e) = end {
+                    parts.push(format!("{col} < ?"));
+                    vals.push(SqlValue::Integer(e.trunc() as i64));
+                }
+                if parts.is_empty() {
+                    ("1".into(), vec![])
+                } else {
+                    (parts.join(" AND "), vals)
+                }
+            }
+            Test::Path {
+                pattern,
+                dir,
+                case_sensitive,
+            } => {
+                let (l, r) = if *case_sensitive {
+                    (col.clone(), "?".to_string())
+                } else {
+                    (format!("bytelower({col})"), "bytelower(?)".to_string())
+                };
+                (
+                    format!("({l} = {r}) OR (substr({l}, 1, ?) = {r})"),
+                    vec![
+                        SqlValue::Blob(pattern.clone()),
+                        SqlValue::Integer(dir.len() as i64),
+                        SqlValue::Blob(dir.clone()),
+                    ],
+                )
+            }
+            Test::IsNone => {
+                // Our singletons have album_id 0 where beets has NULL.
+                if self.field == "album_id" {
+                    (format!("({col} IS NULL OR {col} = 0)"), vec![])
+                } else {
+                    (format!("{col} IS NULL"), vec![])
+                }
+            }
+        })
+    }
+
+    fn value(&self, obj: &Obj) -> Option<PyVal> {
+        let v = obj.get(&self.field)?;
+        Some(match v {
+            PyVal::Bytes(b) if self.db_path => {
+                PyVal::Str(String::from_utf8_lossy(&db_path(&b)).into_owned())
+            }
+            v => v,
+        })
+    }
+
+    fn matches(&self, obj: &Obj) -> bool {
+        let value = self.value(obj);
+        match &self.test {
+            Test::Substring(p) => {
+                lower(&value.unwrap_or(PyVal::None).as_string()).contains(&lower(p))
+            }
+            Test::String(p) => lower(&value.unwrap_or(PyVal::None).as_string()) == lower(p),
+            Test::Match(p) => p.py_eq(&value.unwrap_or(PyVal::None)),
+            Test::Regexp(re) => {
+                let s: String = value.unwrap_or(PyVal::None).as_string().nfc().collect();
+                re.is_match(&s).unwrap_or(false)
+            }
+            Test::Numeric { point, min, max } => {
+                let Some(v) = value else { return false };
+                let v = match v {
+                    PyVal::Str(s) => match parse_number(&s) {
+                        Ok(Some(n)) => n.f(),
+                        _ => return false,
+                    },
+                    v => match v.number() {
+                        Some(n) => n,
+                        None => return false,
+                    },
+                };
+                if let Some(p) = point {
+                    return v == p.f();
+                }
+                !(min.is_some_and(|m| v < m.f()) || max.is_some_and(|m| v > m.f()))
+            }
+            Test::Date { start, end } => {
+                let ts = match value {
+                    Some(PyVal::Str(s)) => match s.trim().parse::<f64>() {
+                        Ok(f) => f,
+                        Err(_) => return false,
+                    },
+                    Some(v) => match v.number() {
+                        Some(f) => f,
+                        None => return false,
+                    },
+                    None => return false,
+                };
+                !(start.is_some_and(|s| ts < s) || end.is_some_and(|e| ts >= e))
+            }
+            Test::Path {
+                pattern,
+                dir,
+                case_sensitive,
+            } => {
+                let mut path = match value {
+                    Some(PyVal::Bytes(b)) => b,
+                    Some(v) => v.as_string().into_bytes(),
+                    None => return false,
+                };
+                if !case_sensitive {
+                    path.make_ascii_lowercase();
+                }
+                path == *pattern || path.starts_with(dir)
+            }
+            Test::IsNone => matches!(value, None | Some(PyVal::None)),
+        }
+    }
+}
+
+// ------------------------------------------------------------ path helpers
+
+/// Python's `os.path.normpath(os.path.abspath(os.path.expanduser(p)))`.
+pub fn normpath(p: &Path) -> PathBuf {
+    let p = crate::config::expand_tilde(&p.to_string_lossy());
     let p = if p.is_absolute() {
         p
     } else {
         std::env::current_dir().unwrap_or_default().join(p)
     };
-    std::fs::canonicalize(&p).unwrap_or(p)
-}
-
-/// Parse "2024", "2024-03", "2024-03-05" or a `..` range of those into
-/// [start, end) timestamps.
-fn parse_date_range(s: &str) -> Result<(Option<f64>, Option<f64>)> {
-    let (a, b) = match s.split_once("..") {
-        Some((a, b)) => (a, b),
-        None => (s, s),
-    };
-    let lo = if a.is_empty() {
-        None
-    } else {
-        Some(date_period(a)?.0)
-    };
-    let hi = if b.is_empty() {
-        None
-    } else {
-        Some(date_period(b)?.1)
-    };
-    Ok((lo, hi))
-}
-
-fn date_period(s: &str) -> Result<(f64, f64)> {
-    let parts: Vec<i32> = s.split('-').map(|p| p.parse()).collect::<Result<_, _>>()?;
-    let (start, end) = match parts.as_slice() {
-        [y] => (
-            NaiveDate::from_ymd_opt(*y, 1, 1),
-            NaiveDate::from_ymd_opt(y + 1, 1, 1),
-        ),
-        [y, m] => {
-            let start = NaiveDate::from_ymd_opt(*y, *m as u32, 1);
-            let end = if *m == 12 {
-                NaiveDate::from_ymd_opt(y + 1, 1, 1)
-            } else {
-                NaiveDate::from_ymd_opt(*y, *m as u32 + 1, 1)
-            };
-            (start, end)
+    let mut out: Vec<std::ffi::OsString> = vec![];
+    for c in p.components() {
+        use std::path::Component as C;
+        match c {
+            C::RootDir | C::Prefix(_) | C::CurDir => {}
+            C::ParentDir => {
+                out.pop();
+            }
+            C::Normal(s) => out.push(s.to_os_string()),
         }
-        [y, m, d] => {
-            let start = NaiveDate::from_ymd_opt(*y, *m as u32, *d as u32);
-            (start, start.and_then(|s| s.succ_opt()))
-        }
-        _ => bail!("bad date"),
-    };
-    let ts = |d: Option<NaiveDate>| -> Result<f64> {
-        let d = d.context("invalid date")?;
-        let dt = Local
-            .with_ymd_and_hms(d.year(), d.month(), d.day(), 0, 0, 0)
-            .earliest()
-            .context("invalid local time")?;
-        Ok(dt.timestamp() as f64)
-    };
-    Ok((ts(start)?, ts(end)?))
+    }
+    let mut r = PathBuf::from("/");
+    r.extend(out);
+    r
 }
 
-fn search_fields(kind: Kind) -> &'static [&'static str] {
-    match kind {
-        Kind::Item => ITEM_SEARCH_FIELDS,
-        Kind::Album => ALBUM_SEARCH_FIELDS,
+/// beets' `normalize_path_for_db`: a path inside the library directory
+/// relative to it, others unchanged.
+fn db_path(path: &[u8]) -> Vec<u8> {
+    let Some(music) = context().music_dir else {
+        return path.to_vec();
+    };
+    if !path.starts_with(b"/") {
+        return path.to_vec();
+    }
+    let music = music.as_os_str().as_bytes();
+    if path == music {
+        return b".".to_vec();
+    }
+    let mut prefix = music.to_vec();
+    if !prefix.ends_with(b"/") {
+        prefix.push(b'/');
+    }
+    match path.strip_prefix(prefix.as_slice()) {
+        Some(rel) => {
+            let p = Path::new(std::ffi::OsStr::from_bytes(rel));
+            let n = normpath(&Path::new("/").join(p));
+            n.as_os_str().as_bytes()[1..].to_vec()
+        }
+        None => path.to_vec(),
     }
 }
 
-fn str_of(rec: &Record, field: &str) -> Option<String> {
-    rec.get(field).map(|v| match v {
-        Value::Bool(b) => {
-            if b {
-                "True".into()
-            } else {
-                "False".into()
-            }
+/// beets' `util.case_sensitive`: whether the filesystem holding `path` is
+/// case sensitive, judged from the nearest existing ancestor.
+pub fn case_sensitive(path: &Path) -> bool {
+    let mut path = path.to_path_buf();
+    loop {
+        let (Some(head), Some(tail)) = (path.parent(), path.file_name()) else {
+            return true;
+        };
+        let head = head.to_path_buf();
+        if !path.exists() {
+            path = head;
+            continue;
         }
-        v => v.raw(),
+        let tail = tail.to_string_lossy();
+        let (upper, low) = (tail.to_uppercase(), tail.to_lowercase());
+        if upper == low {
+            path = head;
+            continue;
+        }
+        let (u, l) = (head.join(&upper), head.join(&low));
+        let (Ok(um), Ok(lm)) = (std::fs::metadata(&u), std::fs::metadata(&l)) else {
+            return true;
+        };
+        use std::os::unix::fs::MetadataExt;
+        return (um.dev(), um.ino()) != (lm.dev(), lm.ino());
+    }
+}
+
+/// beets' `PathQuery.is_path_query`: the part before any colon contains a
+/// `/` and exists.
+pub fn is_path_query(part: &str) -> bool {
+    let p = part.split(':').next().unwrap_or("");
+    p.contains('/') && normpath(Path::new(p)).exists()
+}
+
+fn path_test(pattern: &str) -> Test {
+    let ctx = context();
+    let mut p = PathBuf::from(pattern);
+    if !pattern.starts_with('/')
+        && let Some(md) = &ctx.music_dir
+    {
+        p = md.join(pattern);
+    }
+    let path = normpath(&p);
+    let case_sensitive = case_sensitive(&path);
+    let mut pattern = path.as_os_str().as_bytes().to_vec();
+    if !case_sensitive {
+        pattern.make_ascii_lowercase();
+    }
+    let mut dir = pattern.clone();
+    if !dir.ends_with(b"/") {
+        dir.push(b'/');
+    }
+    Test::Path {
+        pattern,
+        dir,
+        case_sensitive,
+    }
+}
+
+// --------------------------------------------------------- numbers, dates
+
+/// Python's `int(s)`, else `float(s)`; None for "".
+fn parse_number(s: &str) -> Result<Option<Num>, ()> {
+    if s.is_empty() {
+        return Ok(None);
+    }
+    let t = s.trim();
+    let digits_ok = |d: &str| {
+        !d.is_empty()
+            && !d.starts_with('_')
+            && !d.ends_with('_')
+            && !d.contains("__")
+            && d.chars().all(|c| c.is_ascii_digit() || c == '_')
+    };
+    let unsigned = t.strip_prefix(['+', '-']).unwrap_or(t);
+    if digits_ok(unsigned)
+        && let Ok(i) = t.replace('_', "").parse::<i64>()
+    {
+        return Ok(Some(Num::Int(i)));
+    }
+    let lower_t = t.to_ascii_lowercase();
+    let word = lower_t.trim_start_matches(['+', '-']);
+    if (matches!(word, "inf" | "infinity" | "nan") || t.chars().any(|c| c.is_ascii_digit()))
+        && let Ok(f) = t.parse::<f64>()
+    {
+        return Ok(Some(Num::Float(f)));
+    }
+    Err(())
+}
+
+fn numeric_test(pattern: &str, duration: bool) -> Result<Test, String> {
+    let convert = |s: &str| -> Result<Option<Num>, String> {
+        if duration {
+            if s.is_empty() {
+                return Ok(None);
+            }
+            static MSS: LazyLock<Regex> =
+                LazyLock::new(|| Regex::new(r"^(\d+):([0-5]\d)$").unwrap());
+            if let Some(c) = MSS.captures(s) {
+                let m: f64 = c[1].parse().unwrap_or(0.0);
+                let ss: f64 = c[2].parse().unwrap_or(0.0);
+                return Ok(Some(Num::Float(m * 60.0 + ss)));
+            }
+            match parse_number(s) {
+                Ok(n) => Ok(n.map(|n| Num::Float(n.f()))),
+                Err(()) => Err(bad_arg(s, "a M:SS string or a float", None)),
+            }
+        } else {
+            parse_number(s).map_err(|()| bad_arg(s, "an int or a float", None))
+        }
+    };
+    Ok(match pattern.split_once("..") {
+        None => Test::Numeric {
+            point: convert(pattern)?,
+            min: None,
+            max: None,
+        },
+        Some((a, b)) => Test::Numeric {
+            point: None,
+            min: convert(a)?,
+            max: convert(b)?,
+        },
     })
 }
 
-impl Pred {
-    pub fn matches(&self, rec: &Record) -> bool {
-        match self {
-            Pred::True => true,
-            Pred::Not(p) => !p.matches(rec),
-            Pred::And(ps) => ps.iter().all(|p| p.matches(rec)),
-            Pred::Or(ps) => ps.iter().any(|p| p.matches(rec)),
-            Pred::Substr {
-                field: Some(f),
-                pat,
-            } => str_of(rec, f).is_some_and(|s| s.to_lowercase().contains(pat.as_str())),
-            Pred::Substr { field: None, pat } => search_fields(rec.kind)
-                .iter()
-                .any(|f| rec.str(f).to_lowercase().contains(pat.as_str())),
-            Pred::Exact { field, pat, ci } => str_of(rec, field).is_some_and(|s| {
-                if *ci {
-                    s.to_lowercase() == *pat
-                } else {
-                    s == *pat
-                }
-            }),
-            Pred::Regex { field: Some(f), re } => str_of(rec, f).is_some_and(|s| re.is_match(&s)),
-            Pred::Regex { field: None, re } => search_fields(rec.kind)
-                .iter()
-                .any(|f| re.is_match(rec.str(f))),
-            Pred::Numeric { field, lo, hi } => {
-                let Some(v) = rec.get(field).and_then(|v| v.as_f64()) else {
-                    return false;
-                };
-                lo.is_none_or(|lo| v >= lo) && hi.is_none_or(|hi| v <= hi)
+/// beets' `Period`: a date with a precision.
+#[derive(Clone, Copy, Debug)]
+struct Period {
+    date: NaiveDateTime,
+    /// 0 year, 1 month, 2 day, 3 hour, 4 minute, 5 second.
+    precision: usize,
+}
+
+/// `time.strptime`'s regexes for beets' date formats, in precision order
+/// (each with a "T" and a whitespace variant once a time is involved).
+static DATE_FORMATS: LazyLock<Vec<(usize, Regex)>> = LazyLock::new(|| {
+    let y = r"(\d\d\d\d)";
+    let m = r"(1[0-2]|0[1-9]|[1-9])";
+    let d = r"(3[01]|[12]\d|0[1-9]|[1-9]| [1-9])";
+    let h = r"(2[0-3]|[0-1]\d|\d)";
+    let mi = r"([0-5]\d|\d)";
+    let s = r"(6[0-1]|[0-5]\d|\d)";
+    let date = format!("{y}-{m}-{d}");
+    let mut out = vec![
+        (0, y.to_string()),
+        (1, format!("{y}-{m}")),
+        (2, date.clone()),
+    ];
+    for sep in ["T", r"\s+"] {
+        out.push((3, format!("{date}{sep}{h}")));
+        out.push((4, format!("{date}{sep}{h}:{mi}")));
+        out.push((5, format!("{date}{sep}{h}:{mi}:{s}")));
+    }
+    out.sort_by_key(|(p, _)| *p);
+    out.into_iter()
+        .map(|(p, r)| (p, Regex::new(&format!("(?i)^{r}")).unwrap()))
+        .collect()
+});
+
+static RELATIVE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^([+-]?)([0-9]+)([ymwd])").unwrap());
+
+impl Period {
+    fn parse(s: &str) -> Result<Option<Period>, String> {
+        if s.is_empty() {
+            return Ok(None);
+        }
+        if let Some(c) = RELATIVE.captures(s) {
+            let days: i64 = match &c[3] {
+                "y" => 365,
+                "m" => 30,
+                "w" => 7,
+                _ => 1,
+            };
+            let qty: i64 = c[2]
+                .parse()
+                .map_err(|_| bad_arg(s, "a valid date/time string", None))?;
+            let delta = Duration::try_days(qty.saturating_mul(days))
+                .ok_or_else(|| bad_arg(s, "a valid date/time string", None))?;
+            let now = Local::now().naive_local();
+            let date = if &c[1] == "-" {
+                now.checked_sub_signed(delta)
+            } else {
+                now.checked_add_signed(delta)
             }
-            Pred::Bool { field, val } => {
-                let v = match rec.get(field) {
-                    Some(Value::Bool(b)) => b,
-                    Some(Value::Str(s)) => parse_bool(&s).unwrap_or(false),
-                    Some(v) => v.as_f64().unwrap_or(0.0) != 0.0,
-                    None => false,
-                };
-                v == *val
+            .ok_or_else(|| bad_arg(s, "a valid date/time string", None))?;
+            return Ok(Some(Period { date, precision: 5 }));
+        }
+        for (precision, re) in DATE_FORMATS.iter() {
+            let Some(c) = re.captures(s) else { continue };
+            // `strptime` wants the whole string used.
+            if c.get(0).unwrap().end() != s.len() {
+                continue;
             }
-            Pred::Date { field, lo, hi } => {
-                let v = rec.float(field);
-                v != 0.0 && lo.is_none_or(|lo| v >= lo) && hi.is_none_or(|hi| v < hi)
-            }
-            Pred::Path { prefix } => {
-                let path = match rec.kind {
-                    Kind::Item => rec.path().to_path_buf(),
-                    Kind::Album => return false,
-                };
-                path == *prefix || path.starts_with(prefix)
+            let n = |i: usize| -> u32 {
+                c.get(i)
+                    .map_or(0, |m| m.as_str().trim().parse().unwrap_or(0))
+            };
+            let year = n(1) as i32;
+            let date = NaiveDate::from_ymd_opt(year, n(2).max(1), n(3).max(1))
+                .and_then(|d| d.and_hms_opt(n(4), n(5), n(6)));
+            if let Some(date) = date {
+                return Ok(Some(Period {
+                    date,
+                    precision: *precision,
+                }));
             }
         }
+        Err(bad_arg(s, "a valid date/time string", None))
+    }
+
+    /// The end of the period, for a right-open interval.
+    fn open_right_endpoint(&self) -> Option<NaiveDateTime> {
+        use chrono::Datelike;
+        let d = self.date;
+        match self.precision {
+            0 => d.with_month(1)?.with_year(d.year() + 1),
+            1 => {
+                if d.month() < 12 {
+                    d.with_month(d.month() + 1)
+                } else {
+                    d.with_month(1)?.with_year(d.year() + 1)
+                }
+            }
+            2 => d.checked_add_signed(Duration::days(1)),
+            3 => d.checked_add_signed(Duration::hours(1)),
+            4 => d.checked_add_signed(Duration::minutes(1)),
+            _ => d.checked_add_signed(Duration::seconds(1)),
+        }
+    }
+}
+
+/// A local naive datetime as a Unix timestamp (`datetime.timestamp()`).
+fn timestamp(d: NaiveDateTime) -> f64 {
+    let local = Local.from_local_datetime(&d).earliest().or_else(|| {
+        Local
+            .from_local_datetime(&(d + Duration::hours(1)))
+            .earliest()
+    });
+    match local {
+        Some(l) => l.timestamp() as f64 + l.timestamp_subsec_micros() as f64 / 1e6,
+        None => d.and_utc().timestamp() as f64,
+    }
+}
+
+/// beets' `DateInterval.from_periods` over `_parse_periods`.
+fn date_test(pattern: &str) -> Result<Test, String> {
+    let (start, end) = match pattern.split_once("..") {
+        None => {
+            let p = Period::parse(pattern)?;
+            (p, p)
+        }
+        Some((a, b)) => (Period::parse(a)?, Period::parse(b)?),
+    };
+    let overflow = || bad_arg(pattern, "a valid date/time string", None);
+    let (start, end) = match (start, end) {
+        (Some(s), Some(e)) if s.date >= e.open_right_endpoint().ok_or_else(overflow)? => {
+            (Some(e), Some(s))
+        }
+        x => x,
+    };
+    Ok(Test::Date {
+        start: start.map(|s| timestamp(s.date)),
+        end: match end {
+            Some(e) => Some(timestamp(e.open_right_endpoint().ok_or_else(overflow)?)),
+            None => None,
+        },
+    })
+}
+
+// ----------------------------------------------------------------- parsing
+
+/// beets' `parse_query_part`: (field, term, negated). The field is what
+/// comes before the first unescaped colon, if that's all non-space;
+/// `\:` in the term stands for a colon.
+pub fn parse_query_part(part: &str) -> (Option<String>, String, bool) {
+    let part = part.trim();
+    let (negate, rest) = match part.strip_prefix(['-', '^']) {
+        Some(r) => (true, r),
+        None => (false, part),
+    };
+    let mut key = None;
+    let mut prev: Option<char> = None;
+    for (i, c) in rest.char_indices() {
+        if c.is_whitespace() {
+            break;
+        }
+        if c == ':' && i > 0 && prev != Some('\\') {
+            key = Some(i);
+            break;
+        }
+        prev = Some(c);
+    }
+    match key {
+        Some(i) => (
+            Some(rest[..i].to_string()),
+            rest[i + 1..].replace("\\:", ":"),
+            negate,
+        ),
+        None => (None, rest.replace("\\:", ":"), negate),
+    }
+}
+
+/// The query prefixes beets registers, in order.
+const PREFIXES: [(&str, Class); 3] = [
+    (":", Class::Regexp),
+    ("=~", Class::String),
+    ("=", Class::Match),
+];
+
+/// beets' `construct_query_part`.
+fn construct_query_part(kind: Kind, part: &str) -> Result<Pred, String> {
+    if part.is_empty() {
+        return Ok(Pred::True);
+    }
+    let (key, term, negate) = parse_query_part(part);
+    let (class, pattern) = match PREFIXES.iter().find(|(p, _)| term.starts_with(p)) {
+        Some((p, c)) => (*c, term[p.len()..].to_string()),
+        None => (
+            key.as_deref()
+                .map_or(Class::Substring, |k| field_class(kind, k)),
+            term,
+        ),
+    };
+    let q = match key {
+        None => Pred::Or(
+            search_fields(kind)
+                .iter()
+                .map(|f| field_query(kind, f, &pattern, class))
+                .collect::<Result<_, _>>()?,
+        ),
+        Some(k) => field_query(kind, &lower(&k), &pattern, class)?,
+    };
+    Ok(if negate { Pred::Not(Box::new(q)) } else { q })
+}
+
+/// beets' `LibModel.field_query`.
+fn field_query(kind: Kind, field: &str, pattern: &str, class: Class) -> Result<Pred, String> {
+    let mut pattern = pattern.to_string();
+    let db_path = is_path_typed(kind, field) && class != Class::Path;
+    if db_path {
+        // String queries on a path see the stored, library-relative form.
+        let p = crate::config::expand_tilde(&pattern);
+        if p.is_absolute() {
+            pattern = String::from_utf8_lossy(&db_path_of(&p)).into_owned();
+        }
+    }
+    let test = match class {
+        Class::Substring => Test::Substring(pattern),
+        Class::String => Test::String(pattern),
+        Class::Match => Test::Match(PyVal::Str(pattern)),
+        Class::Regexp => {
+            let p: String = pattern.nfc().collect();
+            match fancy_regex::Regex::new(&p) {
+                Ok(re) => Test::Regexp(re),
+                Err(e) => return Err(bad_arg(&p, "a regular expression", Some(e.to_string()))),
+            }
+        }
+        Class::Numeric => numeric_test(&pattern, false)?,
+        Class::Duration => numeric_test(&pattern, true)?,
+        Class::Date => date_test(&pattern)?,
+        Class::Boolean => Test::Match(PyVal::Int(str2bool(&pattern) as i64)),
+        Class::Path => path_test(&pattern),
+        Class::Singleton => {
+            let q = Pred::Field(FieldQuery {
+                field: "album_id".into(),
+                col: column(kind, "album_id"),
+                fast: true,
+                db_path: false,
+                test: Test::IsNone,
+            });
+            return Ok(if str2bool(&pattern) {
+                q
+            } else {
+                Pred::Not(Box::new(q))
+            });
+        }
+    };
+    Ok(Pred::Field(FieldQuery {
+        field: field.to_string(),
+        col: column(kind, field),
+        fast: in_all_db(kind, field),
+        db_path,
+        test,
+    }))
+}
+
+fn db_path_of(p: &Path) -> Vec<u8> {
+    db_path(p.as_os_str().as_bytes())
+}
+
+/// beets' `util.str2bool`.
+pub fn str2bool(s: &str) -> bool {
+    matches!(lower(s).as_str(), "yes" | "1" | "true" | "t" | "y")
+}
+
+// -------------------------------------------------------------------- sorts
+
+#[derive(Clone, Debug, PartialEq)]
+enum SortKind {
+    /// `SmartArtistSort`: `<field>_sort`, falling back to `<field>`.
+    Smart,
+    /// `FixedFieldSort`: in SQL.
+    Fixed,
+    /// `SlowFieldSort`: flexible or computed fields.
+    Slow,
+}
+
+#[derive(Clone, Debug)]
+pub struct FieldSort {
+    pub field: String,
+    pub ascending: bool,
+    case_insensitive: bool,
+    kind: SortKind,
+}
+
+/// beets' `Sort`: no keys is `NullSort`.
+#[derive(Clone, Debug, Default)]
+pub struct Sort(pub Vec<FieldSort>);
+
+/// beets' `LibModel.field_sort`.
+fn field_sort(kind: Kind, field: &str, ascending: bool, case_insensitive: bool) -> FieldSort {
+    let (field, k) = match (kind, field) {
+        (Kind::Item, "artist") => ("artist", SortKind::Smart),
+        (Kind::Album, "artist" | "albumartist") => ("albumartist", SortKind::Smart),
+        (_, f) if in_all_db(kind, f) && !is_getter(kind, f) => (f, SortKind::Fixed),
+        (_, f) => (f, SortKind::Slow),
+    };
+    FieldSort {
+        field: field.to_string(),
+        ascending,
+        case_insensitive,
+        kind: k,
+    }
+}
+
+/// beets' `sort_from_strings`: each part is a field and `+` or `-`.
+pub fn sort_from_strings(kind: Kind, parts: &[String], case_insensitive: bool) -> Sort {
+    Sort(
+        parts
+            .iter()
+            .filter(|p| p.len() > 1)
+            .map(|p| {
+                let (f, dir) = p.split_at(p.len() - 1);
+                field_sort(kind, f, dir == "+", case_insensitive)
+            })
+            .collect(),
+    )
+}
+
+impl FieldSort {
+    fn order_clause(&self, kind: Kind) -> Option<String> {
+        let order = if self.ascending { "ASC" } else { "DESC" };
+        let col = column(kind, &self.field);
+        match self.kind {
+            SortKind::Slow => None,
+            SortKind::Smart => {
+                let collate = if self.case_insensitive {
+                    "COLLATE NOCASE"
+                } else {
+                    ""
+                };
+                Some(format!(
+                    "COALESCE(NULLIF({col}_sort, ''), {col}) {collate} {order}"
+                ))
+            }
+            SortKind::Fixed => Some(if self.case_insensitive {
+                format!(
+                    "(CASE WHEN TYPEOF({col})='text' THEN LOWER({col}) \
+                     WHEN TYPEOF({col})='blob' THEN LOWER({col}) ELSE {col} END) {order}"
+                )
+            } else {
+                format!("{col} {order}")
+            }),
+        }
+    }
+
+    /// Python's sort key for the slow path.
+    fn key(&self, obj: &Obj) -> PyVal {
+        let v = match self.kind {
+            SortKind::Smart => match obj.get(&format!("{}_sort", self.field)) {
+                Some(PyVal::Str(s)) if !s.is_empty() => PyVal::Str(s),
+                _ => obj.get(&self.field).unwrap_or(PyVal::Str(String::new())),
+            },
+            _ => match obj.get(&self.field) {
+                None | Some(PyVal::None) => {
+                    if obj.rec.kind == Kind::Album && self.field == "path" {
+                        PyVal::Bytes(vec![])
+                    } else {
+                        PyVal::Str(String::new())
+                    }
+                }
+                Some(v) => v,
+            },
+        };
+        match v {
+            PyVal::Str(s) if self.case_insensitive => PyVal::Str(lower(&s)),
+            v => v,
+        }
+    }
+}
+
+/// Python-ish ordering of sort keys (numbers, then strings, then bytes,
+/// where Python would refuse to compare mixed types).
+fn py_cmp(a: &PyVal, b: &PyVal) -> Ordering {
+    let rank = |v: &PyVal| match v {
+        PyVal::None => 0,
+        PyVal::Bool(_) | PyVal::Int(_) | PyVal::Float(_) => 1,
+        PyVal::Str(_) => 2,
+        PyVal::Bytes(_) => 3,
+    };
+    match (a, b) {
+        (PyVal::Str(x), PyVal::Str(y)) => x.cmp(y),
+        (PyVal::Bytes(x), PyVal::Bytes(y)) => x.cmp(y),
+        _ => match (a.number(), b.number()) {
+            (Some(x), Some(y)) => x.partial_cmp(&y).unwrap_or(Ordering::Equal),
+            _ => rank(a).cmp(&rank(b)),
+        },
+    }
+}
+
+impl Sort {
+    pub fn is_null(&self) -> bool {
+        self.0.is_empty()
+    }
+
+    pub fn is_slow(&self) -> bool {
+        self.0.iter().any(|s| s.kind == SortKind::Slow)
+    }
+
+    /// beets' `MultipleSort.order_clause`: the trailing run of SQL sorts.
+    pub fn order_clause(&self, kind: Kind) -> Option<String> {
+        let mut parts = vec![];
+        for s in self.0.iter().rev() {
+            match s.order_clause(kind) {
+                Some(c) => parts.push(c),
+                None => break,
+            }
+        }
+        parts.reverse();
+        (!parts.is_empty()).then(|| parts.join(", "))
+    }
+
+    /// Whether the SQL sorts need the related table.
+    pub fn needs_join(&self, kind: Kind) -> bool {
+        self.0
+            .iter()
+            .any(|s| s.kind == SortKind::Fixed && in_other_db(kind, &s.field))
+    }
+
+    /// The sorts SQL couldn't do (everything up to the last slow one),
+    /// applied as beets does: stable sorts, least significant first.
+    /// Returns the new order as indices into `objs`.
+    pub fn sort_slow(&self, objs: &[Obj]) -> Vec<usize> {
+        let mut order: Vec<usize> = (0..objs.len()).collect();
+        let Some(last_slow) = self.0.iter().rposition(|s| s.kind == SortKind::Slow) else {
+            return order;
+        };
+        for s in self.0[..=last_slow].iter().rev() {
+            let keys: Vec<PyVal> = objs.iter().map(|o| s.key(o)).collect();
+            order.sort_by(|&a, &b| {
+                if s.ascending {
+                    py_cmp(&keys[a], &keys[b])
+                } else {
+                    py_cmp(&keys[b], &keys[a])
+                }
+            });
+        }
+        order
+    }
+}
+
+// --------------------------------------------------------------- the query
+
+/// A parsed query: what to match and how to sort.
+#[derive(Clone, Debug)]
+pub struct Query {
+    pub kind: Kind,
+    pub pred: Pred,
+    /// The sort the query asked for; empty means the default (`sort_item`
+    /// or `sort_album`).
+    pub sort: Sort,
+}
+
+impl Query {
+    /// beets' `parse_query_parts`: implicit path queries, `,` for OR, sort
+    /// parts, the rest query parts.
+    pub fn parse<S: AsRef<str>>(kind: Kind, args: &[S]) -> anyhow::Result<Self> {
+        let parts: Vec<String> = args
+            .iter()
+            .map(|s| {
+                let s = s.as_ref();
+                if is_path_query(s) {
+                    format!("path:{s}")
+                } else {
+                    s.to_string()
+                }
+            })
+            .collect();
+        let ci = context().sort_case_insensitive;
+        Self::parse_sorted(kind, &parts, ci).map_err(|e| {
+            let q: Vec<&str> = args.iter().map(|s| s.as_ref()).collect();
+            anyhow::Error::new(InvalidQueryError(format!("'{}': {e}", q.join(" "))))
+        })
+    }
+
+    /// beets' `parse_sorted_query`.
+    fn parse_sorted(kind: Kind, parts: &[String], case_insensitive: bool) -> Result<Self, String> {
+        let mut ors = vec![];
+        let mut sorts = vec![];
+        let mut sub: Vec<String> = vec![];
+        let comma = ",".to_string();
+        for part in parts.iter().chain(std::iter::once(&comma)) {
+            if let Some(last) = part.strip_suffix(',') {
+                if !last.is_empty() {
+                    sub.push(last.to_string());
+                }
+                let mut and = sub
+                    .drain(..)
+                    .map(|p| construct_query_part(kind, &p))
+                    .collect::<Result<Vec<_>, _>>()?;
+                if and.is_empty() {
+                    and.push(Pred::True);
+                }
+                ors.push(Pred::And(and));
+            } else if (part.ends_with('+') || part.ends_with('-'))
+                && !part.contains(':')
+                && part.chars().count() > 1
+            {
+                sorts.push(part.clone());
+            } else {
+                sub.push(part.clone());
+            }
+        }
+        let pred = if ors.len() > 1 {
+            Pred::Or(ors)
+        } else {
+            ors.pop().unwrap()
+        };
+        Ok(Query {
+            kind,
+            pred,
+            sort: sort_from_strings(kind, &sorts, case_insensitive),
+        })
+    }
+
+    /// The sort to use: the query's own, else the configured default (which
+    /// beets always sorts case-insensitively).
+    pub fn effective_sort(&self) -> Sort {
+        if !self.sort.is_null() {
+            return self.sort.clone();
+        }
+        let ctx = context();
+        let parts = match self.kind {
+            Kind::Item => ctx.sort_item,
+            Kind::Album => ctx.sort_album,
+        };
+        sort_from_strings(self.kind, &parts, true)
+    }
+
+    pub fn matches_obj(&self, obj: &Obj) -> bool {
+        self.pred.matches(obj)
     }
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn item(artist: &str, title: &str, year: i64) -> Record {
-        let mut r = Record::new_item();
-        r.set_str("artist", artist);
-        r.set_str("title", title);
-        r.set_int("year", year);
-        r.set_path(format!("/music/{artist}/{title}.mp3"));
-        r
-    }
-
-    fn q(args: &[&str]) -> Query {
-        Query::parse(Kind::Item, args).unwrap()
-    }
-
-    #[test]
-    fn substring_and_fields() {
-        let it = item("The Beatles", "Help!", 1965);
-        assert!(q(&["beatles"]).matches(&it));
-        assert!(q(&["artist:beat", "title:help"]).matches(&it));
-        assert!(!q(&["title:beat"]).matches(&it));
-        assert!(q(&[]).matches(&it));
-    }
-
-    #[test]
-    fn exact_regex_negation_or() {
-        let it = item("The Beatles", "Help!", 1965);
-        assert!(q(&["artist:=The Beatles"]).matches(&it));
-        assert!(!q(&["artist:=the beatles"]).matches(&it));
-        assert!(q(&["artist:=~the beatles"]).matches(&it));
-        assert!(q(&["title::^H.lp"]).matches(&it));
-        assert!(q(&["::Beat"]).matches(&it));
-        assert!(!q(&["-beatles"]).matches(&it));
-        assert!(q(&["^stones"]).matches(&it));
-        assert!(q(&["stones", ",", "help"]).matches(&it));
-        assert!(!q(&["stones", ",", "zappa"]).matches(&it));
-    }
-
-    #[test]
-    fn numeric_ranges() {
-        let it = item("A", "B", 1965);
-        assert!(q(&["year:1965"]).matches(&it));
-        assert!(q(&["year:1960..1970"]).matches(&it));
-        assert!(q(&["year:1965.."]).matches(&it));
-        assert!(!q(&["year:..1964"]).matches(&it));
-        assert!(Query::parse(Kind::Item, &["year:abc"]).is_err());
-        let mut it = it;
-        it.set("length", Value::Float(200.0));
-        assert!(q(&["length:3:00..3:30"]).matches(&it));
-    }
-
-    #[test]
-    fn path_and_bool() {
-        let it = item("A", "B", 1);
-        assert!(q(&["path:/music/A"]).matches(&it));
-        assert!(!q(&["path:/music/AB"]).matches(&it));
-        assert!(q(&["comp:false"]).matches(&it));
-        assert!(q(&["singleton:true"]).matches(&it));
-    }
-
-    #[test]
-    fn sorting() {
-        let mut v = vec![
-            item("b", "x", 2000),
-            item("a", "y", 1990),
-            item("c", "z", 1995),
-        ];
-        q(&["year-"]).sort(&mut v);
-        let years: Vec<i64> = v.iter().map(|r| r.int("year")).collect();
-        assert_eq!(years, vec![2000, 1995, 1990]);
-        q(&["artist+"]).sort(&mut v);
-        assert_eq!(v[0].str("artist"), "a");
-    }
-
-    #[test]
-    fn dates() {
-        let mut it = item("A", "B", 1);
-        let ts = crate::model::parse_datetime("2024-03-15 12:00:00").unwrap();
-        it.set("added", Value::Float(ts));
-        assert!(q(&["added:2024"]).matches(&it));
-        assert!(q(&["added:2024-03"]).matches(&it));
-        assert!(!q(&["added:2024-04.."]).matches(&it));
-        assert!(q(&["added:..2024-03-15"]).matches(&it));
-    }
-}
+mod tests;

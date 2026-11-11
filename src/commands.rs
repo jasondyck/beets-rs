@@ -36,6 +36,7 @@ pub fn run(cli: Cli) -> Result<()> {
         eprintln!("configuration error: {e:#}");
         std::process::exit(1);
     }
+    crate::query::configure(&cfg);
     debug!("configuration sources (highest → lowest priority):");
     for s in &cfg.sources {
         debug!("YamlSource {}", s.display());

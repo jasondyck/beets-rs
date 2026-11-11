@@ -71,10 +71,15 @@ impl PathFormatter {
         })
     }
 
-    fn choose(&self, item: &Item) -> Option<&Template> {
+    fn choose(&self, item: &Item, album: Option<&Album>) -> Option<&Template> {
         for (q, special, t) in &self.formats {
             let hit = match (q, *special) {
-                (Some(q), _) => q.matches(item),
+                // As beets: the item's fields, then its album's.
+                (Some(q), _) => q.matches_obj(&crate::query::Obj {
+                    rec: item,
+                    album,
+                    album_dir: None,
+                }),
                 (None, "singleton") => item.int("album_id") == 0,
                 (None, "comp") => item.bool("comp"),
                 _ => false,
@@ -97,7 +102,7 @@ impl PathFormatter {
         album: Option<&Album>,
         lib: Option<&Library>,
     ) -> PathBuf {
-        let tmpl = match self.choose(item) {
+        let tmpl = match self.choose(item, album) {
             Some(t) => t,
             None => {
                 return self

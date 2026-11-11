@@ -20,6 +20,33 @@ fn table(kind: Kind) -> &'static str {
     }
 }
 
+fn other(kind: Kind) -> Kind {
+    match kind {
+        Kind::Item => Kind::Album,
+        Kind::Album => Kind::Item,
+    }
+}
+
+/// A record with what beets' models reach through it (see `query::Obj`).
+fn obj_of<'a>(
+    kind: Kind,
+    r: &'a Record,
+    albums: &'a HashMap<i64, Album>,
+    dirs: &'a HashMap<i64, PathBuf>,
+) -> crate::query::Obj<'a> {
+    crate::query::Obj {
+        rec: r,
+        album: match kind {
+            Kind::Item => albums.get(&r.int("album_id")),
+            Kind::Album => None,
+        },
+        album_dir: match kind {
+            Kind::Album => r.id.and_then(|id| dirs.get(&id)).map(PathBuf::as_path),
+            Kind::Item => None,
+        },
+    }
+}
+
 fn attr_table(kind: Kind) -> &'static str {
     match kind {
         Kind::Item => "item_attributes",
@@ -182,14 +209,25 @@ impl Library {
         Ok(())
     }
 
-    fn row_to_record(kind: Kind, row: &Row) -> rusqlite::Result<Record> {
-        let mut rec = Record::new(kind);
-        rec.id = Some(row.get("id")?);
-        for (name, ty) in schema(kind) {
-            let v: SqlValue = row.get(*name)?;
-            rec.set(name, from_sql(v, *ty));
+    /// The column of each schema field (and `id`) in a statement's result.
+    fn columns(kind: Kind, stmt: &rusqlite::Statement) -> rusqlite::Result<(usize, Vec<usize>)> {
+        let fields = schema(kind)
+            .iter()
+            .map(|(n, _)| stmt.column_index(n))
+            .collect::<rusqlite::Result<_>>()?;
+        Ok((stmt.column_index("id")?, fields))
+    }
+
+    fn row_to_record(
+        kind: Kind,
+        row: &Row,
+        cols: &(usize, Vec<usize>),
+    ) -> rusqlite::Result<Record> {
+        let mut values = Vec::with_capacity(cols.1.len());
+        for ((_, ty), &i) in schema(kind).iter().zip(&cols.1) {
+            values.push(from_sql(row.get::<_, SqlValue>(i)?, *ty));
         }
-        Ok(rec)
+        Ok(Record::from_values(kind, row.get(cols.0)?, values))
     }
 
     fn load(&self, kind: Kind, where_sql: &str, args: &[SqlValue]) -> Result<Vec<Record>> {
@@ -197,9 +235,10 @@ impl Library {
         let mut stmt = self
             .conn
             .prepare(&format!("SELECT * FROM {t} {where_sql}"))?;
+        let cols = Self::columns(kind, &stmt)?;
         let mut recs: Vec<Record> = stmt
             .query_map(rusqlite::params_from_iter(args.iter()), |r| {
-                Self::row_to_record(kind, r)
+                Self::row_to_record(kind, r, &cols)
             })?
             .collect::<Result<_, _>>()?;
         if recs.is_empty() {
@@ -244,23 +283,145 @@ impl Library {
     }
 
     pub fn items(&self, q: &Query) -> Result<Vec<Item>> {
-        let mut v: Vec<Item> = self
-            .load(Kind::Item, "", &[])?
-            .into_iter()
-            .filter(|r| q.matches(r))
-            .collect();
-        q.sort(&mut v);
-        Ok(v)
+        self.fetch(Kind::Item, q)
     }
 
     pub fn albums(&self, q: &Query) -> Result<Vec<Album>> {
-        let mut v: Vec<Album> = self
-            .load(Kind::Album, "", &[])?
-            .into_iter()
-            .filter(|r| q.matches(r))
-            .collect();
-        q.sort(&mut v);
-        Ok(v)
+        self.fetch(Kind::Album, q)
+    }
+
+    /// beets' `Database._get_results`: the query's `WHERE` clause (joining
+    /// the related table when it names its fields) and the SQL part of the
+    /// sort run in SQLite; slow queries and sorts run here, with each item's
+    /// album (and each album's directory) at hand as beets' models have.
+    fn fetch(&self, kind: Kind, q: &Query) -> Result<Vec<Record>> {
+        let t = table(kind);
+        let o = table(other(kind));
+        let join = match kind {
+            Kind::Item => format!("LEFT JOIN {o} ON {t}.album_id = {o}.id"),
+            Kind::Album => format!("LEFT JOIN {o} ON {t}.id = {o}.album_id"),
+        };
+        let sort = q.effective_sort();
+        let clause = q.pred.clause();
+        let (where_sql, args) = clause.clone().unwrap_or_else(|| ("1".into(), vec![]));
+        let where_join = q.pred.needs_join(kind);
+        let sort_join = sort.needs_join(kind);
+        let order = match sort.order_clause(kind) {
+            Some(o) => format!("{o}, {t}.id"),
+            None => format!("{t}.id"),
+        };
+        // `inner` selects the matching rows; grouping by id undoes the
+        // duplicates a join brings (as beets does).
+        let inner = if where_join {
+            format!("SELECT {t}.* FROM {t} {join} WHERE {where_sql} GROUP BY {t}.id")
+        } else {
+            format!("SELECT {t}.* FROM {t} WHERE {where_sql}")
+        };
+        // Sorting albums by an item field joins in every item: keep one row
+        // per album (beets would list the album once per item).
+        let regroup = if sort_join && kind == Kind::Album {
+            format!(" GROUP BY {t}.id")
+        } else {
+            String::new()
+        };
+        let sql = match (where_join, sort_join) {
+            (false, false) => format!("{inner} ORDER BY {order}"),
+            (false, true) => {
+                format!("SELECT {t}.* FROM {t} {join} WHERE {where_sql}{regroup} ORDER BY {order}")
+            }
+            (true, false) => format!("SELECT {t}.* FROM ({inner}) {t} ORDER BY {order}"),
+            (true, true) => {
+                format!("SELECT {t}.* FROM ({inner}) {t} {join}{regroup} ORDER BY {order}")
+            }
+        };
+        crate::query::register_sql_functions(&self.conn)?;
+        let mut stmt = self.conn.prepare(&sql)?;
+        let cols = Self::columns(kind, &stmt)?;
+        let mut recs: Vec<Record> = stmt
+            .query_map(rusqlite::params_from_iter(args.iter()), |r| {
+                Self::row_to_record(kind, r, &cols)
+            })?
+            .collect::<Result<_, _>>()?;
+        let a = attr_table(kind);
+        let mut flex: HashMap<i64, BTreeMap<String, String>> = HashMap::new();
+        let mut stmt = self.conn.prepare(&format!(
+            "SELECT entity_id, key, value FROM {a} WHERE entity_id IN (SELECT id FROM ({inner}))"
+        ))?;
+        let rows = stmt.query_map(rusqlite::params_from_iter(args.iter()), |r| {
+            Ok((r.get(0)?, r.get(1)?, r.get::<_, Option<String>>(2)?))
+        })?;
+        for row in rows {
+            let (id, k, v): (i64, String, Option<String>) = row?;
+            flex.entry(id).or_default().insert(k, v.unwrap_or_default());
+        }
+        for r in &mut recs {
+            if let Some(f) = flex.remove(&r.id.unwrap()) {
+                r.flex = f;
+            }
+        }
+        if clause.is_some() && !sort.is_slow() {
+            return Ok(recs);
+        }
+
+        // In-memory matching and sorting need what beets' models reach
+        // through: an item's album, an album's directory.
+        let albums: HashMap<i64, Album> = match kind {
+            Kind::Item => self
+                .load(Kind::Album, "", &[])?
+                .into_iter()
+                .map(|a| (a.id.unwrap(), a))
+                .collect(),
+            Kind::Album => HashMap::new(),
+        };
+        let dirs: HashMap<i64, PathBuf> = match kind {
+            Kind::Album => self.album_dirs()?,
+            Kind::Item => HashMap::new(),
+        };
+        if clause.is_none() {
+            recs.retain(|r| q.matches_obj(&obj_of(kind, r, &albums, &dirs)));
+        }
+        if sort.is_slow() {
+            let objs: Vec<_> = recs
+                .iter()
+                .map(|r| obj_of(kind, r, &albums, &dirs))
+                .collect();
+            let order = sort.sort_slow(&objs);
+            drop(objs);
+            let mut slots: Vec<Option<Record>> = recs.into_iter().map(Some).collect();
+            recs = order
+                .into_iter()
+                .map(|i| slots[i].take().unwrap())
+                .collect();
+        }
+        Ok(recs)
+    }
+
+    /// Each album's directory (beets' `Album.item_dir`): that of its first
+    /// item in the default item order.
+    fn album_dirs(&self) -> Result<HashMap<i64, PathBuf>> {
+        let order = Query::parse::<&str>(Kind::Item, &[])?
+            .effective_sort()
+            .order_clause(Kind::Item)
+            .map(|o| format!("{o}, "))
+            .unwrap_or_default();
+        let mut stmt = self.conn.prepare(&format!(
+            "SELECT items.album_id, items.path FROM items LEFT JOIN albums \
+             ON items.album_id = albums.id WHERE items.album_id != 0 \
+             ORDER BY {order}items.id"
+        ))?;
+        let rows = stmt.query_map([], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, SqlValue>(1)?)))?;
+        let mut out = HashMap::new();
+        for row in rows {
+            let (id, path) = row?;
+            let path = match path {
+                SqlValue::Blob(b) => PathBuf::from(std::ffi::OsString::from_vec(b)),
+                SqlValue::Text(s) => PathBuf::from(s),
+                _ => continue,
+            };
+            out.entry(id)
+                .or_insert_with(|| path.parent().map(Path::to_path_buf).unwrap_or_default());
+        }
+        Ok(out)
     }
 
     pub fn all_albums(&self) -> Result<Vec<Album>> {

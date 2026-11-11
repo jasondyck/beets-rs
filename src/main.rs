@@ -419,6 +419,11 @@ fn main() {
         },
     };
     if let Err(e) = commands::run(cli) {
+        // As beets: `invalid query: 'QUERY': EXPLANATION`.
+        if let Some(q) = e.downcast_ref::<query::InvalidQueryError>() {
+            eprintln!("invalid query: {q}");
+            std::process::exit(1);
+        }
         eprintln!("error: {e:#}");
         std::process::exit(1);
     }
