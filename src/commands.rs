@@ -32,6 +32,10 @@ pub fn run(cli: Cli) -> Result<()> {
             std::process::exit(1);
         }
     };
+    if let Err(e) = ui::configure(&cfg) {
+        eprintln!("configuration error: {e:#}");
+        std::process::exit(1);
+    }
     debug!("configuration sources (highest → lowest priority):");
     for s in &cfg.sources {
         debug!("YamlSource {}", s.display());
@@ -1274,7 +1278,7 @@ fn update(cfg: &Config, lib: &Library, opts: &UpdateOpts, q: &[String]) -> Resul
             let path = item.path().to_path_buf();
             if path.as_os_str().is_empty() || !path.exists() {
                 println!("{}", format_record(&t, &item));
-                println!("{}", ui::red("  deleted"));
+                println!("{}", ui::colorize("text_error", "  deleted"));
                 if !pretend {
                     remove_item(cfg, lib, &item, true, true)?;
                 }
@@ -1709,11 +1713,7 @@ fn lyrics(cfg: &Config, lib: &Library, print: bool, force: bool, q: &[String]) -
             eprintln!("warning: {}: {e:#}", format_record(&t, &item));
         }
         if print && !item.str("lyrics").is_empty() {
-            println!(
-                "\n{}\n\n{}\n",
-                ui::bold(&format_record(&t, &item)),
-                item.str("lyrics")
-            );
+            println!("\n{}\n\n{}\n", format_record(&t, &item), item.str("lyrics"));
         }
     }
     Ok(())

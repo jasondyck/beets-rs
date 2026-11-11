@@ -110,6 +110,32 @@ match:
     track_length_grace: 10
     track_length_max: 30
 
+ui:
+    terminal_width: 80
+    length_diff_thresh: 10.0
+    color: yes
+    colors:
+        text_success: ['bold', 'green']
+        text_warning: ['bold', 'yellow']
+        text_error: ['bold', 'red']
+        text_highlight: ['bold', 'red']
+        text_highlight_minor: ['white']
+        action_default: ['bold', 'cyan']
+        action: ['bold', 'cyan']
+        text_faint: ['faint']
+        import_path: ['bold', 'blue']
+        import_path_items: ['bold', 'blue']
+        changed: ['yellow']
+        text_diff_added: ['bold', 'green']
+        text_diff_removed: ['bold', 'red']
+        action_description: ['white']
+    import:
+        indentation:
+            match_header: 2
+            match_details: 2
+            match_tracklist: 5
+        layout: column
+
 plugins: []
 
 fetchart:

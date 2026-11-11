@@ -87,16 +87,18 @@ impl Distance {
         if max == 0.0 { 0.0 } else { self.raw() / max }
     }
 
-    /// Penalty keys that contributed, worst first (for display).
-    pub fn keys(&self) -> Vec<String> {
-        let mut ks: Vec<(String, f64)> = self
-            .penalties
+    /// beets' `generic_penalty_keys`: the keys with a penalty, without
+    /// their `album_`/`track_` prefix, underscores as spaces.
+    pub fn generic_penalty_keys(&self) -> Vec<String> {
+        self.penalties
             .iter()
-            .map(|(k, p)| (k.clone(), self.weight(k) * p.iter().sum::<f64>()))
-            .filter(|(_, v)| *v > 0.0)
-            .collect();
-        ks.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
-        ks.into_iter().map(|(k, _)| k.replace('_', " ")).collect()
+            .filter(|(_, p)| p.iter().any(|v| *v > 0.0))
+            .map(|(k, _)| {
+                k.replace("album_", "")
+                    .replace("track_", "")
+                    .replace('_', " ")
+            })
+            .collect()
     }
 
     pub fn has(&self, key: &str) -> bool {
@@ -668,7 +670,11 @@ mod tests {
         let items = vec![item("Alpha", 1, 200.0), item("Beta", 2, 180.0)];
         let m = match_album(&cfg, &items, info());
         assert_eq!(m.extra_tracks, vec![2]);
-        assert!(m.distance.keys().contains(&"missing tracks".to_string()));
+        assert!(
+            m.distance
+                .generic_penalty_keys()
+                .contains(&"missing tracks".to_string())
+        );
         assert!(recommend(&cfg, &[&m.distance]) <= Recommendation::Medium);
     }
 

@@ -96,10 +96,10 @@ pub fn opcodes(a: &[char], b: &[char]) -> Vec<(Op, usize, usize, usize, usize)> 
 
 /// beets' `text_diff_removed` / `text_diff_added` colours.
 pub fn removed(s: &str) -> String {
-    ui::colorize("1;31", s)
+    ui::colorize("text_diff_removed", s)
 }
 pub fn added(s: &str) -> String {
-    ui::colorize("1;32", s)
+    ui::colorize("text_diff_added", s)
 }
 
 /// beets' `colordiff`: highlight what changed between two strings.

@@ -18,6 +18,7 @@ config`, plugins fetchart / lyrics / embedart, release preferences.
 - [x] **1.4 Reimport**: `-L/--library` (import a library query), `--from-scratch`, preserving `added`/flex attrs on reimport, `duplicate_action: merge`
 - [x] **1.5 File ops**: `import.link`, `hardlink`, `reflink`, `import.delete`; `ignore`, `ignore_hidden`, `clutter` (also used for empty-dir pruning)
 - [x] **1.6 Duplicate options**: `import.duplicate_keys` (album/item), `duplicate_verbose_prompt`, `singleton_album_disambig`, `import.bell`, `import.languages`; duplicate check for singletons; beets' newer "Upgrade" duplicate action
+- [ ] **1.7 Singleton confirm flow**: picking a singleton candidate should show the change and ask Apply / More candidates, as beets does (ours applies immediately); the import header should list every path of a merged multi-disc album
 
 ## 2. Core: commands and CLI
 
@@ -26,7 +27,7 @@ config`, plugins fetchart / lyrics / embedart, release preferences.
 - [x] **2.3 move**: `-e/--export` (copy without updating db) vs `-c` (copy and update db), `-t/--timid`. Deliberate deviation: an item's own file counts as free for unique names, so repeated mv is idempotent
 - [x] **2.4 update / write / remove**: `update -F/--field`, `-a`; `write -f/--force`; `remove` confirmation listing as in beets
 - [x] **2.5 config**: `config -e/--edit` (`$VISUAL`/`$EDITOR`), `--clear`; `include:` files; `config -p` with `$BEETSRSDIR`; `-c/--config` should layer on top of the user config (repeatable) as in beets, not replace it
-- [ ] **2.6 ui**: `ui.color`, `ui.colors`, change-display highlighting as in beets, `terminal_width`, `ui.length_diff_thresh`
+- [x] **2.6 ui**: `ui.color`, `ui.colors`, change-display highlighting as in beets, `terminal_width`, `ui.length_diff_thresh`
 
 ## 3. Core: queries, templates, library
 
@@ -38,7 +39,7 @@ config`, plugins fetchart / lyrics / embedart, release preferences.
 
 ## 4. Core: autotagger
 
-- [ ] **4.1 Match options**: `match.ignored`, `match.required`, `ignored_media`, `ignore_data_tracks`, `ignore_video_tracks`, `track_length_grace/max` check, `distance_weights` completeness (source, tracks, etc.)
+- [ ] **4.1 Match options**: `match.ignored`, `match.required`, `ignored_media`, `ignore_data_tracks`, `ignore_video_tracks`, `track_length_grace/max` check, `distance_weights` completeness (source, tracks, etc.); `match.album_disambig_fields` / `singleton_disambig_fields`; penalty keys listed in insertion order
 - [ ] **4.2 Metadata fidelity**: `artist_credit`, multi-artist/multi-value fields, album types, release group / work fields, `musicbrainz.extra_tags`, `musicbrainz.genres`, VA detection, pregap/data tracks, `per_disc_numbering` checks
 
 ## 5. Bundled plugins (by popularity)

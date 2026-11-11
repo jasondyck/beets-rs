@@ -3,12 +3,13 @@
 
 use crate::autotag::{self, AlbumMatch, Recommendation, TrackMatch};
 use crate::config::Config;
+use crate::display::Display;
 use crate::duplicates::{self, DuplicateAction, Found, KeyValues};
 use crate::fileops::{self, FileOp, Globs, WalkFilter, prune_dirs};
 use crate::library::{Library, now};
 use crate::mb::MusicBrainz;
 use crate::media;
-use crate::model::{Album, Item, Value, format_duration};
+use crate::model::{Album, Item, Value};
 use crate::paths::PathFormatter;
 use crate::plugins::{self, Plugin, PluginCtx};
 use crate::state::ImportState;
@@ -386,18 +387,6 @@ pub fn group_files(root: &Path, filter: &WalkFilter) -> Result<Vec<(PathBuf, Vec
     Ok(groups.into_iter().collect())
 }
 
-fn file_label(item: &Item) -> String {
-    item.path()
-        .file_name()
-        .map(|f| f.to_string_lossy().into_owned())
-        .unwrap_or_default()
-}
-
-fn len_str(secs: Option<f64>) -> String {
-    secs.map(|s| format!(" ({})", format_duration(s)))
-        .unwrap_or_default()
-}
-
 impl<'a> Importer<'a> {
     pub fn new(
         cfg: &'a Config,
@@ -487,13 +476,7 @@ impl<'a> Importer<'a> {
                     continue;
                 }
                 if self.opts.incremental && self.state.history.contains(&key) {
-                    println!(
-                        "{}",
-                        ui::dim(&format!(
-                            "Skipping previously-imported path: {}",
-                            key.display()
-                        ))
-                    );
+                    crate::logging::debug!("Skipping previously-imported path: {}", key.display());
                     self.stats.already += 1;
                     continue;
                 }
@@ -597,11 +580,11 @@ impl<'a> Importer<'a> {
         Ok(items)
     }
 
-    fn thresholds(&self) -> (f64, f64) {
-        (
-            self.cfg.f64("match.strong_rec_thresh"),
-            self.cfg.f64("match.medium_rec_thresh"),
-        )
+    /// The match display, with `--detail` (or `import.detail`).
+    fn display(&self) -> Display {
+        let mut d = Display::new(self.cfg);
+        d.show_all = self.opts.detail;
+        d
     }
 
     // ------------------------------------------------------------- albums
@@ -758,7 +741,11 @@ impl<'a> Importer<'a> {
         paths: &[PathBuf],
     ) -> Result<Outcome> {
         println!();
-        println!("{} ({} items)", dir.display(), items.len());
+        println!(
+            "{} {}",
+            ui::colorize("import_path", &dir.display().to_string()),
+            ui::colorize("import_path_items", &format!("({} items)", items.len()))
+        );
 
         let decision = if self.opts.autotag {
             let d = self.choose_album(&items)?;
@@ -841,8 +828,6 @@ impl<'a> Importer<'a> {
     }
 
     fn choose_album(&mut self, items: &[Item]) -> Result<Decision<AlbumMatch>> {
-        let cur = autotag::current_metadata(items);
-        println!("Tagging:\n    {} - {}", cur.artist, cur.album);
         let ids = self.opts.search_ids.clone();
         let (mut cands, mut rec) =
             autotag::album_candidates(self.cfg, &self.mb, items, None, &ids)?;
@@ -889,15 +874,12 @@ impl<'a> Importer<'a> {
                 }
             } else {
                 if cands.is_empty() {
+                    println!("No matching release found for {} tracks.", items.len());
                     println!(
-                        "{}",
-                        ui::yellow(&format!(
-                            "No matching release found for {} tracks.",
-                            items.len()
-                        ))
+                        "For help, see: https://beets.readthedocs.org/en/latest/faq.html#nomatch"
                     );
                 }
-                self.pick_album_candidate(&cands)?
+                self.pick_album_candidate(items, &cands)?
             };
 
             match choice {
@@ -934,161 +916,39 @@ impl<'a> Importer<'a> {
         }
     }
 
-    fn pick_album_candidate(&self, cands: &[AlbumMatch]) -> Result<Option<Choice>> {
-        let (strong, medium) = self.thresholds();
-        if !cands.is_empty() {
-            println!("Candidates:");
+    /// beets' candidate list ("Finding tags for album ...") and prompt.
+    fn pick_album_candidate(&self, items: &[Item], cands: &[AlbumMatch]) -> Result<Option<Choice>> {
+        if cands.is_empty() {
+            return Ok(ui::options(&ALBUM_CHOICES, None, Some(Choice::Letter('s'))));
         }
+        let cur = autotag::current_metadata(items);
+        let disp = self.display();
+        println!();
+        println!("Finding tags for album \"{} - {}\".", cur.artist, cur.album);
+        println!("  Candidates:");
         for (n, m) in cands.iter().enumerate() {
-            let d = m.distance.distance();
-            let keys = m.distance.keys();
-            let penalty = if keys.is_empty() {
-                String::new()
-            } else {
-                format!(" {}", ui::yellow(&format!("({})", keys.join(", "))))
-            };
-            println!(
-                "{}. {} - {} ({}){}{}",
+            for line in disp.candidate_lines(
                 n + 1,
-                m.info.artist,
-                m.info.album,
-                ui::similarity(d, strong, medium),
-                penalty,
-                ui::dim(&disambig(&m.info))
-            );
+                &m.distance,
+                &m.info.artist,
+                &m.info.album,
+                &Display::album_disambig(&m.info),
+            ) {
+                println!("{line}");
+            }
         }
-        let numbers = if cands.is_empty() {
-            None
-        } else {
-            Some(cands.len())
-        };
         Ok(ui::options(
             &ALBUM_CHOICES,
-            numbers,
-            numbers.map(|_| Choice::Number(1)),
+            Some(cands.len()),
+            Some(Choice::Number(1)),
         ))
     }
 
     fn show_album_match(&self, items: &[Item], m: &AlbumMatch) {
-        let (strong, medium) = self.thresholds();
         let cur = autotag::current_metadata(items);
-        let info = &m.info;
-        let keys = m.distance.keys();
-        let penalty = if keys.is_empty() {
-            String::new()
-        } else {
-            format!(" {}", ui::yellow(&format!("({})", keys.join(", "))))
-        };
-        println!();
-        println!(
-            "  Match ({}){}:",
-            ui::similarity(m.distance.distance(), strong, medium),
-            penalty
-        );
-        println!(
-            "  {}",
-            ui::bold(&format!("{} - {}", info.artist, info.album))
-        );
-        println!(
-            "  {}",
-            ui::dim(&format!(
-                "https://musicbrainz.org/release/{}",
-                info.album_id
-            ))
-        );
-        let d = disambig(info);
-        if !d.is_empty() {
-            println!("  {}", ui::dim(d.trim()));
-        }
-        if !cur.va && !cur.artist.is_empty() && cur.artist != info.artist {
-            println!(" * Artist: {} -> {}", cur.artist, ui::yellow(&info.artist));
-        }
-        if !cur.album.is_empty() && cur.album != info.album {
-            println!(" * Album: {} -> {}", cur.album, ui::yellow(&info.album));
-        }
-        let mut pairs = m.mapping.clone();
-        pairs.sort_by_key(|(_, t)| *t);
-        for (i, t) in pairs {
-            let item = &items[i];
-            let track = &info.tracks[t];
-            let old_title = if item.str("title").is_empty() {
-                file_label(item)
-            } else {
-                item.str("title").to_string()
-            };
-            let idx_changed = item.int("track") as usize != track.index
-                && item.int("track") as usize != track.medium_index;
-            let title_changed = old_title != track.title;
-            let len_off = track
-                .length
-                .is_some_and(|l| (l - item.float("length")).abs() > 10.0);
-            if !(title_changed || idx_changed || len_off) {
-                if self.opts.detail {
-                    println!("   {} (#{})", old_title, item.int("track"));
-                }
-                continue;
-            }
-            let td = autotag::track_distance(self.cfg, item, track, info.va).distance();
-            let new = format!("{} (#{})", track.title, track.index);
-            let new = if td <= strong {
-                new
-            } else if td <= medium {
-                ui::yellow(&new)
-            } else {
-                ui::red(&new)
-            };
-            println!(
-                " * {} (#{}){} -> {}{}",
-                old_title,
-                item.int("track"),
-                if len_off {
-                    len_str(Some(item.float("length")))
-                } else {
-                    String::new()
-                },
-                new,
-                if len_off {
-                    len_str(track.length)
-                } else {
-                    String::new()
-                },
-            );
-        }
-        if !m.extra_tracks.is_empty() {
-            let pct = m.extra_tracks.len() as f64 / info.tracks.len() as f64 * 100.0;
-            println!(
-                "{}",
-                ui::yellow(&format!(
-                    "Missing tracks ({}/{} - {pct:.1}%):",
-                    m.extra_tracks.len(),
-                    info.tracks.len()
-                ))
-            );
-            for &t in &m.extra_tracks {
-                let tr = &info.tracks[t];
-                println!(" ! {} (#{}){}", tr.title, tr.index, len_str(tr.length));
-            }
-        }
-        if !m.extra_items.is_empty() {
-            println!(
-                "{}",
-                ui::yellow(&format!("Unmatched tracks ({}):", m.extra_items.len()))
-            );
-            for &i in &m.extra_items {
-                let it = &items[i];
-                let title = if it.str("title").is_empty() {
-                    file_label(it)
-                } else {
-                    it.str("title").to_string()
-                };
-                println!(
-                    " ! {} (#{}){}",
-                    title,
-                    it.int("track"),
-                    len_str(Some(it.float("length")))
-                );
-            }
-        }
+        let d = self.display();
+        d.show_album_change(items, &cur, m);
+        d.flush();
     }
 
     /// Remove a duplicate item from the library, deleting its file when
@@ -1184,10 +1044,7 @@ impl<'a> Importer<'a> {
         let mut action = DuplicateAction::from_config(&self.cfg.str("import.duplicate_action"));
         if action == DuplicateAction::Ask {
             let what = if album { "album" } else { "track" };
-            println!(
-                "{}",
-                ui::yellow(&format!("This {what} is already in the library!"))
-            );
+            eprintln!("This {what} is already in the library!");
             action = if self.opts.quiet {
                 DuplicateAction::Skip
             } else {
@@ -1203,7 +1060,7 @@ impl<'a> Importer<'a> {
                 for line in duplicates::report("New", new, !album, verbose.as_ref()) {
                     println!("{line}");
                 }
-                match ui::options(&DuplicateAction::PROMPT, None, None) {
+                match ui::options(&DuplicateAction::PROMPT, None, Some(Choice::Letter('s'))) {
                     Some(Choice::Letter(c)) => DuplicateAction::from_letter(c),
                     _ => DuplicateAction::Skip,
                 }
@@ -1669,62 +1526,41 @@ impl<'a> Importer<'a> {
         }
     }
 
-    /// A singleton candidate's disambiguation: its album in brackets, with
-    /// `import.singleton_album_disambig` (beets' `TrackMatch` disambig data).
-    fn track_disambig(&self, info: &crate::mb::TrackInfo) -> String {
-        if self.cfg.bool("import.singleton_album_disambig") && !info.album.is_empty() {
-            format!(" ([{}])", info.album)
-        } else {
-            String::new()
-        }
-    }
-
     fn choose_item(&mut self, item: &Item) -> Result<Decision<TrackMatch>> {
-        println!(
-            "Tagging track: {} - {}",
-            item.str("artist"),
-            item.str("title")
-        );
         let ids = self.opts.search_ids.clone();
         let (mut cands, mut rec) = autotag::item_candidates(self.cfg, &self.mb, item, None, &ids)?;
-        let (strong, medium) = self.thresholds();
+        let disp = self.display();
         if let Some(d) = self.summary_judgment(rec) {
             return Ok(d);
         }
         loop {
             if !cands.is_empty() && rec == Recommendation::Strong && !self.opts.timid {
                 let m = cands.swap_remove(0);
-                println!(
-                    "  Match ({}): {} - {}{}",
-                    ui::similarity(m.distance.distance(), strong, medium),
-                    m.info.artist,
-                    m.info.title,
-                    ui::dim(&self.track_disambig(&m.info))
-                );
+                disp.show_track_change(item, &m);
+                disp.flush();
                 return Ok(Decision::Apply(Box::new(m)));
             }
             if cands.is_empty() {
-                println!("{}", ui::yellow("No matching recording found."));
+                println!("No matching recordings found.");
             } else {
-                println!("Candidates:");
+                println!();
+                println!(
+                    "Finding tags for track \"{} - {}\".",
+                    item.str("artist"),
+                    item.str("title")
+                );
+                println!("  Candidates:");
             }
             for (n, m) in cands.iter().enumerate() {
-                let keys = m.distance.keys();
-                let penalty = if keys.is_empty() {
-                    String::new()
-                } else {
-                    format!(" {}", ui::yellow(&format!("({})", keys.join(", "))))
-                };
-                println!(
-                    "{}. {} - {} ({}){}{}{}",
+                for line in disp.candidate_lines(
                     n + 1,
-                    m.info.artist,
-                    m.info.title,
-                    ui::similarity(m.distance.distance(), strong, medium),
-                    penalty,
-                    ui::dim(&len_str(m.info.length)),
-                    ui::dim(&self.track_disambig(&m.info))
-                );
+                    &m.distance,
+                    &m.info.artist,
+                    &m.info.title,
+                    &disp.track_disambig(&m.info),
+                ) {
+                    println!("{line}");
+                }
             }
             self.bell();
             let numbers = if cands.is_empty() {
@@ -1735,7 +1571,7 @@ impl<'a> Importer<'a> {
             match ui::options(
                 &["Skip", "Use as-is", "Enter search", "enter Id", "aBort"],
                 numbers,
-                numbers.map(|_| Choice::Number(1)),
+                Some(numbers.map_or(Choice::Letter('s'), |_| Choice::Number(1))),
             ) {
                 None | Some(Choice::Letter('b')) => return Ok(Decision::Abort),
                 Some(Choice::Number(n)) => {
@@ -1762,35 +1598,6 @@ impl<'a> Importer<'a> {
                 _ => {}
             }
         }
-    }
-}
-
-fn disambig(info: &crate::mb::AlbumInfo) -> String {
-    let mut parts = vec![];
-    if !info.media.is_empty() {
-        parts.push(if info.mediums > 1 {
-            format!("{}x{}", info.mediums, info.media)
-        } else {
-            info.media.clone()
-        });
-    }
-    if info.year > 0 {
-        parts.push(info.year.to_string());
-    }
-    for s in [
-        &info.country,
-        &info.label,
-        &info.catalognum,
-        &info.albumdisambig,
-    ] {
-        if !s.is_empty() {
-            parts.push(s.clone());
-        }
-    }
-    if parts.is_empty() {
-        String::new()
-    } else {
-        format!(" ({})", parts.join(", "))
     }
 }
 
@@ -2896,11 +2703,12 @@ mod tests {
         let disambig = |cfg: &Config| {
             Importer::new(cfg, &lib, opts(cfg), &[])
                 .unwrap()
+                .display()
                 .track_disambig(&info)
         };
-        assert_eq!(disambig(&cfg), " ([Alb])");
+        assert_eq!(disambig(&cfg), "MusicBrainz, [Alb]");
         cfg.set("import.singleton_album_disambig", false.into());
-        assert_eq!(disambig(&cfg), "");
+        assert_eq!(disambig(&cfg), "MusicBrainz");
     }
 
     #[test]
