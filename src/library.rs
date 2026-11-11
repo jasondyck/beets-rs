@@ -66,6 +66,8 @@ fn to_sql(v: &Value) -> SqlValue {
         Value::Int(i) => SqlValue::Integer(*i),
         Value::Float(f) => SqlValue::Real(*f),
         Value::Bool(b) => SqlValue::Integer(*b as i64),
+        // No path (an album without art) is NULL, as in beets.
+        Value::Path(p) if p.as_os_str().is_empty() => SqlValue::Null,
         Value::Path(p) => SqlValue::Blob(p.as_os_str().as_bytes().to_vec()),
     }
 }
@@ -179,8 +181,11 @@ impl Library {
     }
 
     /// Insert a new record, assigning its id.
+    /// Insert a new record. As beets' `Model.add`, this stamps `added` with
+    /// the current time (a reimport restores the old value afterwards).
     pub fn add(&self, rec: &mut Record) -> Result<i64> {
         self.invalidate();
+        rec.set("added", Value::Float(now()));
         let t = table(rec.kind);
         let cols: Vec<&str> = rec.fixed_values().map(|(n, _)| n).collect();
         let vals: Vec<SqlValue> = rec.fixed_values().map(|(_, v)| to_sql(v)).collect();
@@ -504,7 +509,6 @@ impl Library {
                 }
             }
         }
-        album.set("added", Value::Float(now()));
         self.add(&mut album)?;
         let id = album.id.unwrap();
         for item in items.iter_mut() {
@@ -529,6 +533,28 @@ pub fn now() -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // As beets' `Model.add`: every new record gets its own `added`; an
+    // album without art stores NULL, as beets does.
+    #[test]
+    fn add_stamps_added_and_no_art_is_null() {
+        let lib = Library::in_memory().unwrap();
+        let mut it = Record::new_item();
+        it.set("added", Value::Float(1.0));
+        lib.add(&mut it).unwrap();
+        assert!(it.float("added") > 1.0);
+        let mut items = [Record::new_item(), Record::new_item()];
+        let album = lib.add_album(&mut items).unwrap();
+        assert!(album.float("added") > 1.0);
+        assert!(items[1].float("added") >= items[0].float("added"));
+        let art: Option<Vec<u8>> = lib
+            .conn
+            .query_row("SELECT artpath FROM albums", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(art, None);
+        let back = lib.get_album(album.id.unwrap()).unwrap().unwrap();
+        assert_eq!(back.path_field("artpath"), Path::new(""));
+    }
 
     #[test]
     fn memo_is_dropped_on_writes() {

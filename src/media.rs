@@ -146,6 +146,169 @@ fn pick_tag(file: &TaggedFile) -> Option<&Tag> {
     file.primary_tag().or_else(|| file.first_tag())
 }
 
+/// An MPEG layer III file's bitrate as mutagen (and so beets) computes it:
+/// from the Xing/Info header's frame and byte counts when there is one,
+/// else the first frame's nominal bitrate. `None` for anything else (other
+/// layers, no frame found), where lofty's figure is used.
+fn mpeg_bitrate(path: &Path) -> Option<i64> {
+    use std::io::Read;
+    let mut data = Vec::new();
+    std::fs::File::open(path)
+        .ok()?
+        .take(1 << 20)
+        .read_to_end(&mut data)
+        .ok()?;
+    mpeg_bitrate_of(&data)
+}
+
+fn mpeg_bitrate_of(data: &[u8]) -> Option<i64> {
+    // Skip ID3v2 tags (there can be several).
+    let mut pos = 0;
+    while data.len() >= pos + 10 && &data[pos..pos + 3] == b"ID3" {
+        let b = &data[pos + 6..pos + 10];
+        let size = b
+            .iter()
+            .fold(0usize, |acc, &x| (acc << 7) | (x & 0x7f) as usize);
+        let footer = if data[pos + 5] & 0x10 != 0 { 10 } else { 0 };
+        pos += 10 + size + footer;
+    }
+    // The first plausible layer III frame header.
+    let (start, h) = (pos..data.len().saturating_sub(4)).find_map(|i| {
+        let h = u32::from_be_bytes(data[i..i + 4].try_into().ok()?);
+        let valid = h >> 21 == 0x7ff
+            && (h >> 19) & 3 != 1
+            && (h >> 17) & 3 == 1
+            && !matches!((h >> 12) & 0xf, 0 | 0xf)
+            && (h >> 10) & 3 != 3;
+        valid.then_some((i, h))
+    })?;
+    let version = (h >> 19) & 3; // 3: MPEG 1, 2: MPEG 2, 0: MPEG 2.5
+    let mpeg1 = version == 3;
+    const BR1: [i64; 15] = [
+        0, 32, 40, 48, 56, 64, 80, 96, 112, 128, 160, 192, 224, 256, 320,
+    ];
+    const BR2: [i64; 15] = [0, 8, 16, 24, 32, 40, 48, 56, 64, 80, 96, 112, 128, 144, 160];
+    let idx = ((h >> 12) & 0xf) as usize;
+    let bitrate = if mpeg1 { BR1[idx] } else { BR2[idx] } * 1000;
+    let sample_rate = [44100, 48000, 32000][((h >> 10) & 3) as usize]
+        / match version {
+            3 => 1,
+            2 => 2,
+            _ => 4,
+        };
+    let padding = ((h >> 9) & 1) as i64;
+    let mono = (h >> 6) & 3 == 3;
+    let frame_size: i64 = if mpeg1 { 1152 } else { 576 };
+    let frame_length = (frame_size / 8 * bitrate) / sample_rate + padding;
+    let off = start
+        + match (mpeg1, mono) {
+            (true, false) => 36,
+            (true, true) | (false, false) => 21,
+            (false, true) => 13,
+        };
+    let xing = data.get(off..off + 8);
+    let Some(x) = xing.filter(|x| &x[..4] == b"Xing" || &x[..4] == b"Info") else {
+        return Some(bitrate);
+    };
+    let flags = u32::from_be_bytes(x[4..8].try_into().ok()?);
+    let mut p = off + 8;
+    let mut field = |present: bool| -> Option<Option<i64>> {
+        if !present {
+            return Some(None);
+        }
+        let v = u32::from_be_bytes(data.get(p..p + 4)?.try_into().ok()?);
+        p += 4;
+        Some(Some(v as i64))
+    };
+    let frames = field(flags & 1 != 0)?;
+    let bytes = field(flags & 2 != 0)?;
+    match (frames, bytes) {
+        (Some(frames), Some(bytes)) if frames * frame_size > 0 => {
+            let audio_bytes = (bytes - frame_length).max(0);
+            let samples = (frames * frame_size) as f64;
+            Some(((audio_bytes * 8 * sample_rate) as f64 / samples).round_ties_even() as i64)
+        }
+        _ => Some(bitrate),
+    }
+}
+
+/// An MP4 file's audio sample entry `samplesize` (mutagen's
+/// `bits_per_sample`; 16 in AAC files, where lofty has no bit depth): the
+/// first entry of the first sound track's `stsd`.
+fn mp4_sample_size(path: &Path) -> Option<i64> {
+    use std::io::{Read, Seek, SeekFrom};
+    let mut f = std::fs::File::open(path).ok()?;
+    let file_len = f.metadata().ok()?.len();
+    type Boxes = Vec<([u8; 4], u64, u64)>;
+    // The child boxes of the box spanning `start..end`: (type, body start, end).
+    fn boxes(f: &mut std::fs::File, start: u64, end: u64) -> Option<Boxes> {
+        let mut out = vec![];
+        let mut pos = start;
+        while pos + 8 <= end {
+            f.seek(SeekFrom::Start(pos)).ok()?;
+            let mut h = [0u8; 16];
+            f.read_exact(&mut h[..8]).ok()?;
+            let mut size = u32::from_be_bytes(h[..4].try_into().ok()?) as u64;
+            let mut header = 8;
+            if size == 1 {
+                f.read_exact(&mut h[8..16]).ok()?;
+                size = u64::from_be_bytes(h[8..16].try_into().ok()?);
+                header = 16;
+            } else if size == 0 {
+                size = end - pos;
+            }
+            if size < header || pos + size > end {
+                break;
+            }
+            out.push((h[4..8].try_into().ok()?, pos + header, pos + size));
+            pos += size;
+        }
+        Some(out)
+    }
+    let find = |boxes: &[([u8; 4], u64, u64)], name: &[u8; 4]| {
+        boxes
+            .iter()
+            .find(|(t, _, _)| t == name)
+            .map(|&(_, s, e)| (s, e))
+    };
+    let top = boxes(&mut f, 0, file_len)?;
+    let (ms, me) = find(&top, b"moov")?;
+    let moov = boxes(&mut f, ms, me)?;
+    for (_, ts, te) in moov.iter().filter(|(t, _, _)| t == b"trak") {
+        let trak = boxes(&mut f, *ts, *te)?;
+        let Some((ds, de)) = find(&trak, b"mdia") else {
+            continue;
+        };
+        let mdia = boxes(&mut f, ds, de)?;
+        let Some((hs, _)) = find(&mdia, b"hdlr") else {
+            continue;
+        };
+        let mut handler = [0u8; 4];
+        // hdlr: version/flags (4), pre_defined (4), handler_type (4).
+        f.seek(SeekFrom::Start(hs + 8)).ok()?;
+        f.read_exact(&mut handler).ok()?;
+        if &handler != b"soun" {
+            continue;
+        }
+        let (ns, ne) = find(&mdia, b"minf")?;
+        let minf = boxes(&mut f, ns, ne)?;
+        let (ss, se) = find(&minf, b"stbl")?;
+        let stbl = boxes(&mut f, ss, se)?;
+        let (ds, _) = find(&stbl, b"stsd")?;
+        // stsd: version/flags (4), entry count (4), then the first entry's
+        // box header (8), reserved (6), data ref index (2), reserved (8),
+        // channel count (2), sample size (2).
+        let mut buf = [0u8; 36];
+        f.seek(SeekFrom::Start(ds)).ok()?;
+        f.read_exact(&mut buf).ok()?;
+        if u32::from_be_bytes(buf[4..8].try_into().ok()?) == 0 {
+            return None;
+        }
+        return Some(u16::from_be_bytes(buf[34..36].try_into().ok()?) as i64);
+    }
+    None
+}
+
 /// Read an audio file into a new (unsaved) item.
 pub fn read(path: &Path) -> Result<Item> {
     let file = lofty::read_from_path(path)
@@ -154,16 +317,29 @@ pub fn read(path: &Path) -> Result<Item> {
     item.set_path(path);
     let props = file.properties();
     item.set("length", Value::Float(props.duration().as_secs_f64()));
+    let bitrate = match file.file_type() {
+        FileType::Mpeg => mpeg_bitrate(path),
+        _ => None,
+    };
     item.set_int(
         "bitrate",
-        props
-            .audio_bitrate()
-            .or(props.overall_bitrate())
-            .unwrap_or(0) as i64
-            * 1000,
+        bitrate.unwrap_or(
+            props
+                .audio_bitrate()
+                .or(props.overall_bitrate())
+                .unwrap_or(0) as i64
+                * 1000,
+        ),
     );
     item.set_int("samplerate", props.sample_rate().unwrap_or(0) as i64);
-    item.set_int("bitdepth", props.bit_depth().unwrap_or(0) as i64);
+    let bitdepth = props
+        .bit_depth()
+        .map(|b| b as i64)
+        .or_else(|| match file.file_type() {
+            FileType::Mp4 => mp4_sample_size(path),
+            _ => None,
+        });
+    item.set_int("bitdepth", bitdepth.unwrap_or(0));
     item.set_int("channels", props.channels().unwrap_or(0) as i64);
     let format = match (file.file_type(), path.extension().and_then(|e| e.to_str())) {
         (FileType::Mp4, Some(e))
@@ -174,16 +350,6 @@ pub fn read(path: &Path) -> Result<Item> {
         (ft, _) => format_name(ft),
     };
     item.set_str("format", format);
-    if let Ok(meta) = std::fs::metadata(path)
-        && let Ok(m) = meta.modified()
-    {
-        let ts = m
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_secs_f64())
-            .unwrap_or(0.0);
-        item.set("mtime", Value::Float(ts));
-    }
-
     if let Some(tag) = pick_tag(&file) {
         item.set_str("title", tag.title().unwrap_or_default());
         item.set_str("artist", tag.artist().unwrap_or_default());
@@ -241,6 +407,8 @@ pub fn read(path: &Path) -> Result<Item> {
             item.set_int("bpm", b.trim().parse::<f64>().unwrap_or(0.0).round() as i64);
         }
     }
+    // Last: setting the tag fields reset it (beets' `from_path`).
+    refresh_mtime(&mut item);
     Ok(item)
 }
 
@@ -425,6 +593,61 @@ pub fn write_to(item: &Item, path: &Path) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A minimal MPEG 1 layer III stream: an ID3v2 tag, then one 128 kbps
+    /// 44.1 kHz stereo frame, with an Info header when `xing` gives its
+    /// frame and byte counts.
+    fn mpeg(xing: Option<(u32, u32)>) -> Vec<u8> {
+        let mut d = b"ID3\x04\x00\x00\x00\x00\x00\x0a".to_vec();
+        d.extend([0u8; 10]);
+        let mut frame = vec![0xff, 0xfb, 0x90, 0x00];
+        frame.resize(417, 0);
+        if let Some((frames, bytes)) = xing {
+            frame[36..40].copy_from_slice(b"Info");
+            frame[40..44].copy_from_slice(&3u32.to_be_bytes());
+            frame[44..48].copy_from_slice(&frames.to_be_bytes());
+            frame[48..52].copy_from_slice(&bytes.to_be_bytes());
+        }
+        d.extend(frame);
+        d
+    }
+
+    // mutagen's figures: (bytes - first frame) * 8 * rate / (frames * 1152),
+    // rounded half to even; without a Xing/Info header, the frame's own.
+    #[test]
+    fn mpeg_bitrate_as_mutagen() {
+        assert_eq!(mpeg_bitrate_of(&mpeg(None)), Some(128_000));
+        // 40 frames of 417 bytes after the Info frame.
+        let bytes = 41 * 417;
+        // 40 * 417 * 8 * 44100 / (40 * 1152) = 127706.25
+        assert_eq!(mpeg_bitrate_of(&mpeg(Some((40, bytes)))), Some(127_706));
+        assert_eq!(mpeg_bitrate_of(b"not audio"), None);
+    }
+
+    // mutagen's `bits_per_sample` for AAC: the sample entry's sample size.
+    #[test]
+    fn mp4_aac_bit_depth() {
+        let d = tempfile::tempdir().unwrap();
+        let p = d.path().join("a.m4a");
+        let ok = std::process::Command::new("ffmpeg")
+            .args([
+                "-loglevel",
+                "error",
+                "-f",
+                "lavfi",
+                "-i",
+                "sine=d=0.2",
+                "-c:a",
+                "aac",
+            ])
+            .arg(&p)
+            .status()
+            .is_ok_and(|s| s.success());
+        if !ok {
+            return;
+        }
+        assert_eq!(read(&p).unwrap().int("bitdepth"), 16);
+    }
 
     #[test]
     fn dates() {

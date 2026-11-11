@@ -7,7 +7,7 @@ use crate::display::Display;
 use crate::duplicates::{self, DuplicateAction, Found, KeyValues};
 use crate::fileops::{self, FileOp, Globs, WalkFilter, prune_dirs};
 use crate::formatted::Formatted;
-use crate::library::{Library, now};
+use crate::library::Library;
 use crate::mb::MusicBrainz;
 use crate::media;
 use crate::model::{Album, Item, Value};
@@ -704,7 +704,7 @@ impl<'a> Importer<'a> {
                 Err(e) => eprintln!("warning: {e:#}"),
             }
         }
-        items.sort_by_key(|i| (i.int("disc"), i.int("track"), i.path().to_path_buf()));
+        // Path order, as beets: the library ids follow it.
         Ok(items)
     }
 
@@ -1364,10 +1364,6 @@ impl<'a> Importer<'a> {
         source_dir: &Path,
         graft: Option<i64>,
     ) -> Result<()> {
-        let added = now();
-        for i in &mut items {
-            i.set("added", Value::Float(added));
-        }
         let n = items.len();
         let lib = self.lib;
         let mut moved_in_library = false;
@@ -1551,15 +1547,9 @@ impl<'a> Importer<'a> {
         {
             eprintln!("warning: {e:#}");
         }
-        if let Ok(meta) = std::fs::metadata(item.path())
-            && let Ok(m) = meta.modified()
-        {
-            let ts = m
-                .duration_since(std::time::UNIX_EPOCH)
-                .map(|d| d.as_secs_f64())
-                .unwrap_or(0.0);
-            item.set("mtime", Value::Float(ts));
-        }
+        // As beets, the stored mtime stays the one read from the source
+        // (0 when the tags were changed and not written); a write records
+        // the file's new one.
         Ok(copied)
     }
 
@@ -1626,7 +1616,6 @@ impl<'a> Importer<'a> {
                 return self.import_album_items(items, &dir, &paths);
             }
         }
-        item.set("added", Value::Float(now()));
         item.set_int("album_id", 0);
         let lib = self.lib;
         let copied = lib.transaction(|lib| {
@@ -2898,6 +2887,39 @@ mod tests {
         let c2 = album_with(&src, "c2", "Third", &[("One", 128)]).unwrap();
         assert_eq!(import_dir(&cfg, &lib, &c2, copy_op).skipped, 1);
         assert_eq!(lib.all_albums().unwrap().len(), 3);
+    }
+
+    // As beets: an album's items get library ids in file (path) order, not
+    // track order (found by tools/diffbeets).
+    #[test]
+    fn album_items_added_in_path_order() {
+        let (_d, cfg, lib, src) = setup(&[]);
+        let d = src.join("a");
+        for (name, title, track) in [
+            ("1.mp3", "First", "2"),
+            ("2.mp3", "Second", ""),
+            ("3.mp3", "Third", "1"),
+        ] {
+            let mut tags = vec![("artist", "Artist"), ("album", "Al"), ("title", title)];
+            if !track.is_empty() {
+                tags.push(("track", track));
+            }
+            if !make_mp3(&d, name, &tags, 128) {
+                return;
+            }
+        }
+        import_dir(&cfg, &lib, &d, |_| {});
+        let a = &lib.all_albums().unwrap()[0];
+        let mut items = lib.album_items(a.id.unwrap()).unwrap();
+        items.sort_by_key(|i| i.id);
+        let titles: Vec<&str> = items.iter().map(|i| i.str("title")).collect();
+        assert_eq!(titles, ["First", "Second", "Third"]);
+        // As-is took the artist as albumartist, a tag change not written to
+        // the file: beets resets mtime then ("dirty"), so `update` re-reads.
+        for i in &items {
+            assert_eq!(i.str("albumartist"), "Artist");
+            assert_eq!(i.float("mtime"), 0.0);
+        }
     }
 
     #[test]

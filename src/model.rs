@@ -390,7 +390,15 @@ impl Record {
     pub fn set(&mut self, name: &str, value: Value) {
         if let Some((key, ty)) = schema(self.kind).iter().find(|(n, _)| *n == name) {
             let coerced = coerce(value, *ty);
-            self.values.insert(key, coerced);
+            let old = self.values.insert(key, coerced);
+            // beets' `Item.__setitem__`: changing a tag field marks the
+            // file as out of date ("Reset mtime on dirty").
+            if self.kind == Kind::Item
+                && crate::media::TAG_FIELDS.contains(key)
+                && old.as_ref() != self.values.get(key)
+            {
+                self.values.insert("mtime", Value::Float(0.0));
+            }
         } else if name != "id" {
             self.flex.insert(name.to_string(), value.raw());
         }
@@ -503,6 +511,27 @@ fn coerce(value: Value, ty: FieldType) -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // beets' `Item.__setitem__`: changing a tag field resets `mtime`.
+    #[test]
+    fn changing_tag_fields_resets_mtime() {
+        let mut it = Record::new_item();
+        it.set_str("title", "a");
+        it.set("mtime", Value::Float(5.0));
+        it.set_str("title", "a");
+        assert_eq!(it.float("mtime"), 5.0, "same value: not dirty");
+        it.flex.insert("mood".into(), "x".into());
+        it.set_str("mood", "y");
+        it.set_int("bitrate", 1);
+        it.set_path("/x.mp3");
+        assert_eq!(it.float("mtime"), 5.0, "flex, audio properties, path");
+        it.set_str("title", "b");
+        assert_eq!(it.float("mtime"), 0.0);
+        let mut al = Record::new_album();
+        al.set("artpath", Value::Path("/a.jpg".into()));
+        al.set_str("album", "x");
+        assert!(al.get("mtime").is_none());
+    }
 
     #[test]
     fn formatting() {

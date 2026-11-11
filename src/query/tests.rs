@@ -826,8 +826,9 @@ fn date_lib(added: &str) -> Library {
     let lib = Library::in_memory().unwrap();
     let d = NaiveDateTime::parse_from_str(added, "%Y-%m-%d %H:%M").unwrap();
     let mut it = item(&[("title", "x")]);
-    it.set("added", Value::Float(timestamp(d)));
     lib.add(&mut it).unwrap();
+    it.set("added", Value::Float(timestamp(d)));
+    lib.store(&it).unwrap();
     lib
 }
 

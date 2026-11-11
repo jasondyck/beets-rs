@@ -427,6 +427,42 @@ mod tests {
         }
     }
 
+    // beets' test_library.py TestDestination cases not covered above.
+    #[test]
+    fn upstream_destination_cases() {
+        // test_unicode_extension_in_fragment
+        let mut it = item();
+        it.set_path("/in/bar.caf\u{e9}");
+        let f = fmt("paths:\n  default: foo\n");
+        assert_eq!(dest(&f, &it), "/lib/foo.caf\u{e9}");
+        // test_albumtype_query_path / test_albumtype_path_fallback_to_comp
+        let mut it = item();
+        it.set("comp", Value::Bool(true));
+        it.set_str("albumtype", "sometype");
+        let f = fmt("paths:\n  default: two\n  albumtype:sometype: four\n  comp: three\n");
+        assert_eq!(dest(&f, &it), "/lib/four.mp3");
+        let f = fmt("paths:\n  default: two\n  albumtype:anothertype: four\n  comp: three\n");
+        assert_eq!(dest(&f, &it), "/lib/three.mp3");
+        // test_destination_with_empty_component / _final_component
+        let mut it = item();
+        it.set_str("artist", "");
+        it.set_str("albumartist", "");
+        it.set_str("album", "one");
+        it.set_str("title", "three");
+        let f = fmt("empty_component_replace: _\npaths:\n  default: $album/$artist/$title\n");
+        assert_eq!(dest(&f, &it), "/lib/one/_/three.mp3");
+        it.set_str("title", "");
+        let f = fmt("empty_component_replace: _\npaths:\n  default: $album/$title\n");
+        assert_eq!(dest(&f, &it), "/lib/one/_.mp3");
+        // test_destination_escapes_leading_dot
+        let mut it = item();
+        it.set_str("album", ".something");
+        assert_eq!(
+            dest(&fmt(""), &it),
+            "/lib/AC_DC/_something/01 Hells Bells_.mp3"
+        );
+    }
+
     #[test]
     fn custom_replacements_and_empty_leading_field() {
         // As beets' test_destination_stays_in_basedir_with_empty_leading_field.

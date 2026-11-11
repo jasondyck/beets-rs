@@ -329,6 +329,12 @@ impl<'a> Formatted<'a> {
         })
     }
 
+    /// Whether `rec` is the record this mapping formats (not its album:
+    /// an item and its album can share an id).
+    fn is_self(&self, rec: &Record) -> bool {
+        rec.kind == self.rec.kind && rec.id == self.rec.id
+    }
+
     fn has_key(rec: &Record, key: &str) -> bool {
         rec.has_field(key) || computed(rec.kind, key)
     }
@@ -348,13 +354,13 @@ impl<'a> Formatted<'a> {
                 let art = crate::media::has_art(rec.path()).unwrap_or(false);
                 if art { "True" } else { "False" }.into()
             }
-            (Kind::Album, "path") if rec.id == self.rec.id => self
+            (Kind::Album, "path") if self.is_self(rec) => self
                 .album_items()
                 .first()
                 .and_then(|i| i.path().parent())
                 .map(|p| p.to_string_lossy().into_owned())
                 .unwrap_or_default(),
-            (Kind::Album, "albumtotal") if rec.id == self.rec.id => {
+            (Kind::Album, "albumtotal") if self.is_self(rec) => {
                 let items = self.album_items();
                 let total = if rec.int("disctotal") == 1 || !self.env.per_disc_numbering {
                     items.first().map(|i| i.int("tracktotal")).unwrap_or(0)
@@ -760,6 +766,29 @@ mod tests {
         assert_eq!(render("$title", &it, None, true), "C__x_ y");
         assert_eq!(render("$title", &it, None, false), "C:/x: y");
         assert_eq!(render("%sunique{}", &al, None, false), "");
+    }
+
+    // An item can share its id with its album; the album's computed fields
+    // must still come from the album (found by the diffbeets corpus).
+    #[test]
+    fn album_computed_fields_when_ids_coincide() {
+        let lib = crate::library::Library::in_memory().unwrap();
+        let mut items: Vec<Record> = (1..=2)
+            .map(|t| {
+                let mut it = Record::new_item();
+                it.set_int("track", t);
+                it.set_int("tracktotal", 2);
+                it.set_path(format!("/lib/a/{t}.mp3"));
+                it
+            })
+            .collect();
+        let album = lib.add_album(&mut items).unwrap();
+        assert_eq!(album.id, items[0].id);
+        let env = Rc::new(FormatEnv::defaults());
+        for it in &items {
+            let f = Formatted::with_env(it, Some(&lib), env.clone());
+            assert_eq!(Template::parse("$albumtotal").render(&f), "2");
+        }
     }
 
     #[test]

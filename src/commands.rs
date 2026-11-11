@@ -2322,12 +2322,25 @@ mod tests {
         // The album takes its first item's fields, and passes them on.
         assert_eq!(lib.all_albums().unwrap()[0].str("album"), "Renamed");
         assert!(its.iter().all(|i| i.str("album") == "Renamed"));
-        // Up to date now: a changed db value isn't overwritten again.
+        // Up to date now: a db value changed without touching the stored
+        // mtime isn't overwritten again.
         let mut i = its[0].clone();
+        let id = i.id.unwrap();
+        let get = || lib.get_item(id).unwrap().unwrap();
+        let mtime = i.float("mtime");
         i.set_str("title", "Edited");
+        // As beets, changing a tag field resets the mtime ("dirty").
+        assert_eq!(i.float("mtime"), 0.0);
+        i.set("mtime", Value::Float(mtime));
         lib.store(&i).unwrap();
         update(&cfg, &lib, &update_opts(), &[]).unwrap();
-        assert_eq!(items(&lib)[0].str("title"), "Edited");
+        assert_eq!(get().str("title"), "Edited");
+        // With the reset mtime the file is read again.
+        let mut i = get();
+        i.set_str("title", "Edited again");
+        lib.store(&i).unwrap();
+        update(&cfg, &lib, &update_opts(), &[]).unwrap();
+        assert_eq!(get().str("title"), "New");
     }
 
     #[test]

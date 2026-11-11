@@ -429,7 +429,40 @@ pub fn unidecode(s: &str) -> String {
         if matches!(c, '\u{bc}'..='\u{be}' | '\u{2150}'..='\u{215e}') {
             out.push(' ');
         }
-        out.push_str(&deunicode::deunicode(c.encode_utf8(&mut buf)));
+        // Where unidecode's tables differ from deunicode's for common
+        // Japanese text and CJK punctuation.
+        let fixed = match c {
+            'し' | 'シ' => Some("shi"),
+            'ち' | 'チ' => Some("chi"),
+            'っ' | 'つ' | 'ッ' | 'ツ' => Some("tsu"),
+            'ー' => Some("-"),
+            '・' => Some("*"),
+            '、' => Some(", "),
+            '。' => Some(". "),
+            '〉' => Some("> "),
+            '》' => Some(">> "),
+            '」' | '〕' => Some("] "),
+            '』' => Some("} "),
+            '】' => Some(")] "),
+            '〓' => Some("X "),
+            '〗' | '〛' => Some("]] "),
+            '〙' => Some(")) "),
+            '〜' => Some("~ "),
+            '〷' => Some(" __ "),
+            _ => None,
+        };
+        if let Some(f) = fixed {
+            out.push_str(f);
+            continue;
+        }
+        let t = deunicode::deunicode(c.encode_utf8(&mut buf));
+        out.push_str(&t);
+        // unidecode's CJK ideograph entries end in a space ("Ri Ben ").
+        if matches!(c, '\u{3400}'..='\u{4dbf}' | '\u{4e00}'..='\u{9fff}' | '\u{f900}'..='\u{faff}')
+            && !t.is_empty()
+        {
+            out.push(' ');
+        }
     }
     out
 }
@@ -698,6 +731,25 @@ mod tests {
             "<time data '2024' does not match format '%Y-%m-%d %H:%M:%S'>"
         );
         assert_eq!(render("%first{a,1,0,}"), "<empty separator>");
+    }
+
+    // Python unidecode's output, checked against the reference beets'
+    // venv: CJK ideographs end in a space; some kana and CJK punctuation
+    // differ from deunicode.
+    #[test]
+    fn unidecode_like_python() {
+        for (s, want) in [
+            ("日本語のタイトル", "Ri Ben Yu notaitoru"),
+            ("中文 歌", "Zhong Wen  Ge "),
+            ("しちつっ シチツッ", "shichitsutsu shichitsutsu"),
+            ("ラーメン・ア、い。", "ra-men*a, i. "),
+            ("「x」", "[x] "),
+            ("한국어", "hangugeo"),
+            ("Ελληνικά", "Ellenika"),
+            ("Björk ½", "Bjork  1/2"),
+        ] {
+            assert_eq!(unidecode(s), want, "{s}");
+        }
     }
 
     #[test]
