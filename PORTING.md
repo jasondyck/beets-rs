@@ -24,7 +24,7 @@ config`, plugins fetchart / lyrics / embedart, release preferences.
 - [x] **2.1 Global CLI**: `version`, `help [cmd]`, beets' command aliases (`ls`, `rm`, `mv`, `up`/`upd`, `mod`, `imp`/`im`, `stat`?), `-v/-vv` verbosity (logging), `-p/--plugins` override, `--format-item`/`--format-album` not in beets (skip)
 - [x] **2.2 modify**: `-f/--format`, `-I/--noinherit` (album→item field inheritance), `-m/-M`, `-w/-W`, `-a` album changes propagating to items, `field!` deletion, confirmation diff display as in beets
 - [x] **2.3 move**: `-e/--export` (copy without updating db) vs `-c` (copy and update db), `-t/--timid`. Deliberate deviation: an item's own file counts as free for unique names, so repeated mv is idempotent
-- [ ] **2.4 update / write / remove**: `update -F/--field`, `-a`; `write -f/--force`; `remove` confirmation listing as in beets
+- [x] **2.4 update / write / remove**: `update -F/--field`, `-a`; `write -f/--force`; `remove` confirmation listing as in beets
 - [ ] **2.5 config**: `config -e/--edit` (`$VISUAL`/`$EDITOR`), `--clear`; `include:` files; `config -p` with `$BEETSRSDIR`; `-c/--config` should layer on top of the user config (repeatable) as in beets, not replace it
 - [ ] **2.6 ui**: `ui.color`, `ui.colors`, change-display highlighting as in beets, `terminal_width`, `ui.length_diff_thresh`
 

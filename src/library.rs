@@ -267,7 +267,6 @@ impl Library {
         self.load(Kind::Album, "", &[])
     }
 
-    #[cfg(test)]
     pub fn get_item(&self, id: i64) -> Result<Option<Item>> {
         Ok(self
             .load(Kind::Item, "WHERE id=?", &[SqlValue::Integer(id)])?

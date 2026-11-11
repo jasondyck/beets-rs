@@ -100,6 +100,21 @@ pub const TAG_FIELDS: &[&str] = &[
     "media",
 ];
 
+/// Audio properties `read` takes from the file besides its tags.
+pub const PROPERTY_FIELDS: &[&str] = &[
+    "length",
+    "bitrate",
+    "samplerate",
+    "bitdepth",
+    "channels",
+    "format",
+];
+
+/// beets' `Item._media_fields`: everything `read` sets from a file.
+pub fn media_fields() -> impl Iterator<Item = &'static str> {
+    TAG_FIELDS.iter().chain(PROPERTY_FIELDS).copied()
+}
+
 /// Parse "YYYY", "YYYY-MM" or "YYYY-MM-DD..." into (year, month, day).
 fn parse_date(s: &str) -> (i64, i64, i64) {
     let mut parts = s.trim().splitn(3, ['-', '/']);

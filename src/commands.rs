@@ -6,9 +6,7 @@ use crate::importer::{self, ImportOptions, Importer, Resume};
 use crate::library::Library;
 use crate::logging::debug;
 use crate::media;
-use crate::model::{
-    ALBUM_FIELDS, Album, ITEM_FIELDS, Item, Kind, Record, Value, album_item_shared_fields,
-};
+use crate::model::{ALBUM_FIELDS, Album, ITEM_FIELDS, Item, Kind, Record, Value};
 use crate::paths::PathFormatter;
 use crate::plugins::{self, PluginCtx};
 use crate::query::Query;
@@ -252,8 +250,17 @@ pub fn run(cli: Cli) -> Result<()> {
             album,
             delete,
             force,
+            limit,
             query,
-        } => remove(&cfg, &lib, album, delete, force, &query),
+        } => {
+            let opts = RemoveOpts {
+                album,
+                delete,
+                force,
+                limit,
+            };
+            remove(&cfg, &lib, &opts, &query)
+        }
         Cmd::Move {
             album,
             dest,
@@ -276,11 +283,33 @@ pub fn run(cli: Cli) -> Result<()> {
             move_cmd(&cfg, &lib, &opts, &query)
         }
         Cmd::Update {
-            pretend,
+            album,
+            format,
+            mv,
             nomove,
+            pretend,
+            fields,
+            exclude_fields,
+            limit,
             query,
-        } => update(&cfg, &lib, pretend, !nomove, &query),
-        Cmd::Write { pretend, query } => write(&lib, pretend, &query),
+        } => {
+            let opts = UpdateOpts {
+                album,
+                format,
+                mv: (mv || nomove).then_some(mv),
+                pretend,
+                fields: (!fields.is_empty()).then_some(fields),
+                exclude_fields,
+                limit,
+            };
+            update(&cfg, &lib, &opts, &query)
+        }
+        Cmd::Write {
+            pretend,
+            force,
+            limit,
+            query,
+        } => write(&cfg, &lib, pretend, force, limit, &query),
         Cmd::Stats { exact, query } => stats(&lib, exact, &query),
         Cmd::Fetchart { force, query } => fetchart(&cfg, &lib, force, &query),
         Cmd::Embedart { file, yes, query } => embedart(&cfg, &lib, file, yes, &query),
@@ -460,7 +489,13 @@ fn field_diff(field: &str, old: &Record, new: &Record) -> Option<String> {
 
 /// beets' `get_model_changes`: diff lines for every changed field (fixed
 /// and flexible, except `mtime`), sorted by field name.
+#[cfg(test)]
 fn model_changes(old: &Record, new: &Record) -> Vec<String> {
+    model_changes_in(old, new, None)
+}
+
+/// `model_changes` limited to `only` (beets' `fields`; empty means all).
+fn model_changes_in(old: &Record, new: &Record, only: Option<&[String]>) -> Vec<String> {
     let mut fields: Vec<String> = old.keys();
     for k in new.keys() {
         if !fields.contains(&k) {
@@ -468,6 +503,9 @@ fn model_changes(old: &Record, new: &Record) -> Vec<String> {
         }
     }
     fields.retain(|f| f != "mtime");
+    if let Some(only) = only.filter(|o| !o.is_empty()) {
+        fields.retain(|f| only.contains(f));
+    }
     fields.sort();
     fields
         .iter()
@@ -478,9 +516,23 @@ fn model_changes(old: &Record, new: &Record) -> Vec<String> {
 /// beets' `show_model_changes`: print `label` (the object, formatted as
 /// it was) and its changes, if there are any. Returns whether there were.
 fn show_model_changes(label: &str, old: &Record, new: &Record) -> bool {
-    let changes = model_changes(old, new);
-    if !changes.is_empty() {
+    show_changes(label, old, new, None, false)
+}
+
+/// `show_model_changes` with beets' `fields` (only these are compared) and
+/// `always` (print the label even without changes).
+fn show_changes(
+    label: &str,
+    old: &Record,
+    new: &Record,
+    fields: Option<&[String]>,
+    always: bool,
+) -> bool {
+    let changes = model_changes_in(old, new, fields);
+    if !changes.is_empty() || always {
         println!("{label}");
+    }
+    if !changes.is_empty() {
         for c in &changes {
             println!("  {}", c.replace('\n', "\n  "));
         }
@@ -668,80 +720,161 @@ fn model_changes_fields(old: &Album, new: &Album) -> Vec<String> {
         .collect()
 }
 
-fn remove(
-    cfg: &Config,
-    lib: &Library,
-    album: bool,
-    delete: bool,
-    force: bool,
-    q: &[String],
-) -> Result<()> {
-    let (albums, items): (Vec<Album>, Vec<Item>) = if album {
-        let albums = lib.albums(&Query::parse(Kind::Album, q)?)?;
-        let mut items = vec![];
-        for a in &albums {
-            items.extend(lib.album_items(a.id.unwrap())?);
-        }
-        (albums, items)
+/// `beet remove` options besides the query.
+pub struct RemoveOpts {
+    pub album: bool,
+    /// -d: also delete the files (and album art).
+    pub delete: bool,
+    /// -f: don't ask.
+    pub force: bool,
+    pub limit: Option<usize>,
+}
+
+/// beets' `remove_items` / `remove_albums` / `remove_objects`.
+fn remove(cfg: &Config, lib: &Library, opts: &RemoveOpts, q: &[String]) -> Result<()> {
+    let kind = if opts.album { Kind::Album } else { Kind::Item };
+    let mut objs = if opts.album {
+        lib.albums(&Query::parse(kind, q)?)?
     } else {
-        (vec![], lib.items(&Query::parse(Kind::Item, q)?)?)
+        lib.items(&Query::parse(kind, q)?)?
     };
-    if items.is_empty() && albums.is_empty() {
-        println!("No matching items.");
-        return Ok(());
+    objs.truncate(opts.limit.unwrap_or(usize::MAX));
+    if objs.is_empty() {
+        bail!("No matching objects to remove.");
     }
-    let t = Template::parse(&cfg.str("format_item"));
-    for i in &items {
-        println!("{}", format_record(&t, i));
-    }
-    let verb = if delete {
-        "Really DELETE"
+    let selected = if opts.force {
+        objs
     } else {
-        "Really remove"
-    };
-    if !force && !ui::yes_no(&format!("{verb} {} item(s) from the library", items.len())) {
-        return Ok(());
-    }
-    let libdir = cfg.directory();
-    let clutter = fileops::clutter(cfg);
-    lib.transaction(|lib| {
-        let mut touched_albums: HashSet<i64> = HashSet::new();
-        for i in &items {
-            if delete {
-                if let Err(e) = std::fs::remove_file(i.path()) {
-                    eprintln!("warning: {}: {e}", i.path().display());
-                }
-                if let Some(p) = i.path().parent() {
-                    fileops::prune_dirs(p, &libdir, &clutter);
-                }
+        let file_count = if opts.album {
+            let mut n = 0;
+            for a in &objs {
+                n += lib.album_items(a.id.unwrap())?.len();
             }
-            touched_albums.insert(i.int("album_id"));
-            lib.remove(i)?;
-        }
-        let delete_art = |a: &Album| {
-            let art = a.path_field("artpath");
-            if delete && art.is_file() {
-                std::fs::remove_file(art).ok();
-                if let Some(p) = art.parent() {
-                    fileops::prune_dirs(p, &libdir, &clutter);
+            n
+        } else {
+            objs.len()
+        };
+        let albums = opts.album.then_some(objs.len());
+        let (fmt, prompt, prompt_all) = remove_prompts(cfg, opts.delete, file_count, albums);
+        let t = Template::parse(&fmt);
+        let show = |o: &Record| {
+            if opts.album {
+                println!();
+                for i in lib.album_items(o.id.unwrap()).unwrap_or_default() {
+                    println!("{}", format_record(&t, &i));
                 }
+            } else {
+                println!("{}", format_record(&t, o));
             }
         };
-        for a in &albums {
-            delete_art(a);
-            lib.remove(a)?;
+        for o in &objs {
+            show(o);
         }
-        // Drop albums left with no items.
-        for id in touched_albums {
-            if let Some(a) = lib.get_album(id)?
-                && lib.album_items(id)?.is_empty()
-            {
-                delete_art(&a);
-                lib.remove(&a)?;
+        ui::select_objects_all(prompt, Some(&prompt_all), &objs, show)
+    };
+    if selected.is_empty() {
+        return Ok(());
+    }
+    lib.transaction(|lib| {
+        for obj in &selected {
+            if opts.album {
+                remove_album(cfg, lib, obj, opts.delete, true)?;
+            } else {
+                remove_item(cfg, lib, obj, opts.delete, true)?;
             }
         }
         Ok(())
     })
+}
+
+/// `beet remove`'s listing format, per-object prompt and first prompt.
+/// beets' `prompt_all` for a plain remove ends in "?", to which
+/// `input_select_objects` adds another; we print one.
+fn remove_prompts(
+    cfg: &Config,
+    delete: bool,
+    file_count: usize,
+    albums: Option<usize>,
+) -> (String, &'static str, String) {
+    let album_str = match albums {
+        Some(n) => format!(" and {n} album{}", if n > 1 { "s" } else { "" }),
+        None => String::new(),
+    };
+    let s = if file_count > 1 { "s" } else { "" };
+    if delete {
+        (
+            "$path - $title".into(),
+            "Really DELETE",
+            format!("Really DELETE {file_count} file{s}{album_str}"),
+        )
+    } else {
+        (
+            cfg.str("format_item"),
+            "Really remove from the library",
+            format!("Really remove {file_count} item{s}{album_str} from the library"),
+        )
+    }
+}
+
+/// beets' `Item.remove`: drop the item (and its album, if that leaves it
+/// empty); with `delete`, delete the file and prune emptied directories.
+fn remove_item(
+    cfg: &Config,
+    lib: &Library,
+    item: &Item,
+    delete: bool,
+    with_album: bool,
+) -> Result<()> {
+    lib.remove(item)?;
+    let id = item.int("album_id");
+    if with_album
+        && id != 0
+        && let Some(a) = lib.get_album(id)?
+        && lib.album_items(id)?.is_empty()
+    {
+        remove_album(cfg, lib, &a, delete, false)?;
+    }
+    if delete {
+        remove_file(item.path());
+        if let Some(p) = item.path().parent() {
+            fileops::prune_dirs(p, &cfg.directory(), &fileops::clutter(cfg));
+        }
+    }
+    Ok(())
+}
+
+/// beets' `Album.remove`: drop the album, with `delete` its art file, and
+/// with `with_items` its items too.
+fn remove_album(
+    cfg: &Config,
+    lib: &Library,
+    album: &Album,
+    delete: bool,
+    with_items: bool,
+) -> Result<()> {
+    let items = if with_items {
+        lib.album_items(album.id.unwrap())?
+    } else {
+        vec![]
+    };
+    lib.remove(album)?;
+    if delete {
+        remove_file(album.path_field("artpath"));
+    }
+    for i in &items {
+        remove_item(cfg, lib, i, delete, false)?;
+    }
+    Ok(())
+}
+
+/// beets' `util.remove` (soft): delete a file if there is one.
+fn remove_file(path: &Path) {
+    if path.as_os_str().is_empty() || !path.exists() {
+        return;
+    }
+    if let Err(e) = std::fs::remove_file(path) {
+        eprintln!("error: deleting {}: {e}", path.display());
+    }
 }
 
 /// `beet move` options besides the query.
@@ -1014,89 +1147,234 @@ fn move_item_file(cfg: &Config, item: &mut Item, dest: &Path, op: FileOp) -> Res
     Ok(true)
 }
 
-fn update(cfg: &Config, lib: &Library, pretend: bool, mv: bool, q: &[String]) -> Result<()> {
-    let items = lib.items(&Query::parse(Kind::Item, q)?)?;
-    let t = Template::parse(&cfg.str("format_item"));
+/// `beet update` options besides the query.
+pub struct UpdateOpts {
+    pub album: bool,
+    /// -f: `format_item` for this run.
+    pub format: Option<String>,
+    /// -m/-M; default `import.move` or `import.copy`.
+    pub mv: Option<bool>,
+    pub pretend: bool,
+    /// -F: only these fields (None: all media fields).
+    pub fields: Option<Vec<String>>,
+    /// -e: never these fields.
+    pub exclude_fields: Vec<String>,
+    pub limit: Option<usize>,
+}
+
+fn file_mtime(path: &Path) -> f64 {
+    std::fs::metadata(path)
+        .and_then(|m| m.modified())
+        .ok()
+        .and_then(|m| m.duration_since(std::time::UNIX_EPOCH).ok())
+        .map_or(0.0, |d| d.as_secs_f64())
+}
+
+/// Store `fields` of `new` over the item's stored row (beets'
+/// `store(fields=...)`), plus `mtime` when `with_mtime`.
+fn store_fields(lib: &Library, new: &Item, fields: &[String], with_mtime: bool) -> Result<()> {
+    let Some(mut row) = lib.get_item(new.id.unwrap())? else {
+        return Ok(());
+    };
+    for f in fields
+        .iter()
+        .map(String::as_str)
+        .chain(with_mtime.then_some("mtime"))
+    {
+        if let Some(v) = new.get(f) {
+            row.set(f, v);
+        }
+    }
+    lib.store(&row)
+}
+
+/// beets' `update_func` / `update_items`.
+fn update(cfg: &Config, lib: &Library, opts: &UpdateOpts, q: &[String]) -> Result<()> {
+    let libdir = cfg.directory();
+    if !libdir.is_dir() {
+        println!("Library path is unavailable or does not exist.");
+        println!("{}", libdir.display());
+        if ui::input_options(
+            &['y', 'n'],
+            true,
+            "Are you sure you want to continue (y/n)?",
+            "Enter Y or N:",
+        ) != Some('y')
+        {
+            return Ok(());
+        }
+    }
+    let items: Vec<Item> = if opts.album {
+        let mut albums = lib.albums(&Query::parse(Kind::Album, q)?)?;
+        albums.truncate(opts.limit.unwrap_or(usize::MAX));
+        let mut v = vec![];
+        for a in albums {
+            v.extend(lib.album_items(a.id.unwrap())?);
+        }
+        v
+    } else {
+        let mut v = lib.items(&Query::parse(Kind::Item, q)?)?;
+        v.truncate(opts.limit.unwrap_or(usize::MAX));
+        v
+    };
+    if items.is_empty() {
+        bail!("No matching items to update.");
+    }
+    let mv = opts
+        .mv
+        .unwrap_or_else(|| cfg.bool("import.move") || cfg.bool("import.copy"));
+    let pretend = opts.pretend;
+    // As beets: -F limits both the item and the album fields; a move
+    // always stores `path`.
+    let mut item_fields: Vec<String> = match &opts.fields {
+        Some(f) => f.clone(),
+        None => media::media_fields().map(String::from).collect(),
+    };
+    if mv && !item_fields.iter().any(|f| f == "path") {
+        item_fields.push("path".into());
+    }
+    let mut album_fields: Vec<String> = match &opts.fields {
+        Some(_) => item_fields.clone(),
+        None => ALBUM_FIELDS.iter().map(|(n, _)| n.to_string()).collect(),
+    };
+    item_fields.retain(|f| !opts.exclude_fields.contains(f));
+    album_fields.retain(|f| !opts.exclude_fields.contains(f));
+    // A full update records the new mtime, so the file isn't read again;
+    // a partial one (-F) leaves it, so the other changes still show later.
+    let store_mtime = opts.fields.is_none();
+
+    let t = Template::parse(
+        &opts
+            .format
+            .clone()
+            .unwrap_or_else(|| cfg.str("format_item")),
+    );
     let fmt = PathFormatter::new(cfg)?;
-    let mut touched_albums: HashSet<i64> = HashSet::new();
-    let (mut removed, mut updated) = (0, 0);
-    for item in items {
-        let path = item.path().to_path_buf();
-        if !path.exists() {
-            println!("{} {}", ui::red("deleting"), format_record(&t, &item));
-            if !pretend {
-                lib.remove(&item)?;
-                touched_albums.insert(item.int("album_id"));
-            }
-            removed += 1;
-            continue;
-        }
-        let mtime = std::fs::metadata(&path)?
-            .modified()?
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_secs_f64())
-            .unwrap_or(0.0);
-        if (mtime - item.float("mtime")).abs() < 0.001 {
-            continue;
-        }
-        let fresh = match media::read(&path) {
-            Ok(f) => f,
-            Err(e) => {
-                eprintln!("warning: {e:#}");
-                continue;
+    lib.transaction(|lib| {
+        let mut affected: Vec<i64> = vec![];
+        let mut affect = |id: i64| {
+            if !affected.contains(&id) {
+                affected.push(id);
             }
         };
-        let mut new = item.clone();
-        let props = [
-            "length",
-            "bitrate",
-            "samplerate",
-            "bitdepth",
-            "channels",
-            "format",
-            "mtime",
-        ];
-        for name in media::TAG_FIELDS.iter().chain(props.iter()) {
-            if let Some(v) = fresh.get(name) {
-                new.set(name, v);
+        for item in items {
+            let path = item.path().to_path_buf();
+            if path.as_os_str().is_empty() || !path.exists() {
+                println!("{}", format_record(&t, &item));
+                println!("{}", ui::red("  deleted"));
+                if !pretend {
+                    remove_item(cfg, lib, &item, true, true)?;
+                }
+                affect(item.int("album_id"));
+                continue;
             }
-        }
-        if show_model_changes(&format_record(&t, &item), &item, &new) {
-            updated += 1;
-        }
-        if !pretend {
-            if mv
-                && new.path().starts_with(cfg.directory())
-                && let Err(e) = move_item(&fmt, lib, cfg, &mut new)
-            {
-                eprintln!("warning: {e:#}");
+            if file_mtime(&path) <= item.float("mtime") {
+                debug!(
+                    "skipping {} because mtime is up to date ({})",
+                    path.display(),
+                    item.float("mtime")
+                );
+                continue;
             }
-            lib.store(&new)?;
-            touched_albums.insert(new.int("album_id"));
-            if mv {
-                sync_art(cfg, lib, new.int("album_id"))?;
-            }
-        }
-    }
-    // Refresh album-level fields from their items, and drop empty albums.
-    for id in touched_albums {
-        if let Some(mut a) = lib.get_album(id)? {
-            let items = lib.album_items(id)?;
-            match items.first() {
-                None => lib.remove(&a)?,
-                Some(first) => {
-                    for f in album_item_shared_fields() {
-                        if let Some(v) = first.get(f) {
-                            a.set(f, v);
-                        }
-                    }
-                    lib.store(&a)?;
+            let fresh = match media::read(&path) {
+                Ok(f) => f,
+                Err(e) => {
+                    eprintln!("error reading {}: {e:#}", path.display());
+                    continue;
+                }
+            };
+            let mut new = item.clone();
+            for f in media::media_fields().chain(["mtime"]) {
+                if let Some(v) = fresh.get(f) {
+                    new.set(f, v);
                 }
             }
+            // Keep an album artist that only mirrored the track artist
+            // (as beets does for as-is imports).
+            if new.str("albumartist").is_empty()
+                && item.str("albumartist") == item.str("artist")
+                && item.str("artist") == new.str("artist")
+            {
+                new.set_str("albumartist", item.str("albumartist"));
+            }
+            let changed = show_changes(
+                &format_record(&t, &item),
+                &item,
+                &new,
+                Some(&item_fields),
+                false,
+            );
+            if pretend {
+                continue;
+            }
+            if changed {
+                if mv
+                    && new.path().starts_with(&libdir)
+                    && let Err(e) = move_item(&fmt, lib, cfg, &mut new)
+                {
+                    eprintln!("error moving {}: {e:#}", path.display());
+                    continue;
+                }
+                affect(new.int("album_id"));
+            }
+            store_fields(lib, &new, &item_fields, store_mtime)?;
         }
-    }
-    println!("Updated {updated} item(s), removed {removed}.");
-    Ok(())
+        if pretend {
+            return Ok(());
+        }
+        // Albums take their fields from their (first) item again.
+        let fa = Template::parse(&cfg.str("format_album"));
+        for id in affected {
+            if id == 0 {
+                continue;
+            }
+            let Some(mut album) = lib.get_album(id)? else {
+                debug!("emptied album {id}");
+                continue;
+            };
+            let items = lib.album_items(id)?;
+            let Some(first) = items.first() else {
+                continue;
+            };
+            // beets' `Album.item_keys`, stored (and inherited) where they
+            // changed.
+            let mut changed: Vec<&str> = vec![];
+            for (k, _) in ALBUM_FIELDS {
+                if *k == "artpath" || !album_fields.iter().any(|f| f == k) {
+                    continue;
+                }
+                if let Some(v) = first.get(k)
+                    && album.get(k).as_ref() != Some(&v)
+                {
+                    album.set(k, v);
+                    changed.push(k);
+                }
+            }
+            lib.store(&album)?;
+            for mut i in items.iter().cloned() {
+                if changed.iter().any(|k| i.get(k) != album.get(k)) {
+                    for k in &changed {
+                        if let Some(v) = album.get(k) {
+                            i.set(k, v);
+                        }
+                    }
+                    lib.store(&i)?;
+                }
+            }
+            if mv && first.path().starts_with(&libdir) {
+                debug!("moving album {id}");
+                for mut i in lib.album_items(id)? {
+                    if let Err(e) = move_item(&fmt, lib, cfg, &mut i) {
+                        eprintln!("error moving album {}: {e:#}", format_record(&fa, &album));
+                        break;
+                    }
+                    store_fields(lib, &i, &item_fields, false)?;
+                }
+                sync_art(cfg, lib, id)?;
+            }
+        }
+        Ok(())
+    })
 }
 
 /// Move an album's art next to its (stored) items, if it lives elsewhere.
@@ -1350,37 +1628,50 @@ fn lyrics(cfg: &Config, lib: &Library, print: bool, force: bool, q: &[String]) -
     Ok(())
 }
 
-fn write(lib: &Library, pretend: bool, q: &[String]) -> Result<()> {
-    let items = lib.items(&Query::parse(Kind::Item, q)?)?;
-    let mut n = 0;
+/// beets' `write_items`: write the database's tags to files whose tags
+/// differ (or all, with `force`), showing the differences.
+fn write(
+    cfg: &Config,
+    lib: &Library,
+    pretend: bool,
+    force: bool,
+    limit: Option<usize>,
+    q: &[String],
+) -> Result<()> {
+    let mut items = lib.items(&Query::parse(Kind::Item, q)?)?;
+    items.truncate(limit.unwrap_or(usize::MAX));
+    if items.is_empty() {
+        bail!("No matching items to write.");
+    }
+    let t = Template::parse(&cfg.str("format_item"));
+    let tag_fields: Vec<String> = media::TAG_FIELDS.iter().map(|f| f.to_string()).collect();
     for mut item in items {
-        let on_disk = match media::read(item.path()) {
+        if !item.path().exists() {
+            // beets logs this at INFO, which goes to stderr.
+            eprintln!("missing file: {}", item.path().display());
+            continue;
+        }
+        let clean = match media::read(item.path()) {
             Ok(i) => i,
             Err(e) => {
-                eprintln!("warning: {e:#}");
+                eprintln!("error reading {}: {e:#}", item.path().display());
                 continue;
             }
         };
-        let differs = crate::media::TAG_FIELDS
-            .iter()
-            .any(|f| on_disk.formatted(f) != item.formatted(f));
-        if !differs {
-            continue;
-        }
-        println!("{}", item.path().display());
-        if pretend {
-            continue;
-        }
-        match media::write_item(&mut item) {
-            Ok(()) => {
-                lib.store(&item)?;
-                n += 1;
+        let changed = show_changes(
+            &format_record(&t, &clean),
+            &clean,
+            &item,
+            Some(&tag_fields),
+            force,
+        );
+        if (changed || force) && !pretend {
+            // beets' `try_sync(write=True)`: write, then store (the mtime).
+            if let Err(e) = media::write_item(&mut item) {
+                eprintln!("error: {e:#}");
             }
-            Err(e) => eprintln!("warning: {e:#}"),
+            lib.store(&item)?;
         }
-    }
-    if !pretend {
-        println!("Wrote tags to {n} file(s).");
     }
     Ok(())
 }
@@ -1834,6 +2125,268 @@ mod tests {
         o.mv = Some(true);
         modify(&cfg, &lib, o, &strs(&["comments=x"])).unwrap();
         assert_eq!(items(&lib)[0].path(), p);
+    }
+
+    /// A library (dir `lib`) holding one album of `n` real MP3s by
+    /// "Artist", with `cover.jpg` art; None without ffmpeg.
+    fn lib_with_mp3s(n: usize) -> Option<(tempfile::TempDir, Config, Library)> {
+        let d = tempfile::tempdir().unwrap();
+        let mut cfg = Config::defaults();
+        cfg.set("directory", d.path().join("lib").to_string_lossy().into());
+        let dir = d.path().join("lib/Artist/Alb");
+        std::fs::create_dir_all(&dir).unwrap();
+        let lib = Library::in_memory().unwrap();
+        let mut items = vec![];
+        for t in 1..=n {
+            let path = dir.join(format!("{t}.mp3"));
+            let ok = std::process::Command::new("ffmpeg")
+                .args(["-loglevel", "error", "-f", "lavfi", "-i", "sine=d=0.5"])
+                .args(["-metadata", "artist=Artist", "-metadata", "album=Alb"])
+                .args(["-metadata", &format!("title=T{t}")])
+                .args(["-metadata", &format!("track={t}")])
+                .arg(&path)
+                .status()
+                .is_ok_and(|s| s.success());
+            if !ok {
+                return None;
+            }
+            items.push(media::read(&path).unwrap());
+        }
+        let mut album = lib.add_album(&mut items).unwrap();
+        let art = dir.join("cover.jpg");
+        std::fs::write(&art, b"img").unwrap();
+        album.set("artpath", Value::Path(art));
+        lib.store(&album).unwrap();
+        Some((d, cfg, lib))
+    }
+
+    /// Change a file's tags behind the library's back (and make its mtime
+    /// newer than the stored one).
+    fn retag(path: &Path, f: impl FnOnce(&mut Item)) {
+        let mut i = media::read(path).unwrap();
+        f(&mut i);
+        media::write(&i).unwrap();
+        let later = std::time::SystemTime::now() + std::time::Duration::from_secs(5);
+        std::fs::File::options()
+            .write(true)
+            .open(path)
+            .unwrap()
+            .set_modified(later)
+            .unwrap();
+    }
+
+    fn update_opts() -> UpdateOpts {
+        UpdateOpts {
+            album: false,
+            format: None,
+            mv: Some(false),
+            pretend: false,
+            fields: None,
+            exclude_fields: vec![],
+            limit: None,
+        }
+    }
+
+    #[test]
+    fn update_reads_changed_files_and_recomputes_albums() {
+        let Some((_d, cfg, lib)) = lib_with_mp3s(2) else {
+            return;
+        };
+        let p = items(&lib)[0].path().to_path_buf();
+        retag(&p, |i| {
+            i.set_str("title", "New");
+            i.set_str("album", "Renamed");
+        });
+        // Pretend changes nothing.
+        let mut o = update_opts();
+        o.pretend = true;
+        update(&cfg, &lib, &o, &[]).unwrap();
+        assert_eq!(items(&lib)[0].str("title"), "T1");
+
+        update(&cfg, &lib, &update_opts(), &[]).unwrap();
+        let its = items(&lib);
+        assert_eq!(its[0].str("title"), "New");
+        // The album takes its first item's fields, and passes them on.
+        assert_eq!(lib.all_albums().unwrap()[0].str("album"), "Renamed");
+        assert!(its.iter().all(|i| i.str("album") == "Renamed"));
+        // Up to date now: a changed db value isn't overwritten again.
+        let mut i = its[0].clone();
+        i.set_str("title", "Edited");
+        lib.store(&i).unwrap();
+        update(&cfg, &lib, &update_opts(), &[]).unwrap();
+        assert_eq!(items(&lib)[0].str("title"), "Edited");
+    }
+
+    #[test]
+    fn update_fields_and_exclude_fields() {
+        let Some((_d, cfg, lib)) = lib_with_mp3s(1) else {
+            return;
+        };
+        let p = items(&lib)[0].path().to_path_buf();
+        retag(&p, |i| {
+            i.set_str("title", "New");
+            i.set_str("artist", "Other");
+        });
+        let mut o = update_opts();
+        o.fields = Some(vec!["title".into()]);
+        update(&cfg, &lib, &o, &[]).unwrap();
+        let i = &items(&lib)[0];
+        assert_eq!((i.str("title"), i.str("artist")), ("New", "Artist"));
+        // -F didn't record the mtime, so the artist change is still seen.
+        let mut o = update_opts();
+        o.exclude_fields = vec!["title".into()];
+        let mut i = items(&lib)[0].clone();
+        i.set_str("title", "Mine");
+        lib.store(&i).unwrap();
+        update(&cfg, &lib, &o, &[]).unwrap();
+        let i = &items(&lib)[0];
+        assert_eq!((i.str("title"), i.str("artist")), ("Mine", "Other"));
+    }
+
+    #[test]
+    fn update_moves_changed_files_with_the_art() {
+        let Some((_d, cfg, lib)) = lib_with_mp3s(1) else {
+            return;
+        };
+        let p = items(&lib)[0].path().to_path_buf();
+        retag(&p, |i| i.set_str("title", "New"));
+        let mut o = update_opts();
+        o.mv = Some(true);
+        update(&cfg, &lib, &o, &[]).unwrap();
+        let i = &items(&lib)[0];
+        assert!(i.path().ends_with("01 New.mp3"), "{}", i.path().display());
+        assert!(i.path().is_file());
+        assert!(!p.exists());
+        let art = artpath(&lib);
+        assert!(art.is_file());
+        assert_eq!(art.parent(), i.path().parent());
+    }
+
+    #[test]
+    fn update_removes_missing_items_and_emptied_albums() {
+        let Some((d, cfg, lib)) = lib_with_mp3s(2) else {
+            return;
+        };
+        let its = items(&lib);
+        std::fs::remove_file(its[0].path()).unwrap();
+        update(&cfg, &lib, &update_opts(), &[]).unwrap();
+        assert_eq!(items(&lib).len(), 1);
+        assert_eq!(lib.all_albums().unwrap().len(), 1);
+        std::fs::remove_file(its[1].path()).unwrap();
+        update(&cfg, &lib, &update_opts(), &[]).unwrap();
+        assert!(items(&lib).is_empty());
+        assert!(lib.all_albums().unwrap().is_empty());
+        // As beets (`Item.remove(delete=True)`): the album's art goes too,
+        // and the emptied directories are pruned.
+        assert!(!d.path().join("lib/Artist").exists());
+        let e = update(&cfg, &lib, &update_opts(), &[]).unwrap_err();
+        assert_eq!(e.to_string(), "No matching items to update.");
+    }
+
+    #[test]
+    fn write_only_touches_files_whose_tags_differ() {
+        let Some((_d, cfg, lib)) = lib_with_mp3s(2) else {
+            return;
+        };
+        let its = items(&lib);
+        let mtimes = || -> Vec<f64> { its.iter().map(|i| file_mtime(i.path())).collect() };
+        let before = mtimes();
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        write(&cfg, &lib, false, false, None, &[]).unwrap();
+        assert_eq!(mtimes(), before, "nothing differs, nothing written");
+
+        let mut i = its[0].clone();
+        i.set_str("title", "Changed");
+        lib.store(&i).unwrap();
+        write(&cfg, &lib, true, false, None, &[]).unwrap();
+        assert_eq!(media::read(i.path()).unwrap().str("title"), "T1");
+        write(&cfg, &lib, false, false, None, &[]).unwrap();
+        assert_eq!(media::read(i.path()).unwrap().str("title"), "Changed");
+        let after = mtimes();
+        assert_ne!(after[0], before[0]);
+        assert_eq!(after[1], before[1]);
+        // The stored mtime follows, so `update` doesn't re-read it.
+        assert_eq!(items(&lib)[0].float("mtime"), file_mtime(i.path()));
+
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        write(&cfg, &lib, false, true, None, &[]).unwrap();
+        assert!(
+            mtimes().iter().zip(&after).all(|(a, b)| a > b),
+            "-f writes all"
+        );
+
+        std::fs::remove_file(its[1].path()).unwrap();
+        write(&cfg, &lib, false, false, None, &[]).unwrap();
+        let e = write(&cfg, &lib, false, false, None, &strs(&["title:nope"])).unwrap_err();
+        assert_eq!(e.to_string(), "No matching items to write.");
+    }
+
+    fn remove_opts(album: bool, delete: bool) -> RemoveOpts {
+        RemoveOpts {
+            album,
+            delete,
+            force: true,
+            limit: None,
+        }
+    }
+
+    #[test]
+    fn remove_items_drops_emptied_albums_and_keeps_files() {
+        let (d, cfg, lib) = lib_with_files(2);
+        remove(&cfg, &lib, &remove_opts(false, false), &strs(&["title:T0"])).unwrap();
+        assert_eq!(items(&lib).len(), 1);
+        assert_eq!(lib.all_albums().unwrap().len(), 1);
+        remove(&cfg, &lib, &remove_opts(false, false), &[]).unwrap();
+        assert!(items(&lib).is_empty());
+        assert!(lib.all_albums().unwrap().is_empty());
+        assert!(d.path().join("src/0.mp3").is_file());
+        assert!(d.path().join("src/cover.jpg").is_file());
+        let e = remove(&cfg, &lib, &remove_opts(false, false), &[]).unwrap_err();
+        assert_eq!(e.to_string(), "No matching objects to remove.");
+    }
+
+    #[test]
+    fn remove_delete_deletes_files_and_art_and_prunes() {
+        let (d, mut cfg, lib) = lib_with_files(2);
+        // The files live in the library directory here.
+        cfg.set("directory", d.path().to_string_lossy().into());
+        let mut o = remove_opts(true, true);
+        o.limit = Some(1);
+        remove(&cfg, &lib, &o, &[]).unwrap();
+        assert!(items(&lib).is_empty());
+        assert!(lib.all_albums().unwrap().is_empty());
+        assert!(!d.path().join("src").exists(), "files, art and dir gone");
+        assert!(d.path().exists());
+    }
+
+    #[test]
+    fn remove_last_item_with_delete_takes_the_art() {
+        let (d, cfg, lib) = lib_with_files(1);
+        remove(&cfg, &lib, &remove_opts(false, true), &[]).unwrap();
+        assert!(!d.path().join("src/0.mp3").exists());
+        assert!(!d.path().join("src/cover.jpg").exists());
+    }
+
+    #[test]
+    fn remove_prompts_as_beets() {
+        let cfg = Config::defaults();
+        let p = |delete, n, albums| {
+            let (f, one, all) = remove_prompts(&cfg, delete, n, albums);
+            (f, one.to_string(), all)
+        };
+        assert_eq!(
+            p(true, 3, Some(1)),
+            (
+                "$path - $title".into(),
+                "Really DELETE".into(),
+                "Really DELETE 3 files and 1 album".into()
+            )
+        );
+        assert_eq!(p(true, 1, None).2, "Really DELETE 1 file");
+        let (f, one, all) = p(false, 2, Some(2));
+        assert_eq!(f, cfg.str("format_item"));
+        assert_eq!(one, "Really remove from the library");
+        assert_eq!(all, "Really remove 2 items and 2 albums from the library");
     }
 
     #[test]

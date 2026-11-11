@@ -209,12 +209,15 @@ pub enum Cmd {
     Remove {
         #[arg(short = 'a', long)]
         album: bool,
-        /// Also delete files from disk
+        /// Also remove files from disk
         #[arg(short = 'd', long)]
         delete: bool,
-        /// Don't ask for confirmation
+        /// Do not ask when removing items
         #[arg(short = 'f', long)]
         force: bool,
+        /// Limit query results
+        #[arg(short = 'l', long)]
+        limit: Option<usize>,
         #[arg(allow_hyphen_values = true)]
         query: Vec<String>,
     },
@@ -247,18 +250,44 @@ pub enum Cmd {
     /// Re-read tags from files, dropping items whose files are gone
     #[command(visible_alias = "upd", visible_alias = "up")]
     Update {
+        /// Match albums instead of tracks
+        #[arg(short = 'a', long)]
+        album: bool,
+        /// Print with custom format
+        #[arg(short = 'f', long)]
+        format: Option<String>,
+        /// Move files in the library directory
+        #[arg(short = 'm', long = "move", overrides_with = "nomove")]
+        mv: bool,
+        /// Don't move files in library
+        #[arg(short = 'M', long = "nomove", overrides_with = "mv")]
+        nomove: bool,
+        /// Show all changes but do nothing
         #[arg(short = 'p', long)]
         pretend: bool,
-        /// Don't move files to match updated metadata
-        #[arg(short = 'M', long = "nomove")]
-        nomove: bool,
+        /// Field to update (repeatable; default: all)
+        #[arg(short = 'F', long = "field", value_name = "FIELD")]
+        fields: Vec<String>,
+        /// Field to exclude from updates (repeatable)
+        #[arg(short = 'e', long = "exclude-field", value_name = "FIELD")]
+        exclude_fields: Vec<String>,
+        /// Limit query results
+        #[arg(short = 'l', long)]
+        limit: Option<usize>,
         #[arg(allow_hyphen_values = true)]
         query: Vec<String>,
     },
-    /// Write library metadata to files' tags
+    /// Write tag information to files
     Write {
+        /// Show all changes but do nothing
         #[arg(short = 'p', long)]
         pretend: bool,
+        /// Write tags even if the existing tags match the database
+        #[arg(short = 'f', long)]
+        force: bool,
+        /// Limit query results
+        #[arg(short = 'l', long)]
+        limit: Option<usize>,
         #[arg(allow_hyphen_values = true)]
         query: Vec<String>,
     },

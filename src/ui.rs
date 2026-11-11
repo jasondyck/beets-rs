@@ -145,11 +145,22 @@ pub fn input_options(
 /// beets' `input_select_objects`: ask "PROMPT? (Yes/no/select)" and return
 /// all, none, or (select) the objects confirmed one by one, after showing
 /// each with `show`.
-pub fn select_objects<T: Clone>(prompt: &str, objs: &[T], mut show: impl FnMut(&T)) -> Vec<T> {
+pub fn select_objects<T: Clone>(prompt: &str, objs: &[T], show: impl FnMut(&T)) -> Vec<T> {
+    select_objects_all(prompt, None, objs, show)
+}
+
+/// `select_objects` with beets' `prompt_all`: the first question uses it
+/// instead of `prompt`.
+pub fn select_objects_all<T: Clone>(
+    prompt: &str,
+    prompt_all: Option<&str>,
+    objs: &[T],
+    mut show: impl FnMut(&T),
+) -> Vec<T> {
     let choice = input_options(
         &['y', 'n', 's'],
         false,
-        &format!("{prompt}? (Yes/no/select)"),
+        &format!("{}? (Yes/no/select)", prompt_all.unwrap_or(prompt)),
         "Enter one of Y, N, S:",
     );
     println!();
