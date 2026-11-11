@@ -336,7 +336,11 @@ pub fn run(cli: Cli) -> Result<()> {
             limit,
             query,
         } => write(&cfg, &lib, pretend, force, limit, &query),
-        Cmd::Stats { exact, query } => stats(&lib, exact, &query),
+        Cmd::Stats {
+            exact,
+            limit,
+            query,
+        } => stats(&lib, exact, limit, &query),
         Cmd::Fetchart { force, query } => fetchart(&cfg, &lib, force, &query),
         Cmd::Embedart { file, yes, query } => embedart(&cfg, &lib, file, yes, &query),
         Cmd::Extractart {
@@ -1819,8 +1823,10 @@ fn human_seconds(interval: f64) -> String {
 /// bitrate × length, not the files' real size. beets prints the exact
 /// seconds on a line of their own, which is blank without `-e`; that blank
 /// line is kept so the output matches.
-fn stats(lib: &Library, exact: bool, q: &[String]) -> Result<()> {
-    let items = lib.items(&Query::parse(Kind::Item, q)?)?;
+fn stats(lib: &Library, exact: bool, limit: Option<usize>, q: &[String]) -> Result<()> {
+    let mut items = lib.items(&Query::parse(Kind::Item, q)?)?;
+    // beets' `lib.items(query, limit=limit)`: the first N in the sort order.
+    items.truncate(limit.unwrap_or(usize::MAX));
     let mut total_time = 0.0;
     let mut total_size: u64 = 0;
     let (mut artists, mut albums, mut album_artists) =

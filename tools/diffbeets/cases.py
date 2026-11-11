@@ -130,7 +130,18 @@ CORPUS = (
     + _album("a13", "ogg", {"artist": "Ogg Artist", "album_artist": "Ogg Artist",
                             "album": "Vorbis Album", "date": "1970-01-01"},
              [{"title": "Ogg Song", "tracknumber": "7"}])
+    # One track per format and codec, odd lengths: exact length and bitrate.
+    + [(f"a14/{n:02d}.{ext}", fmt,
+        {"artist": "Format Artist", "album_artist": "Format Artist",
+         "album": "Every Format", "date": "2024", "title": f"Fmt {fmt}",
+         "track": str(n), "_d": d})
+       for n, (ext, fmt, d) in enumerate([
+           ("mp3", "mp3", "1.37"), ("mp3", "mp3vbr", "2.71"), ("mp3", "mp3noxing", "1.9"),
+           ("flac", "flac", "1.37"), ("m4a", "m4a", "1.37"), ("m4a", "alac", "0.5"),
+           ("ogg", "ogg", "3.33"), ("opus", "opus", "1.37"), ("wv", "wv", "2.05"),
+           ("aiff", "aiff", "1.37")], 1)]
     + [
+        ("s03/pcm.wav", "wav", {"_d": "1.37"}),
         ("s01/lone1.mp3", "mp3", {"artist": "Solo Artist", "title": "Lone Track",
                                   "date": "2020"}),
         ("s01/lone2.mp3", "mp3", {"artist": "Solo Artist", "title": "Lone Track",
@@ -147,10 +158,11 @@ CORPUS = (
 IMPORTS = [
     ["import", "-A", "-q", d]
     for d in ["a01", "a02", "a03", "a04", "a05", "a06", "a07", "a08", "a09",
-              "a10", "a11", "a12", "a13"]
+              "a10", "a11", "a12", "a13", "a14"]
 ] + [
     ["import", "-A", "-q", "-s", "s01"],
     ["import", "-A", "-q", "-s", "s02"],
+    ["import", "-A", "-q", "-s", "s03"],
 ]
 
 MODIFIES = [
@@ -656,6 +668,24 @@ def _query_args(q):
 
 DEST = f"{ROOT}/dest"
 
+# Exact audio properties (mutagen's length and bitrate): point and
+# boundary queries, the formatted fields, and stats per format.
+PROPERTY_QUERIES = [
+    "length:1.37", "length:1", "length:..1.0449", "length:1.0449..1.05",
+    "length:1.37..1.371", "length:1.3..1.4", "length:1.5..", "length:3.3..3.35",
+    "bitrate:705600", "bitrate:2304000", "bitrate:..64000", "bitrate:64000..100000",
+    "bitrate:128000", "bitrate:127000..128999", "bitrate:96000..98999",
+    "bitrate:32000", "bitrate:100000..", "length:..0.6", "length:0.5",
+]
+PROPERTY_FORMATS = ["$title $length $bitrate $format $samplerate $bitdepth $channels",
+                    "${length}|${bitrate}"]
+STATS_FORMATS = ["MP3", "FLAC", "AAC", "ALAC", "OGG", "Opus", "WavPack", "AIFF", "WAVE"]
+
+# `stats` options and queries (beets' show_stats; -l is beets' limit option).
+STATS = [[], ["-e"], ["Hit"], ["-e", "Hit"], ["-l", "3"], ["-e", "-l", "3"],
+         ["--limit", "1", "album:Lossless"], ["-l", "0"], ["-l", "100"],
+         ["-l", "2", "title+"], ["-e", "-l", "4", "singleton:true"]]
+
 
 def cases():
     out = []
@@ -678,6 +708,15 @@ def cases():
     for name in MV_OPTION_CONFIGS:
         out.append((f"mv -p -c {name}", ["-c", f"{ROOT}/{name}", "mv", "-p", "-d", DEST]))
         out.append((f"mv -p -a -c {name}", ["-c", f"{ROOT}/{name}", "mv", "-p", "-a", "-d", DEST]))
+    for args in STATS:
+        out.append((f"stats:{' '.join(args)}", ["stats", *args]))
+    for fmt in STATS_FORMATS:
+        out.append((f"stats:format:{fmt}", ["stats", f"format:{fmt}"]))
+        out.append((f"stats -e:format:{fmt}", ["stats", "-e", f"format:{fmt}"]))
+    for q in PROPERTY_QUERIES:
+        out.append((f"ls props:{q}", ["ls", "-f", "$title", q]))
+    for f in PROPERTY_FORMATS:
+        out.append((f"ls -f props:{f}", ["ls", "-f", f, "album:Every Format", ",", "format:WAV"]))
     out.append(("mv -p", ["mv", "-p"]))
     out.append(("mv -p -d", ["mv", "-p", "-d", DEST]))
     out.append(("mv -p -a -d", ["mv", "-p", "-a", "-d", DEST]))

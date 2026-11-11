@@ -10,7 +10,9 @@ dir (under `$TMPDIR`, or `--workdir DIR`):
 1. generates a corpus of 1-second audio files with ffmpeg (`src/`): unicode,
    `½`, slashes, quotes, `$ % { } ,` in titles, empty fields, a multi-disc
    album in `CD1`/`CD2`, a VA album, same album name by different artists and
-   years, long names, leading dots, MP3/FLAC/M4A/Ogg, singletons;
+   years, long names, leading dots, singletons, and one track per format
+   and codec with odd lengths (MP3 CBR/VBR/no Xing header, FLAC, AAC, ALAC,
+   Ogg Vorbis, Opus, WavPack, AIFF, WAV) for exact `length`/`bitrate`;
 2. writes the same `config.yaml` (and the extra configs used with `-c`) to
    `ref/` and `rs/`, differing only in `directory:` (`ref/lib`, `rs/lib`);
 3. imports every directory as-is (`import -A -q`, copying) and applies the

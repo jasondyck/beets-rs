@@ -15,6 +15,7 @@ mod media;
 mod model;
 mod paths;
 mod plugins;
+mod props;
 mod query;
 mod state;
 mod template;
@@ -296,8 +297,12 @@ pub enum Cmd {
     },
     /// Show library statistics
     Stats {
+        /// Exact size and time
         #[arg(short = 'e', long)]
         exact: bool,
+        /// Limit query results
+        #[arg(short = 'l', long)]
+        limit: Option<usize>,
         #[arg(allow_hyphen_values = true)]
         query: Vec<String>,
     },

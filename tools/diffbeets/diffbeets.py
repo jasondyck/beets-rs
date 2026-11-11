@@ -53,24 +53,34 @@ from cases import (  # noqa: E402
 # Corpus generation
 
 
+# ffmpeg output options per corpus format.
+FORMATS = {
+    "mp3": ["-ar", "44100", "-ac", "2", "-c:a", "libmp3lame", "-b:a", "128k"],
+    "mp3vbr": ["-ar", "44100", "-ac", "1", "-c:a", "libmp3lame", "-q:a", "4"],
+    "mp3noxing": ["-ar", "22050", "-ac", "1", "-c:a", "libmp3lame", "-b:a", "32k",
+                  "-write_xing", "0"],
+    "flac": ["-ar", "48000", "-ac", "2", "-c:a", "flac", "-sample_fmt", "s16"],
+    "m4a": ["-ar", "44100", "-ac", "2", "-c:a", "aac", "-b:a", "96k"],
+    "alac": ["-ar", "44100", "-ac", "2", "-c:a", "alac"],
+    "ogg": ["-ar", "44100", "-ac", "2", "-c:a", "libvorbis", "-b:a", "96k"],
+    "opus": ["-ac", "2", "-c:a", "libopus", "-b:a", "64k"],
+    "wv": ["-ar", "44100", "-ac", "1", "-c:a", "wavpack"],
+    "aiff": ["-ar", "48000", "-ac", "2", "-c:a", "pcm_s24be", "-write_id3v2", "1"],
+    "wav": ["-ar", "22050", "-ac", "1", "-c:a", "pcm_s16le"],
+}
+
+
 def ffmpeg(path, fmt, tags):
-    """Generate a 1-second sine file at `path` with `tags` as metadata."""
+    """Generate a sine file at `path` with `tags` as metadata: 1 second
+    long, or `_d` seconds."""
     os.makedirs(os.path.dirname(path), exist_ok=True)
+    tags = dict(tags)
+    duration = tags.pop("_d", "1")
     cmd = [
         "ffmpeg", "-nostdin", "-loglevel", "error", "-y",
-        "-f", "lavfi", "-i", "sine=frequency=440:duration=1",
+        "-f", "lavfi", "-i", f"sine=frequency=440:duration={duration}",
         "-map_metadata", "-1",
-    ]
-    if fmt == "mp3":
-        cmd += ["-ar", "44100", "-ac", "2", "-c:a", "libmp3lame", "-b:a", "128k"]
-    elif fmt == "flac":
-        cmd += ["-ar", "48000", "-ac", "2", "-c:a", "flac", "-sample_fmt", "s16"]
-    elif fmt == "m4a":
-        cmd += ["-ar", "44100", "-ac", "2", "-c:a", "aac", "-b:a", "96k"]
-    elif fmt == "ogg":
-        cmd += ["-ar", "44100", "-ac", "2", "-c:a", "libvorbis", "-b:a", "96k"]
-    else:
-        raise ValueError(fmt)
+    ] + FORMATS[fmt]
     for key, value in tags.items():
         cmd += ["-metadata", f"{key}={value}"]
     cmd.append(path)
