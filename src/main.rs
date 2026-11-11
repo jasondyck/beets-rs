@@ -1,6 +1,7 @@
 mod autotag;
 mod commands;
 mod config;
+mod fileops;
 mod importer;
 mod library;
 mod mb;

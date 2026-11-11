@@ -3,6 +3,7 @@
 
 use crate::autotag::{self, AlbumMatch, Recommendation, TrackMatch};
 use crate::config::Config;
+use crate::fileops::{self, FileOp, Globs, WalkFilter, prune_dirs};
 use crate::library::{Library, now};
 use crate::mb::MusicBrainz;
 use crate::media;
@@ -19,15 +20,10 @@ use std::io::Write as _;
 use std::path::{Path, PathBuf};
 use std::sync::LazyLock;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum FileOp {
-    Copy,
-    Move,
-    None,
-}
-
 pub struct ImportOptions {
     pub op: FileOp,
+    /// `import.delete`: remove the originals after copying them (copy only).
+    pub delete: bool,
     pub write: bool,
     pub quiet: bool,
     pub quiet_fallback_asis: bool,
@@ -195,15 +191,9 @@ enum Outcome {
 
 impl ImportOptions {
     pub fn from_config(cfg: &Config) -> Self {
-        let op = if cfg.bool("import.move") {
-            FileOp::Move
-        } else if cfg.bool("import.copy") {
-            FileOp::Copy
-        } else {
-            FileOp::None
-        };
         ImportOptions {
-            op,
+            op: FileOp::for_import(cfg, cfg.bool("import.copy"), cfg.bool("import.move")),
+            delete: cfg.bool("import.delete"),
             write: cfg.bool("import.write"),
             quiet: cfg.bool("import.quiet"),
             quiet_fallback_asis: cfg.str("import.quiet_fallback") == "asis",
@@ -314,6 +304,8 @@ pub struct Importer<'a> {
     log: Option<std::fs::File>,
     /// Paths of library items already merged into another album this run.
     merged: HashSet<PathBuf>,
+    clutter: Globs,
+    walk: WalkFilter,
 }
 
 static DISC_DIR: LazyLock<Regex> =
@@ -322,8 +314,10 @@ static DISC_DIR: LazyLock<Regex> =
 /// Group audio files into album-sized chunks: one per directory, merging
 /// "CD1"/"Disc 2" style subdirectories into their parent. Each group comes
 /// with its directory (or the file itself, for a single-file import), which
-/// identifies it in the import state.
-pub fn group_files(root: &Path) -> Result<Vec<(PathBuf, Vec<PathBuf>)>> {
+/// identifies it in the import state. Directory walks skip what `filter`
+/// says to (`ignore`, `ignore_hidden`); a file given directly is never
+/// skipped.
+pub fn group_files(root: &Path, filter: &WalkFilter) -> Result<Vec<(PathBuf, Vec<PathBuf>)>> {
     if root.is_file() {
         return Ok(if media::is_audio(root) {
             vec![(root.to_path_buf(), vec![root.to_path_buf()])]
@@ -338,6 +332,8 @@ pub fn group_files(root: &Path) -> Result<Vec<(PathBuf, Vec<PathBuf>)>> {
     for entry in walkdir::WalkDir::new(root)
         .follow_links(true)
         .sort_by_file_name()
+        .into_iter()
+        .filter_entry(|e| e.depth() == 0 || !filter.skips(e.file_name()))
     {
         let entry = match entry {
             Ok(e) => e,
@@ -404,41 +400,6 @@ fn unique_path(p: &Path) -> PathBuf {
     unreachable!()
 }
 
-pub fn move_file(src: &Path, dest: &Path) -> Result<()> {
-    if let Some(parent) = dest.parent() {
-        std::fs::create_dir_all(parent)
-            .with_context(|| format!("creating {}", parent.display()))?;
-    }
-    if std::fs::rename(src, dest).is_err() {
-        // Cross-device: copy then remove.
-        std::fs::copy(src, dest)
-            .with_context(|| format!("copying {} to {}", src.display(), dest.display()))?;
-        std::fs::remove_file(src).with_context(|| format!("removing {}", src.display()))?;
-    }
-    Ok(())
-}
-
-pub fn copy_file(src: &Path, dest: &Path) -> Result<()> {
-    if let Some(parent) = dest.parent() {
-        std::fs::create_dir_all(parent)
-            .with_context(|| format!("creating {}", parent.display()))?;
-    }
-    std::fs::copy(src, dest)
-        .with_context(|| format!("copying {} to {}", src.display(), dest.display()))?;
-    Ok(())
-}
-
-/// Remove now-empty directories from `dir` up to (not including) `stop`.
-pub fn prune_dirs(dir: &Path, stop: &Path) {
-    let mut cur = Some(dir);
-    while let Some(d) = cur {
-        if d == stop || !d.starts_with(stop) || std::fs::remove_dir(d).is_err() {
-            break;
-        }
-        cur = d.parent();
-    }
-}
-
 fn file_label(item: &Item) -> String {
     item.path()
         .file_name()
@@ -473,6 +434,8 @@ impl<'a> Importer<'a> {
         Ok(Importer {
             log,
             merged: HashSet::new(),
+            clutter: fileops::clutter(cfg),
+            walk: WalkFilter::from_config(cfg),
             cfg,
             lib,
             fmt: PathFormatter::new(cfg)?,
@@ -524,10 +487,13 @@ impl<'a> Importer<'a> {
                 Default::default()
             };
             let groups = if self.opts.flat && p.is_dir() {
-                let files = group_files(&p)?.into_iter().flat_map(|(_, f)| f).collect();
+                let files = group_files(&p, &self.walk)?
+                    .into_iter()
+                    .flat_map(|(_, f)| f)
+                    .collect();
                 vec![(p.clone(), files)]
             } else {
-                group_files(&p)?
+                group_files(&p, &self.walk)?
             };
             for (key, group) in groups {
                 if done.contains(&key) {
@@ -1208,7 +1174,7 @@ impl<'a> Importer<'a> {
                         if it.path().starts_with(&libdir) {
                             std::fs::remove_file(it.path()).ok();
                             if let Some(p) = it.path().parent() {
-                                prune_dirs(p, &libdir);
+                                prune_dirs(p, &libdir, &self.clutter);
                             }
                         }
                         self.lib.remove(&it)?;
@@ -1293,10 +1259,13 @@ impl<'a> Importer<'a> {
     }
 
     /// The file operation for one item: as beets' `manipulate_files`, in
-    /// copy mode a reimported file already inside the library is moved, so
-    /// it's never duplicated.
+    /// copy and link modes a reimported file already inside the library is
+    /// moved, so it's never duplicated (or linked to itself).
     fn file_op(&self, item: &Item, replaces: bool) -> FileOp {
-        if self.opts.op == FileOp::Copy && replaces && item.path().starts_with(self.cfg.directory())
+        if self.opts.op.keeps_source()
+            && self.opts.op != FileOp::None
+            && replaces
+            && item.path().starts_with(self.cfg.directory())
         {
             FileOp::Move
         } else {
@@ -1318,6 +1287,7 @@ impl<'a> Importer<'a> {
         let n = items.len();
         let lib = self.lib;
         let mut moved_in_library = false;
+        let mut copied = vec![];
         let mut album = lib.transaction(|lib| {
             let replaced = self.record_replaced(&items)?;
             self.remove_replaced(&replaced)?;
@@ -1328,7 +1298,7 @@ impl<'a> Importer<'a> {
             for (item, dups) in items.iter_mut().zip(&replaced.items) {
                 let op = self.file_op(item, !dups.is_empty());
                 moved_in_library |= op == FileOp::Move && !dups.is_empty();
-                self.place_and_write(item, Some(&album), tagged, op)?;
+                copied.extend(self.place_and_write(item, Some(&album), tagged, op)?);
                 lib.store(item)?;
             }
             Ok(album)
@@ -1345,10 +1315,11 @@ impl<'a> Importer<'a> {
         plugins::each(self.plugins, |p| {
             p.album_imported(&ctx, &mut album, &mut items, source_dir, op)
         });
+        self.delete_originals(&copied);
         if op == FileOp::Move
             && let Some(root) = self.roots.last()
         {
-            prune_dirs(source_dir, root);
+            prune_dirs(source_dir, root, &self.clutter);
         }
         self.stats.albums += 1;
         self.stats.items += n;
@@ -1428,27 +1399,42 @@ impl<'a> Importer<'a> {
         }
     }
 
+    /// beets' `import.delete` (`ImportTask.cleanup`): once the album is
+    /// stored, remove the files that were copied into the library and prune
+    /// the directories they leave empty, up to the import path.
+    fn delete_originals(&self, copied: &[PathBuf]) {
+        if !self.opts.delete {
+            return;
+        }
+        for old in copied {
+            if let Err(e) = std::fs::remove_file(old) {
+                eprintln!("warning: removing {}: {e}", old.display());
+                continue;
+            }
+            if let (Some(parent), Some(root)) = (old.parent(), self.roots.last()) {
+                prune_dirs(parent, root, &self.clutter);
+            }
+        }
+    }
+
+    /// Place the item's file with `op`, write its tags and refresh its
+    /// mtime. Returns the source path when the file was copied and the
+    /// original should go with `import.delete`.
     fn place_and_write(
         &self,
         item: &mut Item,
         album: Option<&Album>,
         tagged: bool,
         op: FileOp,
-    ) -> Result<()> {
+    ) -> Result<Option<PathBuf>> {
         let src = item.path().to_path_buf();
         let dest = self.fmt.destination(item, album, Some(self.lib));
-        match op {
-            FileOp::None => {}
-            _ if dest == src => {}
-            FileOp::Copy => {
-                let dest = unique_path(&dest);
-                copy_file(&src, &dest)?;
-                item.set_path(dest);
-            }
-            FileOp::Move => {
-                let dest = unique_path(&dest);
-                move_file(&src, &dest)?;
-                item.set_path(dest);
+        let mut copied = None;
+        if op != FileOp::None && dest != src {
+            let dest = unique_path(&dest);
+            fileops::transfer(op, &src, &dest)?;
+            item.set_path(dest);
+            if op == FileOp::Move {
                 // Files moved within the library prune up to the library root.
                 let libdir = self.cfg.directory();
                 let root = if src.starts_with(&libdir) {
@@ -1457,8 +1443,10 @@ impl<'a> Importer<'a> {
                     self.roots.last().map(PathBuf::as_path)
                 };
                 if let (Some(parent), Some(root)) = (src.parent(), root) {
-                    prune_dirs(parent, root);
+                    prune_dirs(parent, root, &self.clutter);
                 }
+            } else if op == FileOp::Copy {
+                copied = Some(src);
             }
         }
         if self.opts.write
@@ -1476,7 +1464,7 @@ impl<'a> Importer<'a> {
                 .unwrap_or(0.0);
             item.set("mtime", Value::Float(ts));
         }
-        Ok(())
+        Ok(copied)
     }
 
     // --------------------------------------------------------- singletons
@@ -1518,18 +1506,19 @@ impl<'a> Importer<'a> {
         item.set("added", Value::Float(now()));
         item.set_int("album_id", 0);
         let lib = self.lib;
-        lib.transaction(|lib| {
+        let copied = lib.transaction(|lib| {
             let replaced = self.record_replaced(std::slice::from_ref(&item))?;
             self.remove_replaced(&replaced)?;
             self.reimport_metadata(None, std::slice::from_mut(&mut item), &replaced);
             self.apply_set_fields(None, std::slice::from_mut(&mut item));
             let op = self.file_op(&item, !replaced.items[0].is_empty());
-            self.place_and_write(&mut item, None, tagged, op)?;
+            let copied = self.place_and_write(&mut item, None, tagged, op)?;
             lib.add(&mut item)?;
-            Ok(())
+            Ok(copied)
         })?;
         let ctx = self.plugin_ctx();
         plugins::each(self.plugins, |p| p.item_imported(&ctx, &mut item));
+        self.delete_originals(copied.as_slice());
         self.stats.items += 1;
         Ok(Outcome::Done)
     }
@@ -1665,11 +1654,51 @@ mod tests {
         mk("B/CD2/01.flac");
         mk("C/Live/01.mp3");
         mk("C/Studio/01.mp3");
-        let groups = group_files(d.path()).unwrap();
+        let groups = group_files(d.path(), &WalkFilter::default()).unwrap();
         let sizes: Vec<usize> = groups.iter().map(|(_, g)| g.len()).collect();
         assert_eq!(sizes, vec![2, 2, 1, 1]);
         let keys: Vec<PathBuf> = groups.into_iter().map(|(k, _)| k).collect();
         assert_eq!(keys[1], d.path().join("B"));
+    }
+
+    #[test]
+    fn walk_skips_ignored_and_hidden_entries() {
+        let d = tempfile::tempdir().unwrap();
+        let mk = |p: &str| {
+            let p = d.path().join(p);
+            std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+            std::fs::write(p, b"").unwrap();
+        };
+        mk("A/01.mp3");
+        mk("A/._01.mp3");
+        mk(".Trash/01.mp3");
+        mk("lost+found/01.mp3");
+        mk("Old~/01.mp3");
+        mk("System Volume Information/01.mp3");
+        let files = |f: &WalkFilter| -> Vec<PathBuf> {
+            group_files(d.path(), f)
+                .unwrap()
+                .into_iter()
+                .flat_map(|(_, g)| g)
+                .map(|p| p.strip_prefix(d.path()).unwrap().to_path_buf())
+                .collect()
+        };
+        let mut cfg = Config::defaults();
+        assert_eq!(
+            files(&WalkFilter::from_config(&cfg)),
+            [PathBuf::from("A/01.mp3")]
+        );
+        assert_eq!(files(&WalkFilter::default()).len(), 6);
+        // ignore_hidden alone still skips dot-files.
+        cfg.set("ignore", serde_yaml::from_str("[]").unwrap());
+        assert_eq!(files(&WalkFilter::from_config(&cfg)).len(), 4);
+        // A hidden file given directly is imported.
+        let direct = d.path().join("A/._01.mp3");
+        let g = group_files(&direct, &WalkFilter::from_config(&cfg)).unwrap();
+        assert_eq!(g, [(direct.clone(), vec![direct])]);
+        // The import root itself is never filtered.
+        let g = group_files(&d.path().join(".Trash"), &WalkFilter::from_config(&cfg)).unwrap();
+        assert_eq!(g.len(), 1);
     }
 
     #[test]
@@ -1680,7 +1709,7 @@ mod tests {
         assert_eq!(unique_path(&f), d.path().join("x.1.mp3"));
         let deep = d.path().join("a/b/c");
         std::fs::create_dir_all(&deep).unwrap();
-        prune_dirs(&deep, d.path());
+        prune_dirs(&deep, d.path(), &Globs::default());
         assert!(!d.path().join("a").exists());
         assert!(d.path().exists());
     }
@@ -2266,6 +2295,114 @@ mod tests {
         }
         // The old album folder was pruned.
         assert!(!libdir.join("Artist").exists());
+    }
+
+    fn is_symlink(p: &Path) -> bool {
+        p.symlink_metadata()
+            .is_ok_and(|m| m.file_type().is_symlink())
+    }
+
+    #[test]
+    fn link_hardlink_and_reflink_modes_leave_the_sources() {
+        for op in [FileOp::Link, FileOp::Hardlink, FileOp::ReflinkAuto] {
+            let (_d, cfg, lib, src) = setup(&[]);
+            let Some(dir) = album_dir(&src, "a", "Album") else {
+                return;
+            };
+            // `delete` only applies to copies.
+            let s = import_dir(&cfg, &lib, &dir, |o| {
+                o.op = op;
+                o.delete = true;
+            });
+            assert_eq!((s.albums, s.items), (1, 2), "{op:?}");
+            assert!(dir.join("1.mp3").is_file() && dir.join("2.mp3").is_file());
+            for i in all_items(&lib) {
+                let p = i.path();
+                assert!(p.starts_with(cfg.directory()), "{}", p.display());
+                assert_eq!(is_symlink(p), op == FileOp::Link, "{op:?}");
+                if op == FileOp::Link {
+                    assert!(std::fs::read_link(p).unwrap().starts_with(&dir));
+                }
+                #[cfg(unix)]
+                if op == FileOp::Hardlink {
+                    use std::os::unix::fs::MetadataExt;
+                    let name = p.file_name().unwrap().to_string_lossy();
+                    let orig = dir.join(if name.starts_with("01") {
+                        "1.mp3"
+                    } else {
+                        "2.mp3"
+                    });
+                    assert_eq!(p.metadata().unwrap().ino(), orig.metadata().unwrap().ino());
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn link_mode_reimport_moves_the_library_files() {
+        let (d, cfg, lib, src) = setup(&[]);
+        let Some(dir) = album_dir(&src, "a", "Album") else {
+            return;
+        };
+        let link = |o: &mut ImportOptions| o.op = FileOp::Link;
+        import_dir(&cfg, &lib, &dir, link);
+        let mut cfg2 = cfg.clone();
+        cfg2.set(
+            "paths",
+            serde_yaml::from_str("default: moved/$album/$track").unwrap(),
+        );
+        let libdir = d.path().join("lib");
+        import_dir(&cfg2, &lib, &libdir, link);
+        // The symlinks moved (not linked to themselves) and still resolve.
+        assert_eq!(walkdir_files(&libdir), 2);
+        for i in all_items(&lib) {
+            assert!(i.path().starts_with(libdir.join("moved/Album")));
+            assert!(is_symlink(i.path()) && i.path().is_file());
+        }
+        assert!(!libdir.join("Artist").exists());
+    }
+
+    #[test]
+    fn copy_with_delete_removes_originals_and_prunes_clutter() {
+        let (_d, cfg, lib, src) = setup(&[]);
+        let Some(dir) = album_dir(&src.join("outer"), "disc", "Album") else {
+            return;
+        };
+        std::fs::write(dir.join("Thumbs.DB"), b"").unwrap();
+        std::fs::write(src.join("keep.txt"), b"").unwrap();
+        let s = import_dir(&cfg, &lib, &src, |o| {
+            o.op = FileOp::Copy;
+            o.delete = true;
+        });
+        assert_eq!((s.albums, s.items), (1, 2));
+        for i in all_items(&lib) {
+            assert!(i.path().starts_with(cfg.directory()) && i.path().is_file());
+        }
+        // The emptied directories (clutter aside) went, up to the import
+        // path, which stays.
+        assert!(!src.join("outer").exists());
+        assert!(src.join("keep.txt").exists());
+    }
+
+    #[test]
+    fn move_prunes_source_directories_holding_only_clutter() {
+        let (_d, cfg, lib, src) = setup(&[]);
+        let Some(dir) = album_dir(&src, "a", "Album") else {
+            return;
+        };
+        std::fs::write(dir.join(".DS_Store"), b"").unwrap();
+        import_dir(&cfg, &lib, &src, |o| o.op = FileOp::Move);
+        assert!(!dir.exists());
+        assert!(src.exists());
+        // Without the clutter rule the directory stays.
+        let (_d, mut cfg, lib, src) = setup(&[]);
+        cfg.set("clutter", serde_yaml::from_str("[]").unwrap());
+        let Some(dir) = album_dir(&src, "a", "Album") else {
+            return;
+        };
+        std::fs::write(dir.join(".DS_Store"), b"").unwrap();
+        import_dir(&cfg, &lib, &src, |o| o.op = FileOp::Move);
+        assert!(dir.join(".DS_Store").exists());
     }
 
     fn walkdir_files(dir: &Path) -> usize {

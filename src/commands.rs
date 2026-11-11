@@ -1,7 +1,8 @@
 //! Subcommand implementations.
 
 use crate::config::{Config, DEFAULT_CONFIG, default_config_dir};
-use crate::importer::{self, FileOp, ImportOptions, Importer, Resume};
+use crate::fileops::{self, FileOp};
+use crate::importer::{self, ImportOptions, Importer, Resume};
 use crate::library::Library;
 use crate::media;
 use crate::model::{
@@ -100,13 +101,7 @@ pub fn run(cli: Cli) -> Result<()> {
             if nomove {
                 do_move = false;
             }
-            opts.op = if do_move {
-                FileOp::Move
-            } else if do_copy {
-                FileOp::Copy
-            } else {
-                FileOp::None
-            };
+            opts.op = FileOp::for_import(&cfg, do_copy, do_move);
             if write {
                 opts.write = true;
             }
@@ -368,11 +363,11 @@ fn move_item(
         dest
     };
     if copy {
-        importer::copy_file(&src, &dest)?;
+        fileops::copy_file(&src, &dest)?;
     } else {
-        importer::move_file(&src, &dest)?;
+        fileops::move_file(&src, &dest)?;
         if let Some(p) = src.parent() {
-            importer::prune_dirs(p, &cfg.directory());
+            fileops::prune_dirs(p, &cfg.directory(), &fileops::clutter(cfg));
         }
     }
     item.set_path(dest);
@@ -500,6 +495,7 @@ fn remove(
         return Ok(());
     }
     let libdir = cfg.directory();
+    let clutter = fileops::clutter(cfg);
     lib.transaction(|lib| {
         let mut touched_albums: HashSet<i64> = HashSet::new();
         for i in &items {
@@ -508,7 +504,7 @@ fn remove(
                     eprintln!("warning: {}: {e}", i.path().display());
                 }
                 if let Some(p) = i.path().parent() {
-                    importer::prune_dirs(p, &libdir);
+                    fileops::prune_dirs(p, &libdir, &clutter);
                 }
             }
             touched_albums.insert(i.int("album_id"));
@@ -519,7 +515,7 @@ fn remove(
             if delete && art.is_file() {
                 std::fs::remove_file(art).ok();
                 if let Some(p) = art.parent() {
-                    importer::prune_dirs(p, &libdir);
+                    fileops::prune_dirs(p, &libdir, &clutter);
                 }
             }
         };
@@ -602,7 +598,7 @@ fn move_cmd(
                     if art.is_file() {
                         let target = dir.join(art.file_name().unwrap_or_default());
                         if target != art && !target.exists() {
-                            importer::copy_file(art, &target)?;
+                            fileops::copy_file(art, &target)?;
                         }
                     }
                 }
@@ -722,9 +718,9 @@ pub(crate) fn sync_art(cfg: &Config, lib: &Library, album_id: i64) -> Result<()>
         eprintln!("warning: not moving art, {} exists", dest.display());
         return Ok(());
     }
-    importer::move_file(&art, &dest)?;
+    fileops::move_file(&art, &dest)?;
     if let Some(p) = art.parent() {
-        importer::prune_dirs(p, &cfg.directory());
+        fileops::prune_dirs(p, &cfg.directory(), &fileops::clutter(cfg));
     }
     album.set("artpath", crate::model::Value::Path(dest));
     lib.store(&album)

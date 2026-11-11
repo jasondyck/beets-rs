@@ -2,7 +2,7 @@
 
 use super::{Plugin, PluginCtx, http_agent};
 use crate::config::Config;
-use crate::importer::FileOp;
+use crate::fileops::FileOp;
 use crate::model::{Album, Item};
 use anyhow::{Context, Result};
 use serde_json::Value as J;

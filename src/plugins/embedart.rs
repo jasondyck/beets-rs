@@ -2,7 +2,7 @@
 
 use super::{Plugin, PluginCtx};
 use crate::config::Config;
-use crate::importer::FileOp;
+use crate::fileops::FileOp;
 use crate::media;
 use crate::model::{Album, Item, Value};
 use anyhow::{Context, Result};

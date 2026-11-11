@@ -3,7 +3,7 @@
 
 use super::{Plugin, PluginCtx, http_agent};
 use crate::config::Config;
-use crate::importer::FileOp;
+use crate::fileops::FileOp;
 use crate::model::{Album, Item, Value};
 use anyhow::{Context, Result, bail};
 use std::io::Read;
@@ -213,8 +213,8 @@ impl FetchArt {
                 let dest = dest_dir.join(format!("{}.{ext}", self.art_filename));
                 if src != dest {
                     match op {
-                        FileOp::Move => crate::importer::move_file(&src, &dest)?,
-                        _ => crate::importer::copy_file(&src, &dest)?,
+                        FileOp::Move => crate::fileops::move_file(&src, &dest)?,
+                        _ => crate::fileops::copy_file(&src, &dest)?,
                     }
                 }
                 dest
@@ -248,6 +248,13 @@ impl Plugin for FetchArt {
         if !self.auto {
             return Ok(());
         }
+        // As beets' `_is_source_file_removal_enabled`: when the originals
+        // go (move, or copy with `import.delete`), the source art moves too.
+        let op = if op == FileOp::Copy && ctx.cfg.bool("import.delete") {
+            FileOp::Move
+        } else {
+            op
+        };
         if let Some(p) = self.fetch_for_album(ctx, album, items, Some(source_dir), op, false)? {
             println!("fetchart: {}", p.display());
         }

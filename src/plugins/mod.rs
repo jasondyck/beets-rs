@@ -7,7 +7,7 @@ pub mod fetchart;
 pub mod lyrics;
 
 use crate::config::Config;
-use crate::importer::FileOp;
+use crate::fileops::FileOp;
 use crate::library::Library;
 use crate::model::{Album, Item};
 use anyhow::{Result, bail};

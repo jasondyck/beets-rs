@@ -9,10 +9,18 @@ directory: ~/Music
 library: library.db
 statefile: state.json
 
+clutter: ["Thumbs.DB", ".DS_Store"]
+ignore: [".*", "*~", "System Volume Information", "lost+found"]
+ignore_hidden: yes
+
 import:
     write: yes
     copy: yes
     move: no
+    link: no
+    hardlink: no
+    reflink: no
+    delete: no
     quiet: no
     quiet_fallback: skip
     none_rec_action: ask

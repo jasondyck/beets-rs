@@ -26,12 +26,12 @@ beet update                                         # re-read changed tags, drop
 
 | Area | Status |
 |---|---|
-| `import` | album and singleton (`-s`) modes; copy/move/in place (`-c/-C/-m/-M`); `-q` with `--quiet-fallback skip/asis`, `-t`/`timid`, `-a/-A`, `-w/-W`, `-S <mbid>`; `--pretend` (list files only); `--flat`; `--set field=value` / `set_fields` (templates); `-l/--log` / `log` (beets' log format); `none_rec_action`; `detail`; directory grouping with CD1/Disc 2 merging; `-g`/`group_albums` (split folders into albums by tags); duplicate detection (skip/merge/remove/keep); reimporting (by path or `-L/--library` query: rows replaced, files moved rather than copied inside the library, `added`/flexible attributes/art kept); `--from-scratch`; incremental imports (`-i`/`-I`, `-R`/`-r` for `incremental_skip_later`); resuming interrupted imports (`resume: ask/yes/no`, `-p/--resume`, `-P/--noresume`), with state in `statefile` (JSON) |
+| `import` | album and singleton (`-s`) modes; copy/move/in place (`-c/-C/-m/-M`); `link` (symlink), `hardlink`, `reflink: yes/no/auto` (auto falls back to copying), with beets' precedence (move, link, hardlink, reflink, then copy); `delete` (remove originals after copying); `ignore` globs and `ignore_hidden` when walking import directories; `-q` with `--quiet-fallback skip/asis`, `-t`/`timid`, `-a/-A`, `-w/-W`, `-S <mbid>`; `--pretend` (list files only); `--flat`; `--set field=value` / `set_fields` (templates); `-l/--log` / `log` (beets' log format); `none_rec_action`; `detail`; directory grouping with CD1/Disc 2 merging; `-g`/`group_albums` (split folders into albums by tags); duplicate detection (skip/merge/remove/keep); reimporting (by path or `-L/--library` query: rows replaced, files moved rather than copied inside the library, `added`/flexible attributes/art kept); `--from-scratch`; incremental imports (`-i`/`-I`, `-R`/`-r` for `incremental_skip_later`); resuming interrupted imports (`resume: ask/yes/no`, `-p/--resume`, `-P/--noresume`), with state in `statefile` (JSON) |
 | Autotagger | MusicBrainz release and recording search, 1 req/s rate limit; beets' weighted distance (artist, album, year, label, catalog #, track title/artist/length/index/id, missing/unmatched tracks); Hungarian item↔track assignment; strong/medium/low recommendation with `max_rec` caps |
 | Prompts | Apply, More candidates, Skip, Use as-is, as Tracks, Group albums, Enter search, enter Id, aBort (singletons: Skip, Use as-is, Enter search, enter Id, aBort); candidate list; per-track change display |
 | Queries | substring, `field:`, `:=` / `:=~` exact, `::regex`, numeric/duration/date ranges (`..`), bools, `path:`, `-`/`^` negation, `,` OR, `field+`/`field-` sort, flexible attributes |
 | Templates | `$f`, `${f}`, escapes, `%lower %upper %capitalize %title %left %right %if %ifdef %asciify %initial %first %time %aunique` |
-| Paths | `paths:` with `default`/`singleton`/`comp`/query keys, `replace:` rules, `asciify_paths`, `max_filename_length`, unique-path suffixes, empty-dir pruning |
+| Paths | `paths:` with `default`/`singleton`/`comp`/query keys, `replace:` rules, `asciify_paths`, `max_filename_length`, unique-path suffixes, empty-dir pruning (directories holding only `clutter` files count as empty) |
 | Commands | `import ls modify rm mv update write stats fields config` |
 | Tags | MP3, FLAC, M4A/ALAC, Ogg/Opus, WavPack, APE, AIFF, WAV via lofty |
 | Release preferences | `match.preferred.countries` / `media` (regex lists, earlier = better) and `original_year`, as in beets |
@@ -62,5 +62,5 @@ reading or writing beets' own `library.db`.
 ## Layout
 
 `model` (typed fields + flex attrs) · `library` (SQLite) · `query` · `template` ·
-`paths` · `media` (lofty tags) · `mb` (MusicBrainz) · `autotag` · `importer` ·
+`paths` · `fileops` (copy/move/link/reflink, pruning, ignore globs) · `media` (lofty tags) · `mb` (MusicBrainz) · `autotag` · `importer` ·
 `commands` · `state` (import resume/history) · `ui` · `plugins/` (`fetchart`, `embedart`, `lyrics`).
