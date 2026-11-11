@@ -63,6 +63,7 @@ pub fn run(cli: Cli) -> Result<()> {
             timid,
             noautotag,
             singletons,
+            group_albums,
             search_id,
             pretend,
             incremental,
@@ -91,6 +92,7 @@ pub fn run(cli: Cli) -> Result<()> {
             opts.timid |= timid;
             opts.autotag &= !noautotag;
             opts.singletons |= singletons;
+            opts.group_albums |= group_albums;
             opts.search_ids = search_id;
             opts.pretend = pretend;
             if incremental {

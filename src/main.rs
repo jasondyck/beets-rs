@@ -65,6 +65,9 @@ pub enum Cmd {
         /// Import individual tracks instead of albums
         #[arg(short = 's', long)]
         singletons: bool,
+        /// Split each directory into albums by its tracks' artist and album tags
+        #[arg(short = 'g', long = "group-albums")]
+        group_albums: bool,
         /// Restrict matching to this MusicBrainz release/recording ID (repeatable)
         #[arg(short = 'S', long = "search-id")]
         search_id: Vec<String>,

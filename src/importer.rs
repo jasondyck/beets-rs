@@ -32,6 +32,8 @@ pub struct ImportOptions {
     pub timid: bool,
     pub autotag: bool,
     pub singletons: bool,
+    /// Split every directory into albums by tags (`-g`), as "Group albums" does.
+    pub group_albums: bool,
     pub search_ids: Vec<String>,
     pub pretend: bool,
     /// Skip directories recorded in the state file's history.
@@ -74,6 +76,7 @@ impl ImportOptions {
             timid: cfg.bool("import.timid"),
             autotag: cfg.bool("import.autotag"),
             singletons: cfg.bool("import.singletons"),
+            group_albums: cfg.bool("import.group_albums"),
             search_ids: vec![],
             pretend: false,
             incremental: cfg.bool("import.incremental"),
@@ -101,6 +104,51 @@ enum Decision<M> {
     AsIs,
     Skip,
     Abort,
+    /// "as Tracks": import the album's items as singletons (albums only).
+    Tracks,
+    /// "Group albums": split the items into albums by tags (albums only).
+    Group,
+}
+
+/// The album prompt's choices after the candidate-specific ones, in beets'
+/// order (`_get_choices` for an album task).
+const ALBUM_CHOICES: [&str; 7] = [
+    "Skip",
+    "Use as-is",
+    "as Tracks",
+    "Group albums",
+    "Enter search",
+    "enter Id",
+    "aBort",
+];
+
+/// Shown when confirming one candidate: "Apply, More candidates" + the rest.
+const ALBUM_CONFIRM: [&str; 9] = [
+    "Apply",
+    "More candidates",
+    "Skip",
+    "Use as-is",
+    "as Tracks",
+    "Group albums",
+    "Enter search",
+    "enter Id",
+    "aBort",
+];
+
+/// beets' `group_albums` stage: split items into albums keyed by
+/// (albumartist, or artist when that's empty; album), in key order. Items
+/// keep their relative order within a group.
+pub fn group_albums(items: Vec<Item>) -> Vec<Vec<Item>> {
+    let mut groups: BTreeMap<(String, String), Vec<Item>> = BTreeMap::new();
+    for item in items {
+        let artist = match item.str("albumartist") {
+            "" => item.str("artist"),
+            aa => aa,
+        };
+        let key = (artist.to_string(), item.str("album").to_string());
+        groups.entry(key).or_default().push(item);
+    }
+    groups.into_values().collect()
 }
 
 pub struct Importer<'a> {
@@ -428,13 +476,47 @@ impl<'a> Importer<'a> {
     // ------------------------------------------------------------- albums
 
     fn import_album(&mut self, files: &[PathBuf]) -> Result<Outcome> {
-        let mut items = self.read_items(files)?;
+        let items = self.read_items(files)?;
         if items.is_empty() {
             return Ok(Outcome::Done);
         }
         let dir = files[0].parent().unwrap_or(Path::new("")).to_path_buf();
+        if self.opts.group_albums {
+            self.import_groups(items, &dir)
+        } else {
+            self.import_album_items(items, &dir)
+        }
+    }
+
+    /// "Group albums" and `-g`: run each tag-defined album in the directory
+    /// through the album flow. An abort stops at once; otherwise the
+    /// directory counts as skipped if any of its albums was.
+    fn import_groups(&mut self, items: Vec<Item>, dir: &Path) -> Result<Outcome> {
+        let mut outcome = Outcome::Done;
+        for group in group_albums(items) {
+            match self.import_album_items(group, dir)? {
+                Outcome::Done => {}
+                Outcome::Skipped => outcome = Outcome::Skipped,
+                Outcome::Aborted => return Ok(Outcome::Aborted),
+            }
+        }
+        Ok(outcome)
+    }
+
+    /// "as Tracks": each item goes through the singleton flow. Skipping some
+    /// tracks still leaves the album done, as beets has no album task left.
+    fn import_as_tracks(&mut self, items: Vec<Item>) -> Result<Outcome> {
+        for item in items {
+            if self.import_singleton_item(item)? == Outcome::Aborted {
+                return Ok(Outcome::Aborted);
+            }
+        }
+        Ok(Outcome::Done)
+    }
+
+    fn import_album_items(&mut self, mut items: Vec<Item>, dir: &Path) -> Result<Outcome> {
         println!();
-        println!("{}", dir.display());
+        println!("{} ({} items)", dir.display(), items.len());
 
         let decision = if self.opts.autotag {
             self.choose_album(&items)?
@@ -449,6 +531,8 @@ impl<'a> Importer<'a> {
             }
             Decision::AsIs => None,
             Decision::Apply(m) => Some(m),
+            Decision::Tracks => return self.import_as_tracks(items),
+            Decision::Group => return self.import_groups(items, dir),
         };
 
         if !self.resolve_duplicates(&items, m.as_deref())? {
@@ -485,7 +569,7 @@ impl<'a> Importer<'a> {
             }
             return Ok(Outcome::Done);
         }
-        self.finalize_album(items, m.is_some(), &dir)?;
+        self.finalize_album(items, m.is_some(), dir)?;
         Ok(Outcome::Done)
     }
 
@@ -496,60 +580,67 @@ impl<'a> Importer<'a> {
         let (mut cands, mut rec) =
             autotag::album_candidates(self.cfg, &self.mb, items, None, &ids)?;
 
+        // `fresh`: candidates just (re)fetched, so quiet/strong handling
+        // applies. `focus`: the candidate shown for confirmation, with
+        // whether Apply is the default (beets requires an explicit choice
+        // for anything but the first); None shows the candidate list.
+        let mut fresh = true;
+        let mut focus: Option<(usize, bool)> = None;
         loop {
-            if self.opts.quiet {
-                return Ok(match (cands.into_iter().next(), rec) {
-                    (Some(m), Recommendation::Strong) => {
-                        self.show_album_match(items, &m);
-                        Decision::Apply(Box::new(m))
-                    }
-                    _ => {
-                        let asis = self.opts.quiet_fallback_asis;
-                        println!(
-                            "{}",
-                            if asis {
-                                "Importing as-is (no strong match)."
-                            } else {
-                                "Skipping (no strong match)."
-                            }
-                        );
-                        if asis { Decision::AsIs } else { Decision::Skip }
-                    }
-                });
+            if fresh {
+                fresh = false;
+                if self.opts.quiet {
+                    return Ok(match (cands.into_iter().next(), rec) {
+                        (Some(m), Recommendation::Strong) => {
+                            self.show_album_match(items, &m);
+                            Decision::Apply(Box::new(m))
+                        }
+                        _ => {
+                            let asis = self.opts.quiet_fallback_asis;
+                            println!(
+                                "{}",
+                                if asis {
+                                    "Importing as-is (no strong match)."
+                                } else {
+                                    "Skipping (no strong match)."
+                                }
+                            );
+                            if asis { Decision::AsIs } else { Decision::Skip }
+                        }
+                    });
+                }
+                if !cands.is_empty() && rec == Recommendation::Strong && !self.opts.timid {
+                    self.show_album_match(items, &cands[0]);
+                    return Ok(Decision::Apply(Box::new(cands.swap_remove(0))));
+                }
+                // Show the best match directly when it's good enough.
+                focus = (!cands.is_empty() && rec >= Recommendation::Medium).then_some((0, true));
             }
 
-            if !cands.is_empty() && rec == Recommendation::Strong && !self.opts.timid {
-                self.show_album_match(items, &cands[0]);
-                return Ok(Decision::Apply(Box::new(cands.swap_remove(0))));
-            }
-
-            // Show the best match directly when it's good enough, else list candidates.
-            let choice = if !cands.is_empty() && rec >= Recommendation::Medium {
-                self.show_album_match(items, &cands[0]);
+            let choice = if let Some((k, default_apply)) = focus {
+                self.show_album_match(items, &cands[k]);
                 match ui::options(
-                    &[
-                        "Apply",
-                        "More candidates",
-                        "Skip",
-                        "Use as-is",
-                        "Enter search",
-                        "enter Id",
-                        "aBort",
-                    ],
+                    &ALBUM_CONFIRM,
                     None,
-                    Some(Choice::Letter('a')),
+                    default_apply.then_some(Choice::Letter('a')),
                 ) {
                     Some(Choice::Letter('a')) => {
-                        return Ok(Decision::Apply(Box::new(cands.swap_remove(0))));
+                        return Ok(Decision::Apply(Box::new(cands.swap_remove(k))));
                     }
-                    Some(Choice::Letter('m')) => self.pick_album_candidate(&cands)?,
+                    Some(Choice::Letter('m')) => {
+                        focus = None;
+                        continue;
+                    }
                     other => other,
                 }
             } else {
                 if cands.is_empty() {
                     println!(
                         "{}",
-                        ui::yellow("No matching release found for this album.")
+                        ui::yellow(&format!(
+                            "No matching release found for {} tracks.",
+                            items.len()
+                        ))
                     );
                 }
                 self.pick_album_candidate(&cands)?
@@ -557,22 +648,11 @@ impl<'a> Importer<'a> {
 
             match choice {
                 None | Some(Choice::Letter('b')) => return Ok(Decision::Abort),
-                Some(Choice::Number(n)) => {
-                    let m = cands.swap_remove(n - 1);
-                    self.show_album_match(items, &m);
-                    match ui::options(
-                        &["Apply", "Skip", "Use as-is", "aBort"],
-                        None,
-                        Some(Choice::Letter('a')),
-                    ) {
-                        Some(Choice::Letter('a')) => return Ok(Decision::Apply(Box::new(m))),
-                        Some(Choice::Letter('s')) => return Ok(Decision::Skip),
-                        Some(Choice::Letter('u')) => return Ok(Decision::AsIs),
-                        _ => return Ok(Decision::Abort),
-                    }
-                }
+                Some(Choice::Number(n)) => focus = Some((n - 1, n == 1)),
                 Some(Choice::Letter('s')) => return Ok(Decision::Skip),
                 Some(Choice::Letter('u')) => return Ok(Decision::AsIs),
+                Some(Choice::Letter('t')) => return Ok(Decision::Tracks),
+                Some(Choice::Letter('g')) => return Ok(Decision::Group),
                 Some(Choice::Letter('e')) => {
                     let artist = ui::read_line("Artist: ").unwrap_or_default();
                     let album = ui::read_line("Album: ").unwrap_or_default();
@@ -583,6 +663,7 @@ impl<'a> Importer<'a> {
                         Some((&artist, &album)),
                         &[],
                     )?;
+                    fresh = true;
                 }
                 Some(Choice::Letter('i')) => {
                     let id = ui::read_line("Enter release ID: ").unwrap_or_default();
@@ -590,6 +671,7 @@ impl<'a> Importer<'a> {
                         autotag::album_candidates(self.cfg, &self.mb, items, None, &[id])?;
                     // An explicitly chosen release is never auto-applied.
                     rec = rec.min(Recommendation::Medium);
+                    fresh = true;
                 }
                 _ => {}
             }
@@ -625,7 +707,7 @@ impl<'a> Importer<'a> {
             Some(cands.len())
         };
         Ok(ui::options(
-            &["Skip", "Use as-is", "Enter search", "enter Id", "aBort"],
+            &ALBUM_CHOICES,
             numbers,
             numbers.map(|_| Choice::Number(1)),
         ))
@@ -904,11 +986,15 @@ impl<'a> Importer<'a> {
 
     fn import_singleton(&mut self, file: &Path) -> Result<Outcome> {
         let mut items = self.read_items(&[file.to_path_buf()])?;
-        let Some(mut item) = items.pop() else {
-            return Ok(Outcome::Done);
-        };
+        match items.pop() {
+            Some(item) => self.import_singleton_item(item),
+            None => Ok(Outcome::Done),
+        }
+    }
+
+    fn import_singleton_item(&mut self, mut item: Item) -> Result<Outcome> {
         println!();
-        println!("{}", file.display());
+        println!("{}", item.path().display());
         let decision = if self.opts.autotag {
             self.choose_item(&item)?
         } else {
@@ -925,6 +1011,7 @@ impl<'a> Importer<'a> {
                 autotag::apply_track(&mut item, &m.info);
                 true
             }
+            Decision::Tracks | Decision::Group => unreachable!("not offered for tracks"),
         };
         if self.opts.pretend {
             return Ok(Outcome::Done);
@@ -1248,5 +1335,109 @@ mod tests {
         assert_eq!(imp.stats.already, 0, "quiet mode must not resume");
         let st = ImportState::load(&cfg.state_path());
         assert_eq!(st.progress[&src].len(), 1, "earlier progress left as is");
+    }
+
+    fn tagged(artist: &str, albumartist: &str, album: &str, track: i64) -> Item {
+        let mut i = Item::new_item();
+        i.set_str("artist", artist);
+        i.set_str("albumartist", albumartist);
+        i.set_str("album", album);
+        i.set_int("track", track);
+        i
+    }
+
+    fn summary(groups: &[Vec<Item>]) -> Vec<Vec<(String, i64)>> {
+        groups
+            .iter()
+            .map(|g| {
+                g.iter()
+                    .map(|i| (i.str("album").to_string(), i.int("track")))
+                    .collect()
+            })
+            .collect()
+    }
+
+    #[test]
+    fn group_albums_splits_mixed_directory() {
+        let items = vec![
+            tagged("B", "", "Second", 1),
+            tagged("A", "", "First", 1),
+            tagged("B", "", "Second", 2),
+            tagged("A", "", "First", 2),
+            // Same album name, different artist: a separate album.
+            tagged("C", "", "First", 1),
+        ];
+        assert_eq!(
+            summary(&group_albums(items)),
+            vec![
+                vec![("First".into(), 1), ("First".into(), 2)],
+                vec![("Second".into(), 1), ("Second".into(), 2)],
+                vec![("First".into(), 1)],
+            ]
+        );
+    }
+
+    #[test]
+    fn group_albums_prefers_albumartist_and_keeps_untagged_together() {
+        let items = vec![
+            // A compilation: one albumartist over different track artists.
+            tagged("X", "Various Artists", "Comp", 1),
+            tagged("Y", "Various Artists", "Comp", 2),
+            // No album tag: grouped by artist with an empty album, as beets.
+            tagged("Z", "", "", 1),
+            tagged("Z", "", "", 2),
+            tagged("W", "", "", 1),
+        ];
+        let groups = group_albums(items);
+        let sizes: Vec<usize> = groups.iter().map(Vec::len).collect();
+        assert_eq!(sizes, vec![2, 1, 2]);
+        assert_eq!(groups[0][0].str("albumartist"), "Various Artists");
+        assert_eq!(groups[1][0].str("artist"), "W");
+        assert_eq!(groups[2][0].str("artist"), "Z");
+    }
+
+    /// Real tagged files (needs ffmpeg; skipped without it).
+    fn make_track(dir: &Path, name: &str, artist: &str, album: &str, track: u32) -> bool {
+        std::fs::create_dir_all(dir).unwrap();
+        std::process::Command::new("ffmpeg")
+            .args(["-loglevel", "error", "-f", "lavfi", "-i", "sine=duration=1"])
+            .args(["-metadata", &format!("artist={artist}")])
+            .args(["-metadata", &format!("album={album}")])
+            .args(["-metadata", &format!("track={track}")])
+            .arg(dir.join(name))
+            .status()
+            .is_ok_and(|s| s.success())
+    }
+
+    #[test]
+    fn group_albums_option_imports_each_album_and_records_the_directory() {
+        let (_d, cfg, lib, src) = setup(&[]);
+        let mixed = src.join("mixed");
+        for (n, artist, album, t) in [
+            ("1.mp3", "A", "First", 1),
+            ("2.mp3", "B", "Second", 1),
+            ("3.mp3", "A", "First", 2),
+        ] {
+            if !make_track(&mixed, n, artist, album, t) {
+                return;
+            }
+        }
+        let mut o = opts(&cfg);
+        o.group_albums = true;
+        o.incremental = true;
+        let mut imp = Importer::new(&cfg, &lib, o, &[]).unwrap();
+        imp.run(std::slice::from_ref(&src)).unwrap();
+        assert_eq!((imp.stats.albums, imp.stats.items), (2, 3));
+        let mut albums: Vec<String> = lib
+            .all_albums()
+            .unwrap()
+            .iter()
+            .map(|a| format!("{} - {}", a.str("albumartist"), a.str("album")))
+            .collect();
+        albums.sort();
+        assert_eq!(albums, ["A - First", "B - Second"]);
+        // The state key is still the directory, not the tag groups.
+        let st = ImportState::load(&cfg.state_path());
+        assert_eq!(st.history.iter().collect::<Vec<_>>(), [&mixed]);
     }
 }

@@ -26,9 +26,9 @@ beet update                                         # re-read changed tags, drop
 
 | Area | Status |
 |---|---|
-| `import` | album and singleton (`-s`) modes; copy/move/in place (`-c/-m/-C`); `-q`, `-t`, `-A`, `-W`, `-p`, `-S <mbid>`; directory grouping with CD1/Disc 2 merging; duplicate detection (skip/keep/remove); incremental imports (`-i`/`-I`, `incremental_skip_later`); resuming interrupted imports (`resume: ask/yes/no`, `--resume`/`--noresume`), with state in `statefile` (JSON) |
+| `import` | album and singleton (`-s`) modes; copy/move/in place (`-c/-m/-C`); `-q`, `-t`, `-A`, `-W`, `-p`, `-S <mbid>`; directory grouping with CD1/Disc 2 merging; `-g`/`group_albums` (split folders into albums by tags); duplicate detection (skip/keep/remove); incremental imports (`-i`/`-I`, `incremental_skip_later`); resuming interrupted imports (`resume: ask/yes/no`, `--resume`/`--noresume`), with state in `statefile` (JSON) |
 | Autotagger | MusicBrainz release and recording search, 1 req/s rate limit; beets' weighted distance (artist, album, year, label, catalog #, track title/artist/length/index/id, missing/unmatched tracks); Hungarian item↔track assignment; strong/medium/low recommendation with `max_rec` caps |
-| Prompts | Apply, More candidates, Skip, Use as-is, Enter search, enter Id, aBort; candidate list; per-track change display |
+| Prompts | Apply, More candidates, Skip, Use as-is, as Tracks, Group albums, Enter search, enter Id, aBort (singletons: Skip, Use as-is, Enter search, enter Id, aBort); candidate list; per-track change display |
 | Queries | substring, `field:`, `:=` / `:=~` exact, `::regex`, numeric/duration/date ranges (`..`), bools, `path:`, `-`/`^` negation, `,` OR, `field+`/`field-` sort, flexible attributes |
 | Templates | `$f`, `${f}`, escapes, `%lower %upper %capitalize %title %left %right %if %ifdef %asciify %initial %first %time %aunique` |
 | Paths | `paths:` with `default`/`singleton`/`comp`/query keys, `replace:` rules, `asciify_paths`, `max_filename_length`, unique-path suffixes, empty-dir pruning |
@@ -56,7 +56,7 @@ lyrics:
 
 ## Not yet
 
-More plugins (replaygain, duplicates, web), "as Tracks" / "Group albums" prompt choices, image resizing, `%sunique`,
+More plugins (replaygain, duplicates, web), image resizing, `%sunique`,
 reading or writing beets' own `library.db`.
 
 ## Layout

@@ -18,6 +18,7 @@ import:
     timid: no
     autotag: yes
     singletons: no
+    group_albums: no
     duplicate_action: ask
     incremental: no
     incremental_skip_later: no

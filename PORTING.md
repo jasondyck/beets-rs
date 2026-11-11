@@ -13,8 +13,8 @@ config`, plugins fetchart / lyrics / embedart, release preferences.
 ## 1. Core: import
 
 - [x] **1.1 Resume and incremental imports**: `-i/-I`, `incremental_skip_later`, `resume: ask/yes/no`, `--resume/--noresume`, statefile. Differs from beets on purpose: `--noresume` discards saved progress, and singleton history is keyed by folder
-- [ ] **1.2 Missing prompt choices**: as Tracks (`T`), Group albums (`G`), and the matching singleton/album flow
-- [ ] **1.3 Import flags and options, part 1**: `--set field=value` / `import.set_fields`, `-l/--log` / `import.log`, `--flat`, `-g/--group-albums` / `import.group_albums`, `--quiet-fallback`, `import.none_rec_action`, `import.timid`, `import.detail`
+- [x] **1.2 Missing prompt choices**: as Tracks (`T`), Group albums (`G`), `-g/--group-albums` / `import.group_albums`
+- [ ] **1.3 Import flags and options, part 1**: `--set field=value` / `import.set_fields`, `-l/--log` / `import.log`, `--flat`, `--quiet-fallback`, `import.none_rec_action`, `import.timid`, `import.detail`; `-p/--pretend` should only list files without autotagging or prompting, as in beets (ours currently runs the prompts)
 - [ ] **1.4 Reimport**: `-L/--library` (import a library query), `--from-scratch`, preserving `added`/flex attrs on reimport, `duplicate_action: merge`
 - [ ] **1.5 File ops**: `import.link`, `hardlink`, `reflink`, `import.delete`; `ignore`, `ignore_hidden`, `clutter` (also used for empty-dir pruning)
 - [ ] **1.6 Duplicate options**: `import.duplicate_keys` (album/item), `duplicate_verbose_prompt`, `singleton_album_disambig`, `import.bell`, `import.languages`
