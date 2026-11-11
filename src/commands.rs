@@ -1,7 +1,7 @@
 //! Subcommand implementations.
 
 use crate::config::{Config, DEFAULT_CONFIG, default_config_dir};
-use crate::importer::{self, FileOp, ImportOptions, Importer};
+use crate::importer::{self, FileOp, ImportOptions, Importer, Resume};
 use crate::library::Library;
 use crate::media;
 use crate::model::{
@@ -65,6 +65,10 @@ pub fn run(cli: Cli) -> Result<()> {
             singletons,
             search_id,
             pretend,
+            incremental,
+            noincremental,
+            resume,
+            noresume,
             paths,
         } => {
             let mut opts = ImportOptions::from_config(&cfg);
@@ -89,12 +93,29 @@ pub fn run(cli: Cli) -> Result<()> {
             opts.singletons |= singletons;
             opts.search_ids = search_id;
             opts.pretend = pretend;
+            if incremental {
+                opts.incremental = true;
+            }
+            if noincremental {
+                opts.incremental = false;
+            }
+            if resume {
+                opts.resume = Resume::Yes;
+            }
+            if noresume {
+                opts.resume = Resume::No;
+            }
             let mut imp = Importer::new(&cfg, &lib, opts, &plugins)?;
             imp.run(&paths)?;
             let s = &imp.stats;
             println!();
+            let already = if s.already > 0 {
+                format!("; {} already imported earlier", s.already)
+            } else {
+                String::new()
+            };
             println!(
-                "Imported {} album(s), {} item(s); skipped {}.",
+                "Imported {} album(s), {} item(s); skipped {}{already}.",
                 s.albums, s.items, s.skipped
             );
             Ok(())

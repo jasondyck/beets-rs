@@ -9,6 +9,7 @@ use crate::media;
 use crate::model::{Album, Item, Value, format_duration};
 use crate::paths::PathFormatter;
 use crate::plugins::{self, Plugin, PluginCtx};
+use crate::state::ImportState;
 use crate::ui::{self, Choice};
 use anyhow::{Context, Result, bail};
 use regex::Regex;
@@ -33,6 +34,27 @@ pub struct ImportOptions {
     pub singletons: bool,
     pub search_ids: Vec<String>,
     pub pretend: bool,
+    /// Skip directories recorded in the state file's history.
+    pub incremental: bool,
+    /// With `incremental`, don't record skipped albums, so they come back.
+    pub incremental_skip_later: bool,
+    pub resume: Resume,
+}
+
+/// `import.resume`: what to do when an earlier import of a path was interrupted.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Resume {
+    Yes,
+    No,
+    Ask,
+}
+
+/// How one album (or one directory of singletons) went.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Outcome {
+    Done,
+    Skipped,
+    Aborted,
 }
 
 impl ImportOptions {
@@ -54,6 +76,13 @@ impl ImportOptions {
             singletons: cfg.bool("import.singletons"),
             search_ids: vec![],
             pretend: false,
+            incremental: cfg.bool("import.incremental"),
+            incremental_skip_later: cfg.bool("import.incremental_skip_later"),
+            resume: match cfg.str("import.resume").as_str() {
+                "yes" | "true" => Resume::Yes,
+                "no" | "false" => Resume::No,
+                _ => Resume::Ask,
+            },
         }
     }
 }
@@ -63,6 +92,8 @@ pub struct Stats {
     pub albums: usize,
     pub items: usize,
     pub skipped: usize,
+    /// Directories passed over because an earlier import already handled them.
+    pub already: usize,
 }
 
 enum Decision<M> {
@@ -81,17 +112,21 @@ pub struct Importer<'a> {
     pub stats: Stats,
     roots: Vec<PathBuf>,
     plugins: &'a [Box<dyn Plugin>],
+    state: ImportState,
+    state_path: PathBuf,
 }
 
 static DISC_DIR: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"(?i)^(cd|dis[ck]|side|part)[\s._-]*[0-9a-z]{1,3}\b").unwrap());
 
 /// Group audio files into album-sized chunks: one per directory, merging
-/// "CD1"/"Disc 2" style subdirectories into their parent.
-pub fn group_files(root: &Path) -> Result<Vec<Vec<PathBuf>>> {
+/// "CD1"/"Disc 2" style subdirectories into their parent. Each group comes
+/// with its directory (or the file itself, for a single-file import), which
+/// identifies it in the import state.
+pub fn group_files(root: &Path) -> Result<Vec<(PathBuf, Vec<PathBuf>)>> {
     if root.is_file() {
         return Ok(if media::is_audio(root) {
-            vec![vec![root.to_path_buf()]]
+            vec![(root.to_path_buf(), vec![root.to_path_buf()])]
         } else {
             vec![]
         });
@@ -144,7 +179,7 @@ pub fn group_files(root: &Path) -> Result<Vec<Vec<PathBuf>>> {
         };
         groups.entry(key).or_default().extend(files.iter().cloned());
     }
-    Ok(groups.into_values().collect())
+    Ok(groups.into_iter().collect())
 }
 
 /// Append ".1", ".2", ... before the extension until the path is free.
@@ -232,10 +267,22 @@ impl<'a> Importer<'a> {
             stats: Stats::default(),
             roots: vec![],
             plugins,
+            state: ImportState::load(&cfg.state_path()),
+            state_path: cfg.state_path(),
         })
     }
 
     pub fn run(&mut self, paths: &[PathBuf]) -> Result<()> {
+        // As in beets: incremental imports use history instead of progress,
+        // `resume: no` neither resumes nor records progress, and quiet mode
+        // never asks, so `resume: ask` behaves like `no` there.
+        let track_progress = !self.opts.incremental
+            && !self.opts.pretend
+            && match self.opts.resume {
+                Resume::Yes => true,
+                Resume::Ask => !self.opts.quiet,
+                Resume::No => false,
+            };
         for p in paths {
             let p = std::fs::canonicalize(p)
                 .with_context(|| format!("no such file or directory: {}", p.display()))?;
@@ -244,26 +291,112 @@ impl<'a> Importer<'a> {
             } else {
                 p.parent().unwrap_or(&p).to_path_buf()
             });
-            for group in group_files(&p)? {
-                let keep_going = if self.opts.singletons {
-                    let mut go = true;
+            let done = if track_progress {
+                self.resume_point(&p)?
+            } else {
+                if self.opts.resume == Resume::No
+                    && !self.opts.pretend
+                    && self.state.progress.remove(&p).is_some()
+                {
+                    // Explicitly starting over: drop the stale progress so a
+                    // later run doesn't offer to resume it.
+                    self.state.save(&self.state_path)?;
+                }
+                Default::default()
+            };
+            for (key, group) in group_files(&p)? {
+                if done.contains(&key) {
+                    self.stats.already += 1;
+                    continue;
+                }
+                if self.opts.incremental && self.state.history.contains(&key) {
+                    println!(
+                        "{}",
+                        ui::dim(&format!(
+                            "Skipping previously-imported path: {}",
+                            key.display()
+                        ))
+                    );
+                    self.stats.already += 1;
+                    continue;
+                }
+                let outcome = if self.opts.singletons {
+                    let mut outcome = Outcome::Done;
                     for f in group {
-                        if !self.import_singleton(&f)? {
-                            go = false;
-                            break;
+                        match self.import_singleton(&f)? {
+                            Outcome::Done => {}
+                            Outcome::Skipped => outcome = Outcome::Skipped,
+                            Outcome::Aborted => {
+                                outcome = Outcome::Aborted;
+                                break;
+                            }
                         }
                     }
-                    go
+                    outcome
                 } else {
                     self.import_album(&group)?
                 };
-                if !keep_going {
+                if outcome == Outcome::Aborted {
+                    // Progress so far stays recorded, so the import can resume.
                     println!("Import aborted.");
                     return Ok(());
                 }
+                self.record(&p, key, outcome, track_progress)?;
+            }
+            if track_progress && self.state.progress.remove(&p).is_some() {
+                self.state.save(&self.state_path)?;
             }
         }
         Ok(())
+    }
+
+    /// The groups an interrupted earlier import of `top` already finished,
+    /// if the user wants to resume it; otherwise forget that progress.
+    fn resume_point(&mut self, top: &Path) -> Result<std::collections::BTreeSet<PathBuf>> {
+        let Some(done) = self.state.progress.get(top) else {
+            return Ok(Default::default());
+        };
+        let resume = match self.opts.resume {
+            Resume::Yes => true,
+            Resume::No => false,
+            Resume::Ask => ui::yes_no(&format!(
+                "Import of the directory:\n{}\nwas interrupted. Resume?",
+                top.display()
+            )),
+        };
+        if resume {
+            println!(
+                "Resuming import of {} ({} album(s) already done).",
+                top.display(),
+                done.len()
+            );
+            return Ok(done.clone());
+        }
+        self.state.progress.remove(top);
+        self.state.save(&self.state_path)?;
+        Ok(Default::default())
+    }
+
+    /// Note that a group is finished, in the history (incremental) or the
+    /// top path's progress, and persist it right away so an interruption
+    /// loses at most the album in flight.
+    fn record(&mut self, top: &Path, key: PathBuf, outcome: Outcome, progress: bool) -> Result<()> {
+        if self.opts.pretend {
+            return Ok(());
+        }
+        if self.opts.incremental {
+            if outcome == Outcome::Skipped && self.opts.incremental_skip_later {
+                return Ok(());
+            }
+            self.state.history.insert(key);
+        } else if progress {
+            self.state
+                .progress
+                .entry(top.to_path_buf())
+                .or_default()
+                .insert(key);
+        }
+        self.state.save(&self.state_path)
     }
 
     fn read_items(&mut self, files: &[PathBuf]) -> Result<Vec<Item>> {
@@ -294,11 +427,10 @@ impl<'a> Importer<'a> {
 
     // ------------------------------------------------------------- albums
 
-    /// Returns false if the user aborted.
-    fn import_album(&mut self, files: &[PathBuf]) -> Result<bool> {
+    fn import_album(&mut self, files: &[PathBuf]) -> Result<Outcome> {
         let mut items = self.read_items(files)?;
         if items.is_empty() {
-            return Ok(true);
+            return Ok(Outcome::Done);
         }
         let dir = files[0].parent().unwrap_or(Path::new("")).to_path_buf();
         println!();
@@ -310,10 +442,10 @@ impl<'a> Importer<'a> {
             Decision::AsIs
         };
         let m = match decision {
-            Decision::Abort => return Ok(false),
+            Decision::Abort => return Ok(Outcome::Aborted),
             Decision::Skip => {
                 self.stats.skipped += 1;
-                return Ok(true);
+                return Ok(Outcome::Skipped);
             }
             Decision::AsIs => None,
             Decision::Apply(m) => Some(m),
@@ -321,7 +453,7 @@ impl<'a> Importer<'a> {
 
         if !self.resolve_duplicates(&items, m.as_deref())? {
             self.stats.skipped += 1;
-            return Ok(true);
+            return Ok(Outcome::Skipped);
         }
 
         if let Some(m) = &m {
@@ -351,10 +483,10 @@ impl<'a> Importer<'a> {
             for i in &items {
                 println!("  {}", i.path().display());
             }
-            return Ok(true);
+            return Ok(Outcome::Done);
         }
         self.finalize_album(items, m.is_some(), &dir)?;
-        Ok(true)
+        Ok(Outcome::Done)
     }
 
     fn choose_album(&mut self, items: &[Item]) -> Result<Decision<AlbumMatch>> {
@@ -770,10 +902,10 @@ impl<'a> Importer<'a> {
 
     // --------------------------------------------------------- singletons
 
-    fn import_singleton(&mut self, file: &Path) -> Result<bool> {
+    fn import_singleton(&mut self, file: &Path) -> Result<Outcome> {
         let mut items = self.read_items(&[file.to_path_buf()])?;
         let Some(mut item) = items.pop() else {
-            return Ok(true);
+            return Ok(Outcome::Done);
         };
         println!();
         println!("{}", file.display());
@@ -783,10 +915,10 @@ impl<'a> Importer<'a> {
             Decision::AsIs
         };
         let tagged = match decision {
-            Decision::Abort => return Ok(false),
+            Decision::Abort => return Ok(Outcome::Aborted),
             Decision::Skip => {
                 self.stats.skipped += 1;
-                return Ok(true);
+                return Ok(Outcome::Skipped);
             }
             Decision::AsIs => false,
             Decision::Apply(m) => {
@@ -795,7 +927,7 @@ impl<'a> Importer<'a> {
             }
         };
         if self.opts.pretend {
-            return Ok(true);
+            return Ok(Outcome::Done);
         }
         item.set("added", Value::Float(now()));
         item.set_int("album_id", 0);
@@ -804,7 +936,7 @@ impl<'a> Importer<'a> {
         let ctx = self.plugin_ctx();
         plugins::each(self.plugins, |p| p.item_imported(&ctx, &mut item));
         self.stats.items += 1;
-        Ok(true)
+        Ok(Outcome::Done)
     }
 
     fn choose_item(&mut self, item: &Item) -> Result<Decision<TrackMatch>> {
@@ -943,8 +1075,10 @@ mod tests {
         mk("C/Live/01.mp3");
         mk("C/Studio/01.mp3");
         let groups = group_files(d.path()).unwrap();
-        let sizes: Vec<usize> = groups.iter().map(|g| g.len()).collect();
+        let sizes: Vec<usize> = groups.iter().map(|(_, g)| g.len()).collect();
         assert_eq!(sizes, vec![2, 2, 1, 1]);
+        let keys: Vec<PathBuf> = groups.into_iter().map(|(k, _)| k).collect();
+        assert_eq!(keys[1], d.path().join("B"));
     }
 
     #[test]
@@ -958,5 +1092,161 @@ mod tests {
         prune_dirs(&deep, d.path());
         assert!(!d.path().join("a").exists());
         assert!(d.path().exists());
+    }
+
+    /// Config + library in a temp dir, with an empty album dir per name.
+    /// The files aren't real audio, so each album reads as empty and
+    /// finishes as `Done` without needing MusicBrainz.
+    fn setup(albums: &[&str]) -> (tempfile::TempDir, Config, Library, PathBuf) {
+        let d = tempfile::tempdir().unwrap();
+        let mut cfg = Config::defaults();
+        cfg.config_dir = d.path().join("cfg");
+        let src = d.path().join("src");
+        std::fs::create_dir_all(&src).unwrap();
+        for a in albums {
+            std::fs::create_dir_all(src.join(a)).unwrap();
+            std::fs::write(src.join(a).join("01.mp3"), b"").unwrap();
+        }
+        let src = std::fs::canonicalize(src).unwrap();
+        (d, cfg, Library::in_memory().unwrap(), src)
+    }
+
+    fn opts(cfg: &Config) -> ImportOptions {
+        let mut o = ImportOptions::from_config(cfg);
+        o.autotag = false;
+        o.op = FileOp::None;
+        o
+    }
+
+    #[test]
+    fn incremental_records_and_skips() {
+        let (_d, cfg, lib, src) = setup(&["A", "B"]);
+        let mut o = opts(&cfg);
+        o.incremental = true;
+        let mut imp = Importer::new(&cfg, &lib, o, &[]).unwrap();
+        imp.run(std::slice::from_ref(&src)).unwrap();
+        let st = ImportState::load(&cfg.state_path());
+        assert!(st.history.contains(&src.join("A")) && st.history.contains(&src.join("B")));
+        assert!(st.progress.is_empty());
+
+        std::fs::create_dir_all(src.join("C")).unwrap();
+        std::fs::write(src.join("C/01.mp3"), b"").unwrap();
+        let mut o = opts(&cfg);
+        o.incremental = true;
+        let mut imp = Importer::new(&cfg, &lib, o, &[]).unwrap();
+        imp.run(std::slice::from_ref(&src)).unwrap();
+        assert_eq!(imp.stats.already, 2);
+        assert!(
+            ImportState::load(&cfg.state_path())
+                .history
+                .contains(&src.join("C"))
+        );
+    }
+
+    #[test]
+    fn resumes_interrupted_import() {
+        let (_d, cfg, lib, src) = setup(&["A", "B", "C"]);
+        // Simulate an import of `src` that was interrupted after album A.
+        let mut st = ImportState::default();
+        st.progress
+            .entry(src.clone())
+            .or_default()
+            .insert(src.join("A"));
+        st.save(&cfg.state_path()).unwrap();
+
+        let mut o = opts(&cfg);
+        o.resume = Resume::Yes;
+        let mut imp = Importer::new(&cfg, &lib, o, &[]).unwrap();
+        imp.run(std::slice::from_ref(&src)).unwrap();
+        assert_eq!(imp.stats.already, 1);
+        // Finishing the top path clears its progress; no history without -i.
+        let st = ImportState::load(&cfg.state_path());
+        assert!(st.progress.is_empty() && st.history.is_empty());
+    }
+
+    #[test]
+    fn noresume_starts_over_and_pretend_records_nothing() {
+        let (_d, cfg, lib, src) = setup(&["A", "B"]);
+        let mut st = ImportState::default();
+        st.progress
+            .entry(src.clone())
+            .or_default()
+            .insert(src.join("A"));
+        st.save(&cfg.state_path()).unwrap();
+
+        let mut o = opts(&cfg);
+        o.pretend = true;
+        o.incremental = true;
+        let mut imp = Importer::new(&cfg, &lib, o, &[]).unwrap();
+        imp.run(std::slice::from_ref(&src)).unwrap();
+        let st = ImportState::load(&cfg.state_path());
+        assert!(st.history.is_empty(), "pretend must not record history");
+        assert_eq!(st.progress.len(), 1, "pretend must not touch progress");
+
+        let mut o = opts(&cfg);
+        o.resume = Resume::No;
+        let mut imp = Importer::new(&cfg, &lib, o, &[]).unwrap();
+        imp.run(std::slice::from_ref(&src)).unwrap();
+        assert_eq!(imp.stats.already, 0);
+        assert!(ImportState::load(&cfg.state_path()).progress.is_empty());
+    }
+
+    #[test]
+    fn incremental_skip_later_leaves_skipped_albums_out_of_history() {
+        let (_d, cfg, lib, src) = setup(&[]);
+        for skip_later in [false, true] {
+            let mut o = opts(&cfg);
+            o.incremental = true;
+            o.incremental_skip_later = skip_later;
+            let mut imp = Importer::new(&cfg, &lib, o, &[]).unwrap();
+            let key = src.join(format!("skipped-{skip_later}"));
+            imp.record(&src, key.clone(), Outcome::Skipped, false)
+                .unwrap();
+            imp.record(&src, src.join("done"), Outcome::Done, false)
+                .unwrap();
+            let st = ImportState::load(&cfg.state_path());
+            assert_eq!(st.history.contains(&key), !skip_later);
+            assert!(st.history.contains(&src.join("done")));
+            assert!(st.progress.is_empty(), "incremental records no progress");
+        }
+    }
+
+    #[test]
+    fn progress_is_saved_per_album_and_cleared_when_path_completes() {
+        let (_d, cfg, lib, src) = setup(&["A", "B"]);
+        let mut imp = Importer::new(&cfg, &lib, opts(&cfg), &[]).unwrap();
+        // Mid-import, each finished album is persisted immediately.
+        imp.record(&src, src.join("A"), Outcome::Done, true)
+            .unwrap();
+        let st = ImportState::load(&cfg.state_path());
+        assert!(st.progress[&src].contains(&src.join("A")));
+        assert!(st.history.is_empty(), "no history without incremental");
+        // A full run over the path resumes past A and then clears progress.
+        let mut o = opts(&cfg);
+        o.resume = Resume::Yes;
+        let mut imp = Importer::new(&cfg, &lib, o, &[]).unwrap();
+        imp.run(std::slice::from_ref(&src)).unwrap();
+        assert_eq!(imp.stats.already, 1);
+        assert!(ImportState::load(&cfg.state_path()).progress.is_empty());
+    }
+
+    #[test]
+    fn quiet_ask_neither_resumes_nor_discards_progress() {
+        let (_d, cfg, lib, src) = setup(&["A", "B"]);
+        let mut st = ImportState::default();
+        st.progress
+            .entry(src.clone())
+            .or_default()
+            .insert(src.join("A"));
+        st.save(&cfg.state_path()).unwrap();
+
+        let mut o = opts(&cfg);
+        o.quiet = true;
+        o.resume = Resume::Ask;
+        let mut imp = Importer::new(&cfg, &lib, o, &[]).unwrap();
+        imp.run(std::slice::from_ref(&src)).unwrap();
+        assert_eq!(imp.stats.already, 0, "quiet mode must not resume");
+        let st = ImportState::load(&cfg.state_path());
+        assert_eq!(st.progress[&src].len(), 1, "earlier progress left as is");
     }
 }

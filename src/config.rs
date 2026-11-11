@@ -7,6 +7,7 @@ use std::path::{Path, PathBuf};
 pub const DEFAULT_CONFIG: &str = r#"
 directory: ~/Music
 library: library.db
+statefile: state.json
 
 import:
     write: yes
@@ -18,6 +19,9 @@ import:
     autotag: yes
     singletons: no
     duplicate_action: ask
+    incremental: no
+    incremental_skip_later: no
+    resume: ask
 
 paths:
     default: $albumartist/$album%aunique{}/$track $title
@@ -309,6 +313,16 @@ impl Config {
             l
         } else {
             self.config_dir.join(l)
+        }
+    }
+
+    /// The import state file (`statefile`), relative to the config dir.
+    pub fn state_path(&self) -> PathBuf {
+        let s = expand_tilde(&self.str("statefile"));
+        if s.is_absolute() {
+            s
+        } else {
+            self.config_dir.join(s)
         }
     }
 

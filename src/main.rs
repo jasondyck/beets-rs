@@ -9,6 +9,7 @@ mod model;
 mod paths;
 mod plugins;
 mod query;
+mod state;
 mod template;
 mod ui;
 
@@ -70,6 +71,18 @@ pub enum Cmd {
         /// Only show what would be imported
         #[arg(short = 'p', long)]
         pretend: bool,
+        /// Skip directories imported by earlier incremental imports
+        #[arg(short = 'i', long, overrides_with = "noincremental")]
+        incremental: bool,
+        /// Import everything, even previously imported directories
+        #[arg(short = 'I', long)]
+        noincremental: bool,
+        /// Resume an interrupted import without asking
+        #[arg(long, overrides_with = "noresume")]
+        resume: bool,
+        /// Start over instead of resuming an interrupted import
+        #[arg(long)]
+        noresume: bool,
         #[arg(required = true)]
         paths: Vec<PathBuf>,
     },

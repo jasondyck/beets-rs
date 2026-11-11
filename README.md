@@ -13,6 +13,7 @@ schema is its own. Config and library live in `~/.config/beets-rs/`
 cargo build --release
 beet import ~/Downloads/SomeAlbum        # interactive autotagging
 beet import -q -m ~/incoming             # quiet: apply strong matches, skip the rest
+beet import -i ~/Downloads               # incremental: skip folders imported before
 beet ls artist:radiohead year:2000..2009 year-
 beet ls -a -f '$albumartist - $album ($year)'
 beet modify -a 'in rainbows' genre=Alternative
@@ -25,7 +26,7 @@ beet update                                         # re-read changed tags, drop
 
 | Area | Status |
 |---|---|
-| `import` | album and singleton (`-s`) modes; copy/move/in place (`-c/-m/-C`); `-q`, `-t`, `-A`, `-W`, `-p`, `-S <mbid>`; directory grouping with CD1/Disc 2 merging; duplicate detection (skip/keep/remove) |
+| `import` | album and singleton (`-s`) modes; copy/move/in place (`-c/-m/-C`); `-q`, `-t`, `-A`, `-W`, `-p`, `-S <mbid>`; directory grouping with CD1/Disc 2 merging; duplicate detection (skip/keep/remove); incremental imports (`-i`/`-I`, `incremental_skip_later`); resuming interrupted imports (`resume: ask/yes/no`, `--resume`/`--noresume`), with state in `statefile` (JSON) |
 | Autotagger | MusicBrainz release and recording search, 1 req/s rate limit; beets' weighted distance (artist, album, year, label, catalog #, track title/artist/length/index/id, missing/unmatched tracks); Hungarian item↔track assignment; strong/medium/low recommendation with `max_rec` caps |
 | Prompts | Apply, More candidates, Skip, Use as-is, Enter search, enter Id, aBort; candidate list; per-track change display |
 | Queries | substring, `field:`, `:=` / `:=~` exact, `::regex`, numeric/duration/date ranges (`..`), bools, `path:`, `-`/`^` negation, `,` OR, `field+`/`field-` sort, flexible attributes |
@@ -55,12 +56,11 @@ lyrics:
 
 ## Not yet
 
-More plugins (replaygain, duplicates, web), import resume/incremental
-state, "as Tracks" / "Group albums" prompt choices, image resizing, `%sunique`,
+More plugins (replaygain, duplicates, web), "as Tracks" / "Group albums" prompt choices, image resizing, `%sunique`,
 reading or writing beets' own `library.db`.
 
 ## Layout
 
 `model` (typed fields + flex attrs) · `library` (SQLite) · `query` · `template` ·
 `paths` · `media` (lofty tags) · `mb` (MusicBrainz) · `autotag` · `importer` ·
-`commands` · `ui` · `plugins/` (`fetchart`, `embedart`, `lyrics`).
+`commands` · `state` (import resume/history) · `ui` · `plugins/` (`fetchart`, `embedart`, `lyrics`).
