@@ -285,7 +285,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let file = dir.path().join("config.yaml");
         std::fs::write(&file, format!("directory: /lib\n{extra}")).unwrap();
-        PathFormatter::new(&Config::load(Some(&file)).unwrap()).unwrap()
+        PathFormatter::new(&Config::load_file(&file).unwrap()).unwrap()
     }
 
     fn item() -> Record {

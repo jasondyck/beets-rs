@@ -1,6 +1,6 @@
 //! Subcommand implementations.
 
-use crate::config::{Config, DEFAULT_CONFIG, default_config_dir};
+use crate::config::{Config, default_config_dir};
 use crate::fileops::{self, FileOp};
 use crate::importer::{self, ImportOptions, Importer, Resume};
 use crate::library::Library;
@@ -21,12 +21,21 @@ use std::path::{Path, PathBuf};
 
 pub fn run(cli: Cli) -> Result<()> {
     crate::logging::set_verbosity(cli.verbose);
-    let config_file = cli
-        .config
-        .clone()
-        .unwrap_or_else(|| default_config_dir().join("config.yaml"));
-    debug!("user configuration: {}", config_file.display());
-    let mut cfg = Config::load(cli.config.as_deref())?;
+    // As beets, `config -e` works even when the configuration is broken.
+    if let Some(Cmd::Config { edit: true, .. }) = &cli.cmd {
+        return config_edit(&cli.config);
+    }
+    let mut cfg = match Config::load(&cli.config) {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("configuration error: {e:#}");
+            std::process::exit(1);
+        }
+    };
+    debug!("configuration sources (highest → lowest priority):");
+    for s in &cfg.sources {
+        debug!("YamlSource {}", s.display());
+    }
     debug!("data directory: {}", cfg.config_dir.display());
     if let Some(l) = &cli.library {
         cfg.set("library", Y::String(l.to_string_lossy().into()));
@@ -54,19 +63,23 @@ pub fn run(cli: Cli) -> Result<()> {
         Cmd::Help { command } => return help(command.as_deref()),
         Cmd::Version => return version(&cfg),
         Cmd::Fields => return fields(),
-        Cmd::Config { paths, defaults } => {
+        Cmd::Config {
+            paths,
+            defaults,
+            clear,
+            ..
+        } => {
             if *paths {
-                println!(
-                    "{}",
-                    cli.config
-                        .clone()
-                        .unwrap_or_else(|| default_config_dir().join("config.yaml"))
-                        .display()
-                );
-            } else if *defaults {
-                print!("{}", DEFAULT_CONFIG.trim_start());
+                for p in cfg.source_paths() {
+                    println!("{}", p.display());
+                }
             } else {
-                print!("{}", cfg.dump());
+                let out = cfg.dump(*defaults, !*clear);
+                if out.trim().is_empty() {
+                    println!("Empty configuration");
+                } else {
+                    println!("{out}");
+                }
             }
             return Ok(());
         }
@@ -1434,6 +1447,84 @@ fn move_art(
     Ok(true)
 }
 
+/// beets' `config_edit`: open the first `-c` file, else the user's
+/// `config.yaml` (created empty if missing), in the editor, replacing this
+/// process.
+fn config_edit(configs: &[PathBuf]) -> Result<()> {
+    let path = configs
+        .first()
+        .cloned()
+        .unwrap_or_else(|| default_config_dir().join("config.yaml"));
+    // The `editor` option, if the configuration can be read at all.
+    let configured = Config::load(configs)
+        .ok()
+        .map(|c| c.str("editor"))
+        .filter(|e| !e.is_empty());
+    let editor = editor_command(configured);
+    if editor.is_empty() {
+        bail!("Please set the VISUAL or EDITOR environment variable to edit configuration.");
+    }
+    let open = || -> std::io::Result<std::io::Error> {
+        if !path.is_file() {
+            if let Some(dir) = path.parent() {
+                std::fs::create_dir_all(dir)?;
+            }
+            std::fs::File::create(&path)?;
+        }
+        Ok(interactive_open(&editor, &path))
+    };
+    let err = match open() {
+        Ok(e) | Err(e) => e,
+    };
+    if err.kind() == std::io::ErrorKind::NotFound {
+        bail!("Editor '{editor}' not found.");
+    }
+    bail!("Could not edit configuration: {err}")
+}
+
+/// beets' `util.editor_command`: the `editor` option, `$VISUAL`, `$EDITOR`,
+/// then the platform's opener.
+fn editor_command(configured: Option<String>) -> String {
+    editor_command_with(configured, |k| std::env::var(k).ok())
+}
+
+fn editor_command_with(configured: Option<String>, var: impl Fn(&str) -> Option<String>) -> String {
+    let env = |k: &str| var(k).filter(|v| !v.is_empty());
+    configured
+        .or_else(|| env("VISUAL"))
+        .or_else(|| env("EDITOR"))
+        .unwrap_or_else(|| {
+            if cfg!(target_os = "macos") {
+                "open".into()
+            } else {
+                "xdg-open".into()
+            }
+        })
+}
+
+/// beets' `util.interactive_open`: run `command` (shell-split) on `target`
+/// in place of this process. Returns only on failure.
+fn interactive_open(command: &str, target: &Path) -> std::io::Error {
+    let mut args = crate::paths::shell_split(command);
+    if args.is_empty() {
+        args.push(command.to_string());
+    }
+    let mut cmd = std::process::Command::new(&args[0]);
+    cmd.args(&args[1..]).arg(target);
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        cmd.exec()
+    }
+    #[cfg(not(unix))]
+    {
+        match cmd.status() {
+            Ok(s) => std::process::exit(s.code().unwrap_or(0)),
+            Err(e) => e,
+        }
+    }
+}
+
 fn require_plugin(cfg: &Config, name: &str) -> Result<()> {
     if !plugins::enabled(cfg, name) {
         bail!("the {name} plugin is not enabled; add it to `plugins:` in your config");
@@ -2387,6 +2478,28 @@ mod tests {
         assert_eq!(f, cfg.str("format_item"));
         assert_eq!(one, "Really remove from the library");
         assert_eq!(all, "Really remove 2 items and 2 albums from the library");
+    }
+
+    #[test]
+    fn editor_command_precedence_as_beets() {
+        let env = |pairs: &'static [(&'static str, &'static str)]| {
+            move |k: &str| {
+                pairs
+                    .iter()
+                    .find(|(n, _)| *n == k)
+                    .map(|(_, v)| v.to_string())
+            }
+        };
+        let both = env(&[("VISUAL", "vis"), ("EDITOR", "ed")]);
+        assert_eq!(editor_command_with(Some("code -w".into()), both), "code -w");
+        assert_eq!(editor_command_with(None, both), "vis");
+        assert_eq!(editor_command_with(None, env(&[("EDITOR", "ed")])), "ed");
+        let opener = if cfg!(target_os = "macos") {
+            "open"
+        } else {
+            "xdg-open"
+        };
+        assert_eq!(editor_command_with(None, env(&[])), opener);
     }
 
     #[test]

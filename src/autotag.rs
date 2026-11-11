@@ -681,7 +681,7 @@ mod tests {
             "match:\n  preferred:\n    countries: ['GB|UK', US]\n    media: [CD]\n    original_year: yes\n",
         )
         .unwrap();
-        let cfg = Config::load(Some(&file)).unwrap();
+        let cfg = Config::load_file(&file).unwrap();
         let items = vec![
             item("Alpha", 1, 200.0),
             item("Beta", 2, 180.0),

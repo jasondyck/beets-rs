@@ -41,9 +41,9 @@ pub struct Cli {
     /// Log more details (use twice for even more)
     #[arg(short = 'v', long = "verbose", action = ArgAction::Count)]
     pub verbose: u8,
-    /// Path to configuration file
-    #[arg(short = 'c', long = "config")]
-    pub config: Option<PathBuf>,
+    /// Path to configuration file (repeatable; each goes over the last)
+    #[arg(short = 'c', long = "config", value_name = "FILE")]
+    pub config: Vec<PathBuf>,
     /// A comma-separated list of plugins to load
     #[arg(short = 'p', long = "plugins", value_name = "PLUGINS")]
     pub plugins: Option<String>,
@@ -362,12 +362,18 @@ pub enum Cmd {
     },
     /// Show the effective configuration
     Config {
-        /// Print the config file path
+        /// Show files that configuration was loaded from
         #[arg(short = 'p', long)]
         paths: bool,
-        /// Show the built-in defaults
+        /// Edit user configuration with $VISUAL (or $EDITOR)
+        #[arg(short = 'e', long)]
+        edit: bool,
+        /// Include the default configuration
         #[arg(short = 'd', long)]
         defaults: bool,
+        /// Do not redact sensitive fields
+        #[arg(short = 'c', long)]
+        clear: bool,
     },
 }
 
@@ -451,7 +457,7 @@ mod tests {
         assert_eq!(cli.verbose, 2);
         assert_eq!(cli.library, Some(PathBuf::from("lib.db")));
         assert_eq!(cli.directory, Some(PathBuf::from("/music")));
-        assert_eq!(cli.config, Some(PathBuf::from("c.yaml")));
+        assert_eq!(cli.config, [PathBuf::from("c.yaml")]);
         assert_eq!(
             comma_list(cli.plugins.as_deref().unwrap()),
             ["fetchart", "lyrics"]
