@@ -5,12 +5,18 @@ use crate::query::Query;
 use anyhow::{Context, Result};
 use rusqlite::types::Value as SqlValue;
 use rusqlite::{Connection, Row, params};
+use std::any::Any;
+use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap};
 use std::os::unix::ffi::{OsStrExt, OsStringExt};
 use std::path::{Path, PathBuf};
+use std::rc::Rc;
 
 pub struct Library {
     conn: Connection,
+    /// Values computed from the library's contents (beets' `_memotable`),
+    /// dropped whenever this process writes to the library.
+    memo: RefCell<HashMap<String, Rc<dyn Any>>>,
 }
 
 fn table(kind: Kind) -> &'static str {
@@ -133,7 +139,28 @@ impl Library {
             "CREATE INDEX IF NOT EXISTS items_album_id ON items(album_id);
              CREATE INDEX IF NOT EXISTS items_path ON items(path);",
         )?;
-        Ok(Library { conn })
+        Ok(Library {
+            conn,
+            memo: RefCell::new(HashMap::new()),
+        })
+    }
+
+    /// A memoized value computed from the library's contents: `f`'s
+    /// result for `key`, until the library is next written to.
+    pub fn memo<T: 'static>(&self, key: String, f: impl FnOnce() -> T) -> Rc<T> {
+        if let Some(v) = self.memo.borrow().get(&key)
+            && let Ok(v) = v.clone().downcast::<T>()
+        {
+            return v;
+        }
+        let v = Rc::new(f());
+        self.memo.borrow_mut().insert(key, v.clone());
+        v
+    }
+
+    /// Drop memoized values (after any write).
+    fn invalidate(&self) {
+        self.memo.borrow_mut().clear();
     }
 
     pub fn transaction<T>(&self, f: impl FnOnce(&Self) -> Result<T>) -> Result<T> {
@@ -145,6 +172,7 @@ impl Library {
             }
             Err(e) => {
                 self.conn.execute_batch("ROLLBACK").ok();
+                self.invalidate();
                 Err(e)
             }
         }
@@ -152,6 +180,7 @@ impl Library {
 
     /// Insert a new record, assigning its id.
     pub fn add(&self, rec: &mut Record) -> Result<i64> {
+        self.invalidate();
         let t = table(rec.kind);
         let cols: Vec<&str> = rec.fixed_values().map(|(n, _)| n).collect();
         let vals: Vec<SqlValue> = rec.fixed_values().map(|(_, v)| to_sql(v)).collect();
@@ -171,6 +200,7 @@ impl Library {
 
     /// Write all fields of an existing record.
     pub fn store(&self, rec: &Record) -> Result<()> {
+        self.invalidate();
         let id = rec.id.context("record has no id; add it first")?;
         let t = table(rec.kind);
         let sets: Vec<String> = rec.fixed_values().map(|(n, _)| format!("{n}=?")).collect();
@@ -198,6 +228,7 @@ impl Library {
     }
 
     pub fn remove(&self, rec: &Record) -> Result<()> {
+        self.invalidate();
         if let Some(id) = rec.id {
             if rec.kind == Kind::Album {
                 self.conn
@@ -234,7 +265,7 @@ impl Library {
         let t = table(kind);
         let mut stmt = self
             .conn
-            .prepare(&format!("SELECT * FROM {t} {where_sql}"))?;
+            .prepare_cached(&format!("SELECT * FROM {t} {where_sql}"))?;
         let cols = Self::columns(kind, &stmt)?;
         let mut recs: Vec<Record> = stmt
             .query_map(rusqlite::params_from_iter(args.iter()), |r| {
@@ -248,7 +279,7 @@ impl Library {
         let mut flex: HashMap<i64, BTreeMap<String, String>> = HashMap::new();
         let a = attr_table(kind);
         let mut stmt = if recs.len() == 1 {
-            let mut s = self.conn.prepare(&format!(
+            let mut s = self.conn.prepare_cached(&format!(
                 "SELECT entity_id, key, value FROM {a} WHERE entity_id=?"
             ))?;
             let rows = s.query_map([recs[0].id.unwrap()], |r| {
@@ -498,6 +529,22 @@ pub fn now() -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn memo_is_dropped_on_writes() {
+        let lib = Library::in_memory().unwrap();
+        let count = |lib: &Library| *lib.memo("n".into(), || lib.all_albums().unwrap().len());
+        assert_eq!(count(&lib), 0);
+        let mut album = lib.add_album(&mut [Record::new_item()]).unwrap();
+        assert_eq!(count(&lib), 1);
+        // A cached value stays until the next write.
+        assert_eq!(*lib.memo("n".into(), || 99usize), 1);
+        album.set_str("album", "x");
+        lib.store(&album).unwrap();
+        assert_eq!(*lib.memo("n".into(), || 99usize), 99);
+        lib.remove(&album).unwrap();
+        assert_eq!(count(&lib), 0);
+    }
 
     #[test]
     fn roundtrip() {

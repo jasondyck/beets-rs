@@ -10,7 +10,7 @@ use crate::model::{ALBUM_FIELDS, Album, ITEM_FIELDS, Item, Kind, Record, Value};
 use crate::paths::PathFormatter;
 use crate::plugins::{self, PluginCtx};
 use crate::query::Query;
-use crate::template::{Context, Template};
+use crate::template::Template;
 use crate::ui;
 use crate::{Cli, Cmd};
 use anyhow::{Context as _, Result, bail};
@@ -54,6 +54,10 @@ pub fn run(cli: Cli) -> Result<()> {
     }
     if let Some(p) = &cli.disable_plugins {
         cfg.set("disabled_plugins", csl(p));
+    }
+    if let Err(e) = crate::formatted::configure(&cfg) {
+        eprintln!("configuration error: {e:#}");
+        std::process::exit(1);
     }
     // As beets: `--version` runs the version command, and no command at
     // all shows the help.
@@ -349,13 +353,6 @@ pub fn run(cli: Cli) -> Result<()> {
     }
 }
 
-struct RecCtx<'a>(&'a Record);
-impl Context for RecCtx<'_> {
-    fn field(&self, name: &str) -> Option<String> {
-        self.0.formatted(name)
-    }
-}
-
 /// `beet help [COMMAND]`: the main help, or a command's (by name or alias),
 /// exactly as `beet COMMAND --help` shows it.
 fn help(command: Option<&str>) -> Result<()> {
@@ -396,8 +393,10 @@ fn version_lines(cfg: &Config) -> Result<Vec<String>> {
     ])
 }
 
-pub fn format_record(t: &Template, r: &Record) -> String {
-    t.render(&RecCtx(r))
+/// Evaluate a template for an item or album (beets' `evaluate_template`):
+/// with the library, an item's album fields and `%aunique` etc. work.
+pub fn format_record(t: &Template, r: &Record, lib: Option<&Library>) -> String {
+    t.render(&crate::formatted::Formatted::new(r, lib))
 }
 
 fn list(
@@ -427,12 +426,12 @@ fn list(
                     println!("{}", dir.display());
                 }
             } else {
-                println!("{}", format_record(&t, &a));
+                println!("{}", format_record(&t, &a, Some(lib)));
             }
         }
     } else {
         for i in lib.items(&query)? {
-            println!("{}", format_record(&t, &i));
+            println!("{}", format_record(&t, &i, Some(lib)));
         }
     }
     Ok(())
@@ -585,10 +584,10 @@ pub struct ModifyOpts {
 
 /// Apply `mods` and `dels` to a copy of `obj`: values are templates
 /// evaluated against the object, then parsed for the field's type.
-fn modified(obj: &Record, mods: &[Modification], dels: &[String]) -> Result<Record> {
+fn modified(lib: &Library, obj: &Record, mods: &[Modification], dels: &[String]) -> Result<Record> {
     let mut new = obj.clone();
     for m in mods {
-        let v = format_record(&Template::parse(&m.value), obj);
+        let v = format_record(&Template::parse(&m.value), obj, Some(lib));
         new.set_parsed(&m.field, &v)?;
     }
     for f in dels {
@@ -643,8 +642,8 @@ fn modify(cfg: &Config, lib: &Library, opts: ModifyOpts, args: &[String]) -> Res
     );
     let mut changed: Vec<(Record, Record)> = vec![];
     for obj in objs {
-        let new = modified(&obj, &mods, &dels)?;
-        if show_model_changes(&format_record(&t, &obj), &obj, &new) {
+        let new = modified(lib, &obj, &mods, &dels)?;
+        if show_model_changes(&format_record(&t, &obj, Some(lib)), &obj, &new) {
             changed.push((obj, new));
         }
     }
@@ -667,7 +666,7 @@ fn modify(cfg: &Config, lib: &Library, opts: ModifyOpts, args: &[String]) -> Res
             (false, false) => "",
         };
         ui::select_objects(&format!("Really modify{extra}"), &changed, |(old, new)| {
-            show_model_changes(&format_record(&t, old), old, new);
+            show_model_changes(&format_record(&t, old, Some(lib)), old, new);
         })
     };
 
@@ -781,10 +780,10 @@ fn remove(cfg: &Config, lib: &Library, opts: &RemoveOpts, q: &[String]) -> Resul
             if opts.album {
                 println!();
                 for i in lib.album_items(o.id.unwrap()).unwrap_or_default() {
-                    println!("{}", format_record(&t, &i));
+                    println!("{}", format_record(&t, &i, Some(lib)));
                 }
             } else {
-                println!("{}", format_record(&t, o));
+                println!("{}", format_record(&t, o, Some(lib)));
             }
         };
         for o in &objs {
@@ -1033,8 +1032,18 @@ fn move_cmd(cfg: &Config, lib: &Library, opts: &MoveOpts, q: &[String]) -> Resul
     } else {
         let mut items = lib.items(&Query::parse(Kind::Item, q)?)?;
         items.truncate(opts.limit.unwrap_or(usize::MAX));
+        // Each album is read once, not once per item.
+        let mut albums: HashMap<i64, Option<Album>> = HashMap::new();
         for i in items {
-            let album = lib.get_album(i.int("album_id"))?;
+            let album_id = i.int("album_id");
+            let album = match albums.get(&album_id) {
+                Some(a) => a.clone(),
+                None => {
+                    let a = lib.get_album(album_id)?;
+                    albums.insert(album_id, a.clone());
+                    a
+                }
+            };
             let d = item_destination(&fmt, lib, &i, album.as_ref());
             all.push(MoveObj {
                 album,
@@ -1280,7 +1289,7 @@ fn update(cfg: &Config, lib: &Library, opts: &UpdateOpts, q: &[String]) -> Resul
         for item in items {
             let path = item.path().to_path_buf();
             if path.as_os_str().is_empty() || !path.exists() {
-                println!("{}", format_record(&t, &item));
+                println!("{}", format_record(&t, &item, Some(lib)));
                 println!("{}", ui::colorize("text_error", "  deleted"));
                 if !pretend {
                     remove_item(cfg, lib, &item, true, true)?;
@@ -1318,7 +1327,7 @@ fn update(cfg: &Config, lib: &Library, opts: &UpdateOpts, q: &[String]) -> Resul
                 new.set_str("albumartist", item.str("albumartist"));
             }
             let changed = show_changes(
-                &format_record(&t, &item),
+                &format_record(&t, &item, Some(lib)),
                 &item,
                 &new,
                 Some(&item_fields),
@@ -1385,7 +1394,10 @@ fn update(cfg: &Config, lib: &Library, opts: &UpdateOpts, q: &[String]) -> Resul
                 debug!("moving album {id}");
                 for mut i in lib.album_items(id)? {
                     if let Err(e) = move_item(&fmt, lib, cfg, &mut i) {
-                        eprintln!("error moving album {}: {e:#}", format_record(&fa, &album));
+                        eprintln!(
+                            "error moving album {}: {e:#}",
+                            format_record(&fa, &album, Some(lib))
+                        );
                         break;
                     }
                     store_fields(lib, &i, &item_fields, false)?;
@@ -1438,7 +1450,7 @@ fn move_art(
             None => return Ok(false),
         },
     };
-    let dest = dir.join(art.file_name().unwrap_or_default());
+    let dest = crate::paths::art_destination(cfg, album, &art, &dir, Some(lib))?;
     if dest == art {
         return Ok(false);
     }
@@ -1550,7 +1562,7 @@ fn fetchart(cfg: &Config, lib: &Library, force: bool, q: &[String]) -> Result<()
     let t = Template::parse(&cfg.str("format_album"));
     for mut album in lib.albums(&Query::parse(Kind::Album, q)?)? {
         let items = lib.album_items(album.id.unwrap())?;
-        let label = format_record(&t, &album);
+        let label = format_record(&t, &album, Some(lib));
         match fa.fetch_for_album(&ctx, &mut album, &items, None, FileOp::Copy, force) {
             Ok(Some(p)) => println!("{label}: found art: {}", p.display()),
             Ok(None) if !force && album.path_field("artpath").is_file() => {
@@ -1613,7 +1625,10 @@ fn embedart(
                 };
                 if !album.path_field("artpath").is_file() {
                     let t = Template::parse(&cfg.str("format_album"));
-                    println!("{}: no album art file", format_record(&t, &album));
+                    println!(
+                        "{}: no album art file",
+                        format_record(&t, &album, Some(lib))
+                    );
                     continue;
                 }
                 n += ea.embed_album(&ctx, &mut album, &mut items)?;
@@ -1634,11 +1649,11 @@ fn extractart(
 ) -> Result<()> {
     require_plugin(cfg, "embedart")?;
     if associate {
-        let name = name.unwrap_or_else(|| cfg.str("fetchart.art_filename"));
+        let name = name.unwrap_or_else(|| cfg.str("art_filename"));
         let t = Template::parse(&cfg.str("format_album"));
         for mut album in lib.albums(&Query::parse(Kind::Album, q)?)? {
             let items = lib.album_items(album.id.unwrap())?;
-            let label = format_record(&t, &album);
+            let label = format_record(&t, &album, Some(lib));
             let found = items
                 .iter()
                 .find_map(|i| media::extract_art(i.path()).ok().flatten());
@@ -1713,10 +1728,14 @@ fn lyrics(cfg: &Config, lib: &Library, print: bool, force: bool, q: &[String]) -
     let t = Template::parse(&cfg.str("format_item"));
     for mut item in lib.items(&Query::parse(Kind::Item, q)?)? {
         if let Err(e) = ly.fetch_item(&ctx, &mut item, force) {
-            eprintln!("warning: {}: {e:#}", format_record(&t, &item));
+            eprintln!("warning: {}: {e:#}", format_record(&t, &item, Some(lib)));
         }
         if print && !item.str("lyrics").is_empty() {
-            println!("\n{}\n\n{}\n", format_record(&t, &item), item.str("lyrics"));
+            println!(
+                "\n{}\n\n{}\n",
+                format_record(&t, &item, Some(lib)),
+                item.str("lyrics")
+            );
         }
     }
     Ok(())
@@ -1753,7 +1772,7 @@ fn write(
             }
         };
         let changed = show_changes(
-            &format_record(&t, &clean),
+            &format_record(&t, &clean, Some(lib)),
             &clean,
             &item,
             Some(&tag_fields),

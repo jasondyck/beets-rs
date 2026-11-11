@@ -19,7 +19,7 @@ pub enum FieldType {
     Duration,
     /// Bits per second, formatted as "320kbps".
     Bitrate,
-    /// Hertz, formatted as "44.1kHz".
+    /// Hertz, formatted as "44kHz".
     SampleRate,
     /// Unix timestamp, formatted with `time_format`.
     Date,
@@ -108,13 +108,10 @@ pub fn parse_bool(s: &str) -> Option<bool> {
     }
 }
 
+/// beets' `human_seconds_short`: whole seconds as M:SS (minutes unbounded).
 pub fn format_duration(secs: f64) -> String {
-    let secs = secs.max(0.0).round() as i64;
-    if secs >= 3600 {
-        format!("{}:{:02}:{:02}", secs / 3600, secs / 60 % 60, secs % 60)
-    } else {
-        format!("{}:{:02}", secs / 60, secs % 60)
-    }
+    let secs = secs as i64;
+    format!("{}:{:02}", secs.div_euclid(60), secs.rem_euclid(60))
 }
 
 pub const TIME_FORMAT: &str = "%Y-%m-%d %H:%M:%S";
@@ -183,15 +180,9 @@ impl Value {
             Some(FieldType::Float) => format!("{num:.1}"),
             Some(FieldType::Bool) => if num != 0.0 { "True" } else { "False" }.into(),
             Some(FieldType::Duration) => format_duration(num),
-            Some(FieldType::Bitrate) => format!("{}kbps", (num / 1000.0).round() as i64),
-            Some(FieldType::SampleRate) => {
-                let khz = num / 1000.0;
-                if khz.fract() == 0.0 {
-                    format!("{khz}kHz")
-                } else {
-                    format!("{khz:.1}kHz")
-                }
-            }
+            // beets' `ScaledInt`: integer division and a suffix.
+            Some(FieldType::Bitrate) => format!("{}kbps", (num as i64).div_euclid(1000)),
+            Some(FieldType::SampleRate) => format!("{}kHz", (num as i64).div_euclid(1000)),
             Some(FieldType::Date) => format_datetime(num),
             _ => self.raw(),
         }
@@ -389,6 +380,10 @@ impl Record {
         } else {
             self.field_type(name)
         };
+        // A singleton's `album_id` is null (beets' `FOREIGN_ID`).
+        if self.kind == Kind::Item && name == "album_id" && self.int("album_id") == 0 {
+            return Some(String::new());
+        }
         self.get(name).map(|v| v.format(ty))
     }
 
@@ -521,7 +516,7 @@ mod tests {
         assert_eq!(it.formatted("year").unwrap(), "1999");
         assert_eq!(it.formatted("length").unwrap(), "3:05");
         assert_eq!(it.formatted("bitrate").unwrap(), "320kbps");
-        assert_eq!(it.formatted("samplerate").unwrap(), "44.1kHz");
+        assert_eq!(it.formatted("samplerate").unwrap(), "44kHz");
         assert_eq!(it.formatted("comp").unwrap(), "False");
         assert_eq!(it.formatted("singleton").unwrap(), "True");
     }

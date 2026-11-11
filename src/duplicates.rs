@@ -228,7 +228,7 @@ pub fn report(
         lines.extend(
             items
                 .iter()
-                .map(|i| format!("  {}", crate::commands::format_record(fmt, i))),
+                .map(|i| format!("  {}", crate::commands::format_record(fmt, i, None))),
         );
     }
     lines

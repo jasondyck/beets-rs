@@ -6,6 +6,7 @@ use crate::config::Config;
 use crate::display::Display;
 use crate::duplicates::{self, DuplicateAction, Found, KeyValues};
 use crate::fileops::{self, FileOp, Globs, WalkFilter, prune_dirs};
+use crate::formatted::Formatted;
 use crate::library::{Library, now};
 use crate::mb::MusicBrainz;
 use crate::media;
@@ -13,7 +14,7 @@ use crate::model::{Album, Item, Value};
 use crate::paths::PathFormatter;
 use crate::plugins::{self, Plugin, PluginCtx};
 use crate::state::ImportState;
-use crate::template::{self, Template};
+use crate::template::Template;
 use crate::ui::{self, Choice};
 use anyhow::{Context, Result, bail};
 use regex::Regex;
@@ -178,23 +179,6 @@ pub fn parse_set_field(kv: &str) -> Result<(&str, &str)> {
     match kv.split_once('=') {
         Some((k, v)) if !k.is_empty() && !v.is_empty() => Ok((k, v)),
         _ => bail!("supplied argument `{kv}' is not of the form `key=value'"),
-    }
-}
-
-/// Template context for `set_fields`: the record's own fields, then (for
-/// an item) its album's.
-struct SetCtx<'a> {
-    rec: &'a Item,
-    album: Option<&'a Album>,
-}
-
-impl template::Context for SetCtx<'_> {
-    fn field(&self, name: &str) -> Option<String> {
-        if self.rec.has_field(name) {
-            self.rec.formatted(name)
-        } else {
-            self.album.and_then(|a| a.formatted(name))
-        }
     }
 }
 
@@ -1455,17 +1439,11 @@ impl<'a> Importer<'a> {
         for (field, value) in &self.opts.set_fields {
             let t = Template::parse(value);
             if let Some(a) = album.as_deref_mut() {
-                let v = t.render(&SetCtx {
-                    rec: a,
-                    album: None,
-                });
+                let v = t.render(&Formatted::new(a, Some(self.lib)));
                 set(a, field, v);
             }
             for item in items.iter_mut() {
-                let v = t.render(&SetCtx {
-                    rec: item,
-                    album: album.as_deref(),
-                });
+                let v = t.render(&Formatted::new(item, Some(self.lib)).album(album.as_deref()));
                 set(item, field, v);
             }
         }
@@ -1618,7 +1596,7 @@ impl<'a> Importer<'a> {
                 if self.opts.from_scratch {
                     clear_tags(&mut item);
                 }
-                autotag::apply_track(&mut item, &m.info);
+                autotag::apply_track(self.cfg, &mut item, &m.info);
                 true
             }
             Decision::Tracks | Decision::Group => unreachable!("not offered for tracks"),
@@ -1657,8 +1635,11 @@ impl<'a> Importer<'a> {
             self.reimport_metadata(None, std::slice::from_mut(&mut item), &replaced);
             self.apply_set_fields(None, std::slice::from_mut(&mut item));
             let op = self.file_op(&item, !replaced.items[0].is_empty());
-            let copied = self.place_and_write(&mut item, None, tagged, op)?;
+            // As beets: added before its files are placed, so the path
+            // format sees the item's id (`%sunique`).
             lib.add(&mut item)?;
+            let copied = self.place_and_write(&mut item, None, tagged, op)?;
+            lib.store(&item)?;
             Ok(copied)
         })?;
         let ctx = self.plugin_ctx();
@@ -2810,7 +2791,7 @@ mod tests {
             artist: "New Artist".into(),
             ..Default::default()
         };
-        autotag::apply_track(&mut item, &t);
+        autotag::apply_track(&Config::defaults(), &mut item, &t);
         assert_eq!(item.str("title"), "New Title");
         assert_eq!(item.str("genre"), "");
         assert_eq!(item.str("comments"), "");

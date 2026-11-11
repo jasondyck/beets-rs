@@ -53,15 +53,20 @@ paths:
     singleton: Non-Album/$artist/$title
     comp: Compilations/$album%aunique{}/$track $title
 
+path_sep_replace: _
+empty_component_replace:
+drive_sep_replace: _
+art_filename: cover
 replace:
+    '[<>:\?\*\|]': _
+    '\"': _
     '[\\/]': _
     '^\.': _
-    '[\x00-\x1f]': ''
-    '[<>:"\?\*\|]': _
     '\.$': _
+    '[\x00-\x1f]': _
+    '^-': _
     '\s+$': ''
     '^\s+': ''
-    '^-': _
 
 asciify_paths: no
 max_filename_length: 0
@@ -78,6 +83,20 @@ aunique:
     keys: albumartist album
     disambiguators: albumtype year label catalognum albumdisambig releasegroupdisambig
     bracket: '[]'
+
+sunique:
+    keys: artist title
+    disambiguators: year trackdisambig
+    bracket: '[]'
+
+tunique:
+    keys: title
+    disambiguators: disc track artist
+    bracket: '[]'
+
+overwrite_null:
+    album: []
+    track: []
 
 match:
     strong_rec_thresh: 0.04
@@ -144,7 +163,6 @@ fetchart:
     auto: yes
     sources: filesystem coverart
     cover_names: cover front art album folder
-    art_filename: cover
     maxwidth: 0
 
 embedart:
@@ -343,6 +361,14 @@ impl Config {
 
     /// Put a source over everything read so far.
     fn layer(&mut self, y: Y, from: PathBuf) {
+        // beets reads `replace` with `get(dict)`, which takes the
+        // highest-priority mapping whole: a user's `replace:` replaces the
+        // default rules rather than adding to them.
+        if let (Y::Mapping(root), Some(r)) = (&mut self.root, y.get("replace"))
+            && r.is_mapping()
+        {
+            root.remove("replace");
+        }
         self.root = merge(std::mem::take(&mut self.root), y.clone());
         self.user = merge_in_order(std::mem::take(&mut self.user), y);
         self.sources.insert(0, from);
@@ -357,7 +383,6 @@ impl Config {
         Ok(cfg)
     }
 
-    #[cfg(test)]
     pub fn defaults() -> Config {
         Config {
             root: serde_yaml::from_str(DEFAULT_CONFIG).unwrap(),

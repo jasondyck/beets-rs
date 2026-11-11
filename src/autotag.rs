@@ -509,19 +509,51 @@ pub fn item_candidates(
 
 // ------------------------------------------------------------- applying
 
-pub fn apply_track(item: &mut Item, t: &TrackInfo) {
-    item.set_str("title", &t.title);
-    item.set_str("artist", &t.artist);
-    item.set_str("artist_sort", &t.artist_sort);
-    item.set_str("artist_credit", &t.artist_credit);
-    item.set_str("mb_trackid", &t.track_id);
-    item.set_str("mb_artistid", &t.artist_id);
-    if !t.release_track_id.is_empty() {
-        item.set_str("mb_releasetrackid", &t.release_track_id);
+/// beets' `overwrite_null`: which fields a match may clear. A value the
+/// match doesn't have (empty, or 0) leaves the item's value alone unless
+/// its field is listed, by the match's name for it (`album_id`, `year`)
+/// or the item's (`mb_albumid`).
+struct Setter<'a> {
+    item: &'a mut Item,
+    nullable: &'a [String],
+}
+
+impl Setter<'_> {
+    fn may_clear(&self, key: &str, field: &str) -> bool {
+        self.nullable.iter().any(|n| n == key || n == field)
     }
-    if !t.isrc.is_empty() {
-        item.set_str("isrc", &t.isrc);
+
+    fn str(&mut self, key: &str, field: &str, v: &str) {
+        if !v.is_empty() || self.may_clear(key, field) {
+            self.item.set_str(field, v);
+        }
     }
+
+    fn int(&mut self, key: &str, field: &str, v: i64) {
+        if v != 0 || self.may_clear(key, field) {
+            self.item.set_int(field, v);
+        }
+    }
+}
+
+fn overwrite_null(cfg: &Config, kind: &str) -> Vec<String> {
+    cfg.list(&format!("overwrite_null.{kind}"))
+}
+
+pub fn apply_track(cfg: &Config, item: &mut Item, t: &TrackInfo) {
+    let nullable = overwrite_null(cfg, "track");
+    let mut s = Setter {
+        item,
+        nullable: &nullable,
+    };
+    s.str("title", "title", &t.title);
+    s.str("artist", "artist", &t.artist);
+    s.str("artist_sort", "artist_sort", &t.artist_sort);
+    s.str("artist_credit", "artist_credit", &t.artist_credit);
+    s.str("track_id", "mb_trackid", &t.track_id);
+    s.str("artist_id", "mb_artistid", &t.artist_id);
+    s.str("release_track_id", "mb_releasetrackid", &t.release_track_id);
+    s.str("isrc", "isrc", &t.isrc);
     item.set_str("data_source", "MusicBrainz");
 }
 
@@ -530,51 +562,66 @@ pub fn apply_album(cfg: &Config, items: &mut [Item], m: &AlbumMatch) {
     let per_disc = cfg.bool("per_disc_numbering");
     let original_date = cfg.bool("original_date");
     let va_name = cfg.str("va_name");
+    let album_null = overwrite_null(cfg, "album");
+    let track_null = overwrite_null(cfg, "track");
     for &(i, t) in &m.mapping {
         let track = &info.tracks[t];
         let item = &mut items[i];
-        apply_track(item, track);
-        if track.artist.is_empty() {
-            item.set_str("artist", &info.artist);
-            item.set_str("artist_sort", &info.artist_sort);
-            item.set_str("artist_credit", &info.artist_credit);
-            item.set_str("mb_artistid", &info.artist_id);
+        apply_track(cfg, item, track);
+        {
+            // A track without its own artist gets the album's.
+            let mut s = Setter {
+                item,
+                nullable: &track_null,
+            };
+            if track.artist.is_empty() {
+                s.str("artist", "artist", &info.artist);
+                s.str("artist_sort", "artist_sort", &info.artist_sort);
+                s.str("artist_credit", "artist_credit", &info.artist_credit);
+                s.str("artist_id", "mb_artistid", &info.artist_id);
+            }
+            s.str("disctitle", "disctitle", &track.disctitle);
+            s.str("media", "media", &track.media);
         }
-        item.set_str("album", &info.album);
+        let mut s = Setter {
+            item,
+            nullable: &album_null,
+        };
+        s.str("album", "album", &info.album);
         let albumartist = if info.va && !va_name.is_empty() {
             va_name.as_str()
         } else {
             info.artist.as_str()
         };
-        item.set_str("albumartist", albumartist);
-        item.set_str("albumartist_sort", &info.artist_sort);
-        item.set_str("albumartist_credit", &info.artist_credit);
-        item.set_str("mb_albumid", &info.album_id);
-        item.set_str("mb_albumartistid", &info.artist_id);
-        item.set_str("mb_releasegroupid", &info.releasegroup_id);
+        s.str("artist", "albumartist", albumartist);
+        s.str("artist_sort", "albumartist_sort", &info.artist_sort);
+        s.str("artist_credit", "albumartist_credit", &info.artist_credit);
+        s.str("album_id", "mb_albumid", &info.album_id);
+        s.str("artist_id", "mb_albumartistid", &info.artist_id);
+        s.str(
+            "releasegroup_id",
+            "mb_releasegroupid",
+            &info.releasegroup_id,
+        );
         let (y, mo, d) = if original_date && info.original_year > 0 {
             (info.original_year, info.original_month, info.original_day)
         } else {
             (info.year, info.month, info.day)
         };
-        item.set_int("year", y);
-        item.set_int("month", mo);
-        item.set_int("day", d);
-        item.set_int("original_year", info.original_year);
-        item.set_int("original_month", info.original_month);
-        item.set_int("original_day", info.original_day);
-        if per_disc {
-            item.set_int("track", track.medium_index as i64);
-            item.set_int("tracktotal", track.medium_total as i64);
+        if y != 0 {
+            // As beets: with a year, a missing month and day are 0.
+            for (f, v) in [("year", y), ("month", mo), ("day", d)] {
+                s.item.set_int(f, v);
+            }
         } else {
-            item.set_int("track", track.index as i64);
-            item.set_int("tracktotal", info.tracks.len() as i64);
+            s.int("year", "year", y);
+            s.int("month", "month", mo);
+            s.int("day", "day", d);
         }
-        item.set_int("disc", track.medium as i64);
-        item.set_int("disctotal", info.mediums as i64);
-        item.set_str("disctitle", &track.disctitle);
-        item.set_str("media", &track.media);
-        item.set("comp", Value::Bool(info.va));
+        s.int("original_year", "original_year", info.original_year);
+        s.int("original_month", "original_month", info.original_month);
+        s.int("original_day", "original_day", info.original_day);
+        s.int("mediums", "disctotal", info.mediums as i64);
         for (f, v) in [
             ("albumtype", &info.albumtype),
             ("albumstatus", &info.albumstatus),
@@ -584,8 +631,18 @@ pub fn apply_album(cfg: &Config, items: &mut [Item], m: &AlbumMatch) {
             ("albumdisambig", &info.albumdisambig),
             ("releasegroupdisambig", &info.releasegroupdisambig),
         ] {
-            item.set_str(f, v);
+            s.str(f, f, v);
         }
+        let item = s.item;
+        if per_disc {
+            item.set_int("track", track.medium_index as i64);
+            item.set_int("tracktotal", track.medium_total as i64);
+        } else {
+            item.set_int("track", track.index as i64);
+            item.set_int("tracktotal", info.tracks.len() as i64);
+        }
+        item.set_int("disc", track.medium as i64);
+        item.set("comp", Value::Bool(info.va));
     }
 }
 
@@ -662,6 +719,42 @@ mod tests {
         assert_eq!(items[0].str("mb_trackid"), "rec3");
         assert_eq!(items[0].int("year"), 2000);
         assert_eq!(items[0].str("albumartist"), "Band");
+    }
+
+    #[test]
+    fn overwrite_null() {
+        let mut it = item("Alpha", 1, 200.0);
+        it.set_str("label", "Old Label");
+        it.set_int("original_year", 1990);
+        it.set_str("isrc", "OLD");
+        let mut items = vec![it];
+        let m = AlbumMatch {
+            distance: Default::default(),
+            info: info(),
+            mapping: vec![(0, 0)],
+            extra_items: vec![],
+            extra_tracks: vec![],
+        };
+        // Missing values leave existing ones alone by default...
+        let cfg = Config::defaults();
+        apply_album(&cfg, &mut items, &m);
+        assert_eq!(items[0].str("label"), "Old Label");
+        assert_eq!(items[0].int("original_year"), 1990);
+        assert_eq!(items[0].str("isrc"), "OLD");
+        assert_eq!(items[0].int("year"), 2000);
+        // ... and clear them when listed (by the match's name or the item's).
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("config.yaml");
+        std::fs::write(
+            &file,
+            "overwrite_null:\n  album: [label, original_year]\n  track: [isrc]\n",
+        )
+        .unwrap();
+        let cfg = Config::load_file(&file).unwrap();
+        apply_album(&cfg, &mut items, &m);
+        assert_eq!(items[0].str("label"), "");
+        assert_eq!(items[0].int("original_year"), 0);
+        assert_eq!(items[0].str("isrc"), "");
     }
 
     #[test]

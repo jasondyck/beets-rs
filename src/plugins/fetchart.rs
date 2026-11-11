@@ -16,7 +16,6 @@ pub struct FetchArt {
     auto: bool,
     sources: Vec<String>,
     cover_names: Vec<String>,
-    art_filename: String,
     maxwidth: u32,
     agent: ureq::Agent,
 }
@@ -82,7 +81,6 @@ impl FetchArt {
                 .into_iter()
                 .map(|s| s.to_lowercase())
                 .collect(),
-            art_filename: cfg.str("fetchart.art_filename"),
             maxwidth: cfg.f64("fetchart.maxwidth").max(0.0) as u32,
             agent: http_agent(),
         }
@@ -210,7 +208,13 @@ impl FetchArt {
                     .extension()
                     .map(|e| e.to_string_lossy().to_lowercase())
                     .unwrap_or_else(|| "jpg".into());
-                let dest = dest_dir.join(format!("{}.{ext}", self.art_filename));
+                let dest = crate::paths::art_destination(
+                    ctx.cfg,
+                    album,
+                    Path::new(&format!("x.{ext}")),
+                    &dest_dir,
+                    Some(ctx.lib),
+                )?;
                 if src != dest {
                     match op {
                         FileOp::Move => crate::fileops::move_file(&src, &dest)?,
@@ -220,7 +224,13 @@ impl FetchArt {
                 dest
             }
             Found::Download { bytes, ext } => {
-                let dest = dest_dir.join(format!("{}.{ext}", self.art_filename));
+                let dest = crate::paths::art_destination(
+                    ctx.cfg,
+                    album,
+                    Path::new(&format!("x.{ext}")),
+                    &dest_dir,
+                    Some(ctx.lib),
+                )?;
                 std::fs::write(&dest, bytes)
                     .with_context(|| format!("writing {}", dest.display()))?;
                 dest

@@ -5,6 +5,7 @@ mod diff;
 mod display;
 mod duplicates;
 mod fileops;
+mod formatted;
 mod importer;
 mod layout;
 mod library;
@@ -326,7 +327,7 @@ pub enum Cmd {
         /// Output path without extension (default: ./cover)
         #[arg(short = 'o', long)]
         output: Option<PathBuf>,
-        /// Base name for files written next to albums with -a (default: fetchart.art_filename)
+        /// Base name for files written next to albums with -a (default: art_filename)
         #[arg(short = 'n', long)]
         name: Option<String>,
         /// Extract each matching album's art into its folder and set it as the album art
