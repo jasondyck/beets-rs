@@ -221,7 +221,11 @@ impl Display {
             &m.info.artist,
             &m.info.title,
             &self.track_disambig(&m.info),
-            &format!("https://musicbrainz.org/recording/{}", m.info.track_id),
+            &if m.info.track_id.is_empty() {
+                String::new()
+            } else {
+                format!("https://musicbrainz.org/recording/{}", m.info.track_id)
+            },
         );
         self.show_match_details(
             item.str("artist"),
@@ -562,6 +566,64 @@ mod tests {
             d.take()
                 .contains(&"     * (#1) Song One (3:00)".to_string())
         );
+    }
+
+    #[test]
+    fn track_change_as_beets() {
+        let cfg = Config::defaults();
+        let mut d = Display::new(&cfg);
+        d.width = 80;
+        let mut it = item("Song 1", 1, 180.0);
+        it.set_str("artist", "The Band");
+        let info = TrackInfo {
+            track_id: "rec1".into(),
+            artist: "The Band".into(),
+            album: "The Album".into(),
+            ..track("Song One", 0, 181.0)
+        };
+        let mut dist = Distance::new(&cfg);
+        dist.add("track_title", 0.3);
+        let m = TrackMatch {
+            distance: dist,
+            info,
+        };
+        d.show_track_change(&it, &m);
+        let pct = format!("{:.1}%", (1.0 - m.distance.distance()) * 100.0);
+        assert_eq!(
+            d.take(),
+            [
+                String::new(),
+                format!("  Match ({pct}):"),
+                "  The Band - Song One".into(),
+                "  \u{2260} title".into(),
+                "  MusicBrainz, [The Album]".into(),
+                "  https://musicbrainz.org/recording/rec1".into(),
+                "  * Artist: The Band".into(),
+                "  \u{2260} Track: Song 1 -> Song One".into(),
+            ]
+        );
+
+        // A changed artist and an unchanged title; no URL without an ID.
+        it.set_str("artist", "Band");
+        it.set_str("title", "Song One");
+        let m = TrackMatch {
+            info: TrackInfo {
+                track_id: String::new(),
+                ..m.info
+            },
+            ..m
+        };
+        d.show_track_change(&it, &m);
+        let out = d.take();
+        assert!(
+            !out.iter().any(|l| l.contains("musicbrainz.org")),
+            "{out:?}"
+        );
+        assert!(
+            out.contains(&"  \u{2260} Artist: Band -> The Band".to_string()),
+            "{out:?}"
+        );
+        assert!(out.contains(&"  * Track: Song One".to_string()), "{out:?}");
     }
 
     #[test]

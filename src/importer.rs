@@ -283,6 +283,20 @@ const ALBUM_CONFIRM: [&str; 9] = [
     "aBort",
 ];
 
+/// The track prompt's choices (`_get_choices` for a singleton task).
+const ITEM_CHOICES: [&str; 5] = ["Skip", "Use as-is", "Enter search", "enter Id", "aBort"];
+
+/// Confirming one track candidate.
+const ITEM_CONFIRM: [&str; 7] = [
+    "Apply",
+    "More candidates",
+    "Skip",
+    "Use as-is",
+    "Enter search",
+    "enter Id",
+    "aBort",
+];
+
 /// beets' `group_albums` stage: split items into albums keyed by
 /// (albumartist, or artist when that's empty; album), in key order. Items
 /// keep their relative order within a group.
@@ -385,6 +399,25 @@ pub fn group_files(root: &Path, filter: &WalkFilter) -> Result<Vec<(PathBuf, Vec
         groups.entry(key).or_default().extend(files.iter().cloned());
     }
     Ok(groups.into_iter().collect())
+}
+
+/// The paths of the album task for the group `key` holding `files`, as
+/// beets' `albums_in_dir` yields them: the directory alone, or for discs
+/// merged into their parent, the parent followed by each disc directory.
+fn task_paths(key: &Path, files: &[PathBuf]) -> Vec<PathBuf> {
+    let mut paths = vec![key.to_path_buf()];
+    for f in files {
+        if let Some(d) = f.parent()
+            && d != key
+            && !paths.iter().any(|p| p == d)
+        {
+            paths.push(d.to_path_buf());
+        }
+    }
+    if key.is_file() {
+        paths.truncate(1);
+    }
+    paths
 }
 
 impl<'a> Importer<'a> {
@@ -701,7 +734,12 @@ impl<'a> Importer<'a> {
         if self.opts.group_albums {
             self.import_groups(items, &dir)
         } else {
-            self.import_album_items(items, &dir, &[key.to_path_buf()])
+            let paths = if self.opts.flat {
+                vec![key.to_path_buf()]
+            } else {
+                task_paths(key, files)
+            };
+            self.import_album_items(items, &dir, &paths)
         }
     }
 
@@ -740,10 +778,12 @@ impl<'a> Importer<'a> {
         dir: &Path,
         paths: &[PathBuf],
     ) -> Result<Outcome> {
+        // As beets: the task's paths, one per line.
+        let shown: Vec<String> = paths.iter().map(|p| p.display().to_string()).collect();
         println!();
         println!(
             "{} {}",
-            ui::colorize("import_path", &dir.display().to_string()),
+            ui::colorize("import_path", &shown.join("\n")),
             ui::colorize("import_path_items", &format!("({} items)", items.len()))
         );
 
@@ -1533,49 +1573,49 @@ impl<'a> Importer<'a> {
         if let Some(d) = self.summary_judgment(rec) {
             return Ok(d);
         }
+        // The same dance as `choose_album` (beets' `choose_candidate`
+        // serves both): `fresh` after a lookup, `focus` while confirming.
+        let mut fresh = true;
+        let mut focus: Option<(usize, bool)> = None;
         loop {
-            if !cands.is_empty() && rec == Recommendation::Strong && !self.opts.timid {
-                let m = cands.swap_remove(0);
-                disp.show_track_change(item, &m);
-                disp.flush();
-                return Ok(Decision::Apply(Box::new(m)));
-            }
-            if cands.is_empty() {
-                println!("No matching recordings found.");
-            } else {
-                println!();
-                println!(
-                    "Finding tags for track \"{} - {}\".",
-                    item.str("artist"),
-                    item.str("title")
-                );
-                println!("  Candidates:");
-            }
-            for (n, m) in cands.iter().enumerate() {
-                for line in disp.candidate_lines(
-                    n + 1,
-                    &m.distance,
-                    &m.info.artist,
-                    &m.info.title,
-                    &disp.track_disambig(&m.info),
-                ) {
-                    println!("{line}");
+            if fresh {
+                fresh = false;
+                if !cands.is_empty() && rec == Recommendation::Strong && !self.opts.timid {
+                    let m = cands.swap_remove(0);
+                    disp.show_track_change(item, &m);
+                    disp.flush();
+                    return Ok(Decision::Apply(Box::new(m)));
                 }
+                focus = (!cands.is_empty() && rec != Recommendation::None)
+                    .then_some((0, rec > Recommendation::Low));
             }
-            self.bell();
-            let numbers = if cands.is_empty() {
-                None
+
+            let choice = if let Some((k, default_apply)) = focus {
+                disp.show_track_change(item, &cands[k]);
+                disp.flush();
+                self.bell();
+                match ui::options(
+                    &ITEM_CONFIRM,
+                    None,
+                    default_apply.then_some(Choice::Letter('a')),
+                ) {
+                    Some(Choice::Letter('a')) => {
+                        return Ok(Decision::Apply(Box::new(cands.swap_remove(k))));
+                    }
+                    Some(Choice::Letter('m')) => {
+                        focus = None;
+                        continue;
+                    }
+                    other => other,
+                }
             } else {
-                Some(cands.len())
+                self.pick_item_candidate(&disp, item, &cands)
             };
-            match ui::options(
-                &["Skip", "Use as-is", "Enter search", "enter Id", "aBort"],
-                numbers,
-                Some(numbers.map_or(Choice::Letter('s'), |_| Choice::Number(1))),
-            ) {
+
+            match choice {
                 None | Some(Choice::Letter('b')) => return Ok(Decision::Abort),
                 Some(Choice::Number(n)) => {
-                    return Ok(Decision::Apply(Box::new(cands.swap_remove(n - 1))));
+                    focus = Some((n - 1, n == 1 && rec > Recommendation::Low));
                 }
                 Some(Choice::Letter('s')) => return Ok(Decision::Skip),
                 Some(Choice::Letter('u')) => return Ok(Decision::AsIs),
@@ -1589,15 +1629,50 @@ impl<'a> Importer<'a> {
                         Some((&artist, &title)),
                         &[],
                     )?;
+                    fresh = true;
                 }
                 Some(Choice::Letter('i')) => {
                     let id = ui::read_line("Enter recording ID: ").unwrap_or_default();
                     (cands, rec) = autotag::item_candidates(self.cfg, &self.mb, item, None, &[id])?;
                     rec = rec.min(Recommendation::Medium);
+                    fresh = true;
                 }
                 _ => {}
             }
         }
+    }
+
+    /// beets' candidate list for a track ("Finding tags for track ...") and
+    /// prompt; with no candidates, just the prompt.
+    fn pick_item_candidate(
+        &self,
+        disp: &Display,
+        item: &Item,
+        cands: &[TrackMatch],
+    ) -> Option<Choice> {
+        if cands.is_empty() {
+            println!("No matching recordings found.");
+            return ui::options(&ITEM_CHOICES, None, Some(Choice::Letter('s')));
+        }
+        println!();
+        println!(
+            "Finding tags for track \"{} - {}\".",
+            item.str("artist"),
+            item.str("title")
+        );
+        println!("  Candidates:");
+        for (n, m) in cands.iter().enumerate() {
+            for line in disp.candidate_lines(
+                n + 1,
+                &m.distance,
+                &m.info.artist,
+                &m.info.title,
+                &disp.track_disambig(&m.info),
+            ) {
+                println!("{line}");
+            }
+        }
+        ui::options(&ITEM_CHOICES, Some(cands.len()), Some(Choice::Number(1)))
     }
 }
 
@@ -1623,8 +1698,24 @@ mod tests {
         let groups = group_files(d.path(), &WalkFilter::default()).unwrap();
         let sizes: Vec<usize> = groups.iter().map(|(_, g)| g.len()).collect();
         assert_eq!(sizes, vec![2, 2, 1, 1]);
-        let keys: Vec<PathBuf> = groups.into_iter().map(|(k, _)| k).collect();
+        let keys: Vec<PathBuf> = groups.iter().map(|(k, _)| k.clone()).collect();
         assert_eq!(keys[1], d.path().join("B"));
+
+        // The task's paths, shown in the import header: the parent then
+        // each disc directory for a merged album, else the directory.
+        let (key, files) = &groups[1];
+        let b = d.path().join("B");
+        assert_eq!(
+            task_paths(key, files),
+            vec![b.clone(), b.join("CD1"), b.join("CD2")]
+        );
+        let (key, files) = &groups[0];
+        assert_eq!(task_paths(key, files), vec![d.path().join("A")]);
+        let one = d.path().join("A/01.mp3");
+        assert_eq!(
+            task_paths(&one, std::slice::from_ref(&one)),
+            vec![one.clone()]
+        );
     }
 
     #[test]
