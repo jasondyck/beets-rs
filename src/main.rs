@@ -12,6 +12,7 @@ mod library;
 mod logging;
 mod mb;
 mod media;
+mod mediafile;
 mod model;
 mod paths;
 mod plugins;

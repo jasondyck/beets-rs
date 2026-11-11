@@ -24,6 +24,13 @@ pub enum FieldType {
     /// Unix timestamp, formatted with `time_format`.
     Date,
     Path,
+    /// A list of strings (beets' `DelimitedString`), stored joined with
+    /// the given delimiter and formatted joined with "; ".
+    List(&'static str),
+    /// beets' `NullFloat`: a float that may be null (unset).
+    NullFloat,
+    /// beets' `MusicalKey`: a nullable string, normalized ("Ebm" is "D#m").
+    MusicalKey,
 }
 
 impl FieldType {
@@ -33,6 +40,7 @@ impl FieldType {
             FieldType::Int
                 | FieldType::Padded(_)
                 | FieldType::Float
+                | FieldType::NullFloat
                 | FieldType::Duration
                 | FieldType::Bitrate
                 | FieldType::SampleRate
@@ -41,16 +49,19 @@ impl FieldType {
 
     pub fn sql_type(self) -> &'static str {
         match self {
-            FieldType::Str => "TEXT",
+            FieldType::Str | FieldType::List(_) | FieldType::MusicalKey => "TEXT",
             FieldType::Path => "BLOB",
-            FieldType::Float | FieldType::Duration | FieldType::Date => "REAL",
+            FieldType::Float | FieldType::NullFloat | FieldType::Duration | FieldType::Date => {
+                "REAL"
+            }
             _ => "INTEGER",
         }
     }
 
     pub fn default_value(self) -> Value {
         match self {
-            FieldType::Str => Value::Str(String::new()),
+            FieldType::Str | FieldType::List(_) => Value::Str(String::new()),
+            FieldType::NullFloat | FieldType::MusicalKey => Value::Null,
             FieldType::Path => Value::Path(PathBuf::new()),
             FieldType::Bool => Value::Bool(false),
             FieldType::Float | FieldType::Duration | FieldType::Date => Value::Float(0.0),
@@ -66,6 +77,9 @@ impl FieldType {
         let float = || s.trim().parse::<f64>().unwrap_or(0.0);
         match self {
             FieldType::Str => Value::Str(s.to_string()),
+            FieldType::List(d) => Value::Str(join_list(&split_list(s, d), d)),
+            FieldType::NullFloat => s.trim().parse().map_or(Value::Null, Value::Float),
+            FieldType::MusicalKey => Value::Str(normalize_key(s)),
             FieldType::Path => Value::Path(PathBuf::from(s)),
             // beets' `str2bool`.
             FieldType::Bool => Value::Bool(matches!(
@@ -143,6 +157,8 @@ pub fn format_datetime(ts: f64) -> String {
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Value {
+    /// SQL NULL / Python None (nullable types only).
+    Null,
     Str(String),
     Int(i64),
     Float(f64),
@@ -157,13 +173,14 @@ impl Value {
             Value::Float(f) => Some(*f),
             Value::Bool(b) => Some(*b as i64 as f64),
             Value::Str(s) => s.trim().parse().ok(),
-            Value::Path(_) => None,
+            Value::Path(_) | Value::Null => None,
         }
     }
 
     /// Plain string form with no type-specific formatting.
     pub fn raw(&self) -> String {
         match self {
+            Value::Null => String::new(),
             Value::Str(s) => s.clone(),
             Value::Int(i) => i.to_string(),
             Value::Float(f) => f.to_string(),
@@ -177,7 +194,8 @@ impl Value {
         let num = self.as_f64().unwrap_or(0.0);
         match ty {
             Some(FieldType::Padded(w)) => format!("{:0w$}", num as i64, w = w),
-            Some(FieldType::Float) => format!("{num:.1}"),
+            Some(FieldType::Float | FieldType::NullFloat) => format!("{num:.1}"),
+            Some(FieldType::List(d)) => split_list(&self.raw(), d).join(SEMI),
             Some(FieldType::Bool) => if num != 0.0 { "True" } else { "False" }.into(),
             Some(FieldType::Duration) => format_duration(num),
             // beets' `ScaledInt`: integer division and a suffix.
@@ -197,20 +215,40 @@ pub enum Kind {
 
 use FieldType::*;
 
+/// beets' `MULTI_VALUE_DELIMITER`: how multi-valued fields are joined in
+/// the database.
+pub const MULTI: &str = "\\\u{2400}";
+/// beets' `SEMICOLON_SPACE_DSV` delimiter (`albumtypes`), also the one
+/// lists are formatted and parsed with.
+pub const SEMI: &str = "; ";
+const MV: FieldType = List(MULTI);
+
 pub const ITEM_FIELDS: &[(&str, FieldType)] = &[
     ("path", Path),
     ("album_id", Int),
     ("title", Str),
     ("artist", Str),
+    ("artists", MV),
     ("artist_sort", Str),
+    ("artists_sort", MV),
     ("artist_credit", Str),
+    ("artists_credit", MV),
     ("albumartist", Str),
+    ("albumartists", MV),
     ("albumartist_sort", Str),
+    ("albumartists_sort", MV),
     ("albumartist_credit", Str),
+    ("albumartists_credit", MV),
     ("album", Str),
-    ("genre", Str),
-    ("composer", Str),
+    ("genres", MV),
+    ("style", Str),
+    ("composers", MV),
+    ("composer_sort", Str),
+    ("lyricists", MV),
+    ("arrangers", MV),
+    ("remixers", MV),
     ("grouping", Str),
+    ("subtitle", Str),
     ("year", Padded(4)),
     ("month", Padded(2)),
     ("day", Padded(2)),
@@ -226,28 +264,61 @@ pub const ITEM_FIELDS: &[(&str, FieldType)] = &[
     ("lyrics", Str),
     ("bpm", Int),
     ("comp", Bool),
+    ("initial_key", MusicalKey),
     ("isrc", Str),
+    ("encoder", Str),
     ("mb_trackid", Str),
     ("mb_releasetrackid", Str),
     ("mb_albumid", Str),
     ("mb_artistid", Str),
+    ("mb_artistids", MV),
     ("mb_albumartistid", Str),
+    ("mb_albumartistids", MV),
     ("mb_releasegroupid", Str),
+    ("mb_workid", Str),
+    ("release_group_title", Str),
+    ("work", Str),
+    ("work_disambig", Str),
+    ("trackdisambig", Str),
     ("albumtype", Str),
+    ("albumtypes", List(SEMI)),
     ("label", Str),
+    ("barcode", Str),
     ("catalognum", Str),
+    ("asin", Str),
+    ("script", Str),
+    ("language", Str),
     ("country", Str),
     ("albumstatus", Str),
     ("media", Str),
     ("albumdisambig", Str),
     ("releasegroupdisambig", Str),
+    ("acoustid_fingerprint", Str),
+    ("acoustid_id", Str),
+    ("rg_track_gain", NullFloat),
+    ("rg_track_peak", NullFloat),
+    ("rg_album_gain", NullFloat),
+    ("rg_album_peak", NullFloat),
+    ("r128_track_gain", NullFloat),
+    ("r128_album_gain", NullFloat),
+    ("artists_ids", MV),
+    ("composers_ids", MV),
+    ("lyricists_ids", MV),
+    ("arrangers_ids", MV),
+    ("remixers_ids", MV),
+    ("discogs_albumid", Int),
+    ("discogs_artistid", Int),
+    ("discogs_labelid", Int),
     ("data_source", Str),
     ("length", Duration),
     ("bitrate", Bitrate),
+    ("bitrate_mode", Str),
     ("samplerate", SampleRate),
     ("bitdepth", Int),
     ("channels", Int),
     ("format", Str),
+    ("encoder_info", Str),
+    ("encoder_settings", Str),
     ("mtime", Date),
     ("added", Date),
 ];
@@ -256,10 +327,14 @@ pub const ALBUM_FIELDS: &[(&str, FieldType)] = &[
     ("artpath", Path),
     ("added", Date),
     ("albumartist", Str),
+    ("albumartists", MV),
     ("albumartist_sort", Str),
+    ("albumartists_sort", MV),
     ("albumartist_credit", Str),
+    ("albumartists_credit", MV),
     ("album", Str),
-    ("genre", Str),
+    ("genres", MV),
+    ("style", Str),
     ("year", Padded(4)),
     ("month", Padded(2)),
     ("day", Padded(2)),
@@ -270,16 +345,113 @@ pub const ALBUM_FIELDS: &[(&str, FieldType)] = &[
     ("comp", Bool),
     ("mb_albumid", Str),
     ("mb_albumartistid", Str),
+    ("mb_albumartistids", MV),
     ("mb_releasegroupid", Str),
+    ("release_group_title", Str),
     ("albumtype", Str),
+    ("albumtypes", List(SEMI)),
     ("label", Str),
+    ("barcode", Str),
     ("catalognum", Str),
+    ("asin", Str),
+    ("script", Str),
+    ("language", Str),
     ("country", Str),
     ("albumstatus", Str),
     ("albumdisambig", Str),
     ("releasegroupdisambig", Str),
+    ("rg_album_gain", NullFloat),
+    ("rg_album_peak", NullFloat),
+    ("r128_album_gain", NullFloat),
+    ("discogs_albumid", Int),
+    ("discogs_artistid", Int),
+    ("discogs_labelid", Int),
     ("data_source", Str),
 ];
+
+/// beets' `ITEM_LEGACY_TO_LIST_FIELD` / `ALBUM_LEGACY_TO_LIST_FIELD`:
+/// single-valued field names beets 2.x replaced with lists.
+pub fn legacy_list_field(kind: Kind, field: &str) -> Option<&'static str> {
+    match (kind, field) {
+        (_, "genre") => Some("genres"),
+        (Kind::Item, "arranger") => Some("arrangers"),
+        (Kind::Item, "composer") => Some("composers"),
+        (Kind::Item, "lyricist") => Some("lyricists"),
+        (Kind::Item, "remixer") => Some("remixers"),
+        _ => None,
+    }
+}
+
+/// beets' `maybe_replace_legacy_field`: the list field for a legacy name,
+/// with beets' deprecation warning.
+pub fn replace_legacy_field(kind: Kind, field: &str, modify: bool) -> String {
+    match legacy_list_field(kind, field) {
+        Some(new) => {
+            let sep = if modify {
+                " (separate values by '; ')"
+            } else {
+                ""
+            };
+            eprintln!(
+                "The '{field}' field is deprecated and will be removed in version 3.0.0. \
+                 Use '{new}'{sep} instead."
+            );
+            new.to_string()
+        }
+        None => field.to_string(),
+    }
+}
+
+/// beets' `DelimitedString.parse`: split on the database delimiter if
+/// present, else on "; ".
+pub fn split_list(s: &str, delim: &str) -> Vec<String> {
+    if s.is_empty() {
+        return vec![];
+    }
+    let d = if s.contains(delim) { delim } else { SEMI };
+    s.split(d).map(str::to_string).collect()
+}
+
+/// beets' `DelimitedString.normalize` for a list, then `to_sql`: values
+/// holding "; " are split, and all are joined with the database delimiter.
+pub fn join_list<S: AsRef<str>>(values: &[S], delim: &str) -> String {
+    let mut out: Vec<&str> = vec![];
+    for v in values {
+        out.extend(v.as_ref().split(SEMI));
+    }
+    out.join(delim)
+}
+
+/// beets' `MusicalKey.parse`: flats as sharps, "minor" as "m", no
+/// "major", capitalized.
+pub fn normalize_key(key: &str) -> String {
+    let mut k = key.to_lowercase();
+    for (flat, sharp) in [
+        ("db", "c#"),
+        ("eb", "d#"),
+        ("gb", "f#"),
+        ("ab", "g#"),
+        ("bb", "a#"),
+    ] {
+        k = k.replace(flat, sharp);
+    }
+    // `[\W\s]+minor` / `[\W\s]+major`.
+    static MINOR: std::sync::LazyLock<regex::Regex> =
+        std::sync::LazyLock::new(|| regex::Regex::new(r"[\W\s]+minor").unwrap());
+    static MAJOR: std::sync::LazyLock<regex::Regex> =
+        std::sync::LazyLock::new(|| regex::Regex::new(r"[\W\s]+major").unwrap());
+    let k = MINOR.replace_all(&k, "m");
+    let k = MAJOR.replace_all(&k, "");
+    // Python's `str.capitalize`.
+    let mut c = k.chars();
+    match c.next() {
+        Some(f) => f
+            .to_uppercase()
+            .chain(c.flat_map(char::to_lowercase))
+            .collect(),
+        None => String::new(),
+    }
+}
 
 /// Album fields that are mirrored onto every item of the album.
 pub fn album_item_shared_fields() -> impl Iterator<Item = &'static str> {
@@ -438,6 +610,31 @@ impl Record {
         }
     }
 
+    /// A list field's values (beets' `DelimitedString`); for any other
+    /// field, its string value, if not empty.
+    pub fn list(&self, name: &str) -> Vec<String> {
+        match self.field_type(name) {
+            Some(FieldType::List(d)) => split_list(self.str(name), d),
+            _ => {
+                let s = self.str(name);
+                if s.is_empty() {
+                    vec![]
+                } else {
+                    vec![s.to_string()]
+                }
+            }
+        }
+    }
+
+    /// Set a list field (values containing "; " are split, as beets does).
+    pub fn set_list<S: AsRef<str>>(&mut self, name: &str, values: &[S]) {
+        let d = match self.field_type(name) {
+            Some(FieldType::List(d)) => d,
+            _ => SEMI,
+        };
+        self.set(name, Value::Str(join_list(values, d)));
+    }
+
     pub fn int(&self, name: &str) -> i64 {
         self.values
             .get(name)
@@ -496,6 +693,11 @@ impl Record {
 fn coerce(value: Value, ty: FieldType) -> Value {
     match (ty, value) {
         (FieldType::Str, v) => Value::Str(v.raw()),
+        (FieldType::List(d), v) => Value::Str(join_list(&split_list(&v.raw(), d), d)),
+        (FieldType::NullFloat | FieldType::MusicalKey, Value::Null) => Value::Null,
+        (FieldType::NullFloat, Value::Str(s)) => s.trim().parse().map_or(Value::Null, Value::Float),
+        (FieldType::NullFloat, v) => v.as_f64().map_or(Value::Null, Value::Float),
+        (FieldType::MusicalKey, v) => Value::Str(normalize_key(&v.raw())),
         (FieldType::Path, Value::Path(p)) => Value::Path(p),
         (FieldType::Path, v) => Value::Path(PathBuf::from(v.raw())),
         (FieldType::Bool, Value::Bool(b)) => Value::Bool(b),

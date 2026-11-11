@@ -21,7 +21,13 @@ dir (under `$TMPDIR`, or `--workdir DIR`):
    `BEETSRSDIR=<tmp>/rs`;
 4. runs every case with both, from inside the library directory, and compares
    stdout, stderr and exit status, with each tool's own temp root replaced by
-   `<ROOT>`.
+   `<ROOT>`;
+5. then the tag round trips (`tags:` cases): each tool runs `write` (and
+   `write -f` with `id3v23: yes`), every file in the two libraries is read
+   with MediaFile (the reference venv's) and compared field by field (an
+   empty value and a missing tag count as the same, as beets stores them),
+   and both tools import the files reference beets wrote into fresh
+   libraries and list every tag field.
 
 The report lists each case that isn't a plain PASS (`--show-pass` for all):
 `DIFF` (with both outputs, or a unified diff when long), `EXPECTED` (a known

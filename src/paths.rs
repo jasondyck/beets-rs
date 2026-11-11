@@ -745,8 +745,7 @@ mod tests {
             ),
             "/base/foo/the title [2001]"
         );
-        i2.flex
-            .insert("trackdisambig".into(), "live version".into());
+        i2.set_str("trackdisambig", "live version");
         i2.set_int("year", 2001);
         lib.store(&i2).unwrap();
         assert_eq!(

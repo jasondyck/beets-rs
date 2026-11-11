@@ -6,7 +6,7 @@ use crate::importer::{self, ImportOptions, Importer, Resume};
 use crate::library::Library;
 use crate::logging::debug;
 use crate::media;
-use crate::model::{ALBUM_FIELDS, Album, ITEM_FIELDS, Item, Kind, Record, Value};
+use crate::model::{ALBUM_FIELDS, Album, FieldType, ITEM_FIELDS, Item, Kind, Record, Value};
 use crate::paths::PathFormatter;
 use crate::plugins::{self, PluginCtx};
 use crate::query::Query;
@@ -37,6 +37,7 @@ pub fn run(cli: Cli) -> Result<()> {
         std::process::exit(1);
     }
     crate::query::configure(&cfg);
+    crate::media::set_id3v23(cfg.bool("id3v23"));
     debug!("configuration sources (highest → lowest priority):");
     for s in &cfg.sources {
         debug!("YamlSource {}", s.display());
@@ -457,7 +458,7 @@ struct Modification {
 /// assignments (`field=value`, no `:` before the `=`) and deletions
 /// (`field!`, with no `=` or `:`). A later assignment to the same field
 /// replaces an earlier one.
-fn parse_modify_args(args: &[String]) -> (Vec<String>, Vec<Modification>, Vec<String>) {
+fn parse_modify_args(kind: Kind, args: &[String]) -> (Vec<String>, Vec<Modification>, Vec<String>) {
     let (mut query, mut mods, mut dels) = (vec![], Vec::<Modification>::new(), vec![]);
     for arg in args {
         if arg.ends_with('!') && !arg.contains('=') && !arg.contains(':') {
@@ -470,7 +471,7 @@ fn parse_modify_args(args: &[String]) -> (Vec<String>, Vec<Modification>, Vec<St
                 _ => (key, None),
             };
             let m = Modification {
-                field: field.to_string(),
+                field: crate::model::replace_legacy_field(kind, field, true),
                 op,
                 value: value.to_string(),
             };
@@ -496,8 +497,43 @@ fn field_diff(field: &str, old: &Record, new: &Record) -> Option<String> {
     {
         return None;
     }
-    let oldstr = old.formatted(field).unwrap_or_default();
-    let newstr = new.formatted(field).unwrap_or_default();
+    // `_multi_value_diff`: the values removed and added.
+    if oldval.is_some() && matches!(old.field_type(field), Some(FieldType::List(_))) {
+        let (o, n) = (old.list(field), new.list(field));
+        let mut removed: Vec<&String> = o.iter().filter(|v| !n.contains(v)).collect();
+        let mut added: Vec<&String> = n.iter().filter(|v| !o.contains(v)).collect();
+        if removed.is_empty() && added.is_empty() {
+            return None;
+        }
+        removed.sort();
+        removed.dedup();
+        added.sort();
+        added.dedup();
+        let mut parts = vec![format!("{field}:")];
+        parts.extend(
+            removed
+                .iter()
+                .map(|v| crate::diff::removed(&format!("  - {v}"))),
+        );
+        parts.extend(
+            added
+                .iter()
+                .map(|v| crate::diff::added(&format!("  + {v}"))),
+        );
+        return Some(parts.join("\n"));
+    }
+    // `FormattedItemMapping`: an item's empty artist or album artist shows
+    // the other.
+    let formatted = |r: &Record| {
+        let v = r.formatted(field).unwrap_or_default();
+        match (r.kind, field) {
+            (Kind::Item, "artist") if v.is_empty() => r.formatted("albumartist").unwrap_or(v),
+            (Kind::Item, "albumartist") if v.is_empty() => r.formatted("artist").unwrap_or(v),
+            _ => v,
+        }
+    };
+    let oldstr = formatted(old);
+    let newstr = formatted(new);
     if newval.is_none() {
         return Some(crate::diff::removed(&format!("{field}: {oldstr}")));
     }
@@ -594,6 +630,21 @@ fn modified(lib: &Library, obj: &Record, mods: &[Modification], dels: &[String])
     let mut new = obj.clone();
     for m in mods {
         let v = format_record(&Template::parse(&m.value), obj, Some(lib));
+        // beets' `ModifyOperation.apply`: `+=` adds the values not there
+        // yet, `-=` removes the given ones.
+        if let (Some(op), Some(FieldType::List(d))) = (m.op, new.field_type(&m.field)) {
+            let given = crate::model::split_list(&v, d);
+            let current = obj.list(&m.field);
+            let values: Vec<String> = if op == '+' {
+                let mut out = current.clone();
+                out.extend(given.into_iter().filter(|g| !current.contains(g)));
+                out
+            } else {
+                current.into_iter().filter(|c| !given.contains(c)).collect()
+            };
+            new.set_list(&m.field, &values);
+            continue;
+        }
         new.set_parsed(&m.field, &v)?;
     }
     for f in dels {
@@ -611,12 +662,12 @@ fn modified(lib: &Library, obj: &Record, mods: &[Modification], dels: &[String])
 
 /// beets' `modify_func` / `modify_objects`.
 fn modify(cfg: &Config, lib: &Library, opts: ModifyOpts, args: &[String]) -> Result<()> {
-    let (q, mods, dels) = parse_modify_args(args);
+    let album = opts.album;
+    let kind = if album { Kind::Album } else { Kind::Item };
+    let (q, mods, dels) = parse_modify_args(kind, args);
     if mods.is_empty() && dels.is_empty() {
         bail!("no modifications specified");
     }
-    let album = opts.album;
-    let kind = if album { Kind::Album } else { Kind::Item };
     let mut objs = if album {
         lib.albums(&Query::parse(kind, &q)?)?
     } else {
@@ -625,8 +676,14 @@ fn modify(cfg: &Config, lib: &Library, opts: ModifyOpts, args: &[String]) -> Res
     if let Some(n) = opts.limit {
         objs.truncate(n);
     }
-    // No multi-valued fields yet, so no field takes `+=`/`-=`.
-    if let Some(m) = mods.iter().find(|m| m.op.is_some()) {
+    // beets' `_check_modify_operations`: only list fields take `+=`/`-=`.
+    if let Some(m) = mods.iter().find(|m| {
+        m.op.is_some()
+            && !matches!(
+                crate::model::field_type(kind, &m.field),
+                Some(FieldType::List(_))
+            )
+    }) {
         bail!(
             "field '{}' does not support the {}= operator",
             m.field,
@@ -1944,18 +2001,21 @@ mod tests {
 
     #[test]
     fn modify_args_follow_beets_rules() {
-        let (q, mods, dels) = parse_modify_args(&strs(&[
-            "a!",
-            "artist:x!",
-            "title:a=b",
-            "x=y!",
-            "comment=a:b",
-            "genre+=Rock",
-            "mood-=sad",
-            "year=1",
-            "year=2",
-            "^artist=z",
-        ]));
+        let (q, mods, dels) = parse_modify_args(
+            Kind::Item,
+            &strs(&[
+                "a!",
+                "artist:x!",
+                "title:a=b",
+                "x=y!",
+                "comment=a:b",
+                "genre+=Rock",
+                "mood-=sad",
+                "year=1",
+                "year=2",
+                "^artist=z",
+            ]),
+        );
         assert_eq!(dels, ["a"]);
         assert_eq!(q, ["artist:x!", "title:a=b"]);
         let m: Vec<(&str, Option<char>, &str)> = mods
@@ -1967,7 +2027,8 @@ mod tests {
             [
                 ("x", None, "y!"),
                 ("comment", None, "a:b"),
-                ("genre", Some('+'), "Rock"),
+                // beets' legacy `genre` is `genres`.
+                ("genres", Some('+'), "Rock"),
                 ("mood", Some('-'), "sad"),
                 ("year", None, "2"),
                 ("^artist", None, "z"),
@@ -1998,6 +2059,24 @@ mod tests {
             ]
         );
         assert!(model_changes(&old, &old).is_empty());
+        // Lists: beets' `_multi_value_diff`, values removed then added,
+        // each sorted; a reordering is no change.
+        let mut old = Record::new_item();
+        old.set_list("genres", &["Rock", "Pop", "Ska"]);
+        let mut new = old.clone();
+        new.set_list("genres", &["Pop", "Jazz", "Blues"]);
+        assert_eq!(
+            model_changes(&old, &new),
+            ["genres:\n  - Rock\n  - Ska\n  + Blues\n  + Jazz"]
+        );
+        new.set_list("genres", &["Ska", "Pop", "Rock"]);
+        assert!(model_changes(&old, &new).is_empty());
+        // An item's empty album artist shows the artist (`FormattedItemMapping`).
+        let mut old = Record::new_item();
+        old.set_str("artist", "Solo");
+        let mut new = old.clone();
+        new.set_str("albumartist", "VA");
+        assert_eq!(model_changes(&old, &new), ["albumartist: Solo -> VA"]);
     }
 
     /// An in-memory library with `n` items in one album (no files).
@@ -2642,6 +2721,19 @@ mod tests {
         let it = &items(&lib)[1];
         assert_eq!(it.get("mood"), None);
         assert_eq!(it.int("bpm"), 0);
+        // List fields: "; " separates values; `+=` adds the missing ones,
+        // `-=` removes; the legacy single-valued name means the list.
+        let genres = || items(&lib)[1].list("genres");
+        run(&["title:T1", "genres=Rock; Pop"]).unwrap();
+        assert_eq!(genres(), ["Rock", "Pop"]);
+        run(&["title:T1", "genres+=Jazz; Rock"]).unwrap();
+        assert_eq!(genres(), ["Rock", "Pop", "Jazz"]);
+        run(&["title:T1", "genres-=Rock; Ska"]).unwrap();
+        assert_eq!(genres(), ["Pop", "Jazz"]);
+        run(&["title:T1", "genre=Ska"]).unwrap();
+        assert_eq!(genres(), ["Ska"]);
+        run(&["title:T1", "albumtypes+=live"]).unwrap();
+        assert_eq!(items(&lib)[1].str("albumtypes"), "live");
         // Nothing to change is fine; errors use beets' wording.
         run(&["title:T1", "bpm=0"]).unwrap();
         let err = |args: &[&str]| run(args).unwrap_err().to_string();
@@ -2651,8 +2743,12 @@ mod tests {
             "No matching objects to modify."
         );
         assert_eq!(
-            err(&["genre+=Rock"]),
-            "field 'genre' does not support the += operator"
+            err(&["mood+=calm"]),
+            "field 'mood' does not support the += operator"
+        );
+        assert_eq!(
+            err(&["title-=x"]),
+            "field 'title' does not support the -= operator"
         );
         // -l caps the matches.
         let mut o = quiet_opts(false);
@@ -2672,29 +2768,29 @@ mod tests {
             &cfg,
             &lib,
             quiet_opts(true),
-            &strs(&["genre=Jazz", "mood=x"]),
+            &strs(&["genres=Jazz", "mood=x"]),
         )
         .unwrap();
-        assert_eq!(lib.all_albums().unwrap()[0].str("genre"), "Jazz");
+        assert_eq!(lib.all_albums().unwrap()[0].str("genres"), "Jazz");
         for i in items(&lib) {
-            assert_eq!((i.str("genre"), i.str("mood")), ("Jazz", "x"));
+            assert_eq!((i.str("genres"), i.str("mood")), ("Jazz", "x"));
         }
         // Deleting the album's flex attribute deletes it from the items.
         modify(&cfg, &lib, quiet_opts(true), &strs(&["mood!"])).unwrap();
         assert!(items(&lib).iter().all(|i| i.get("mood").is_none()));
         // Only changed fields propagate.
         let mut it = items(&lib).remove(0);
-        it.set_str("genre", "Own");
+        it.set_str("genres", "Own");
         lib.store(&it).unwrap();
         modify(&cfg, &lib, quiet_opts(true), &strs(&["year=2001"])).unwrap();
-        assert_eq!(items(&lib)[0].str("genre"), "Own");
+        assert_eq!(items(&lib)[0].str("genres"), "Own");
         assert!(items(&lib).iter().all(|i| i.int("year") == 2001));
         // -I keeps the album's change to itself.
         let mut o = quiet_opts(true);
         o.inherit = false;
-        modify(&cfg, &lib, o, &strs(&["genre=Blues"])).unwrap();
-        assert_eq!(lib.all_albums().unwrap()[0].str("genre"), "Blues");
-        assert!(items(&lib).iter().all(|i| i.str("genre") != "Blues"));
+        modify(&cfg, &lib, o, &strs(&["genres=Blues"])).unwrap();
+        assert_eq!(lib.all_albums().unwrap()[0].str("genres"), "Blues");
+        assert!(items(&lib).iter().all(|i| i.str("genres") != "Blues"));
     }
 
     #[test]
@@ -2703,12 +2799,12 @@ mod tests {
             .iter()
             .map(|s| s.to_string())
             .collect();
-        let (q, s, d) = parse_modify_args(&args);
+        let (q, s, d) = parse_modify_args(Kind::Item, &args);
         assert_eq!(q, vec!["artist:foo", "-live", "year:2000"]);
         assert_eq!(
             s,
             [Modification {
-                field: "genre".into(),
+                field: "genres".into(),
                 op: None,
                 value: "Rock".into()
             }]

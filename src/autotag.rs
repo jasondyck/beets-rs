@@ -555,6 +555,38 @@ pub fn apply_track(cfg: &Config, item: &mut Item, t: &TrackInfo) {
     s.str("release_track_id", "mb_releasetrackid", &t.release_track_id);
     s.str("isrc", "isrc", &t.isrc);
     item.set_str("data_source", "MusicBrainz");
+    sync_list_fields(item, TRACK_LIST_FIELDS);
+}
+
+/// beets' `SYNCHRONISED_LIST_FIELDS` for a track: the single value and
+/// the list it heads.
+const TRACK_LIST_FIELDS: &[(&str, &str)] = &[
+    ("artist", "artists"),
+    ("mb_artistid", "mb_artistids"),
+    ("artist_sort", "artists_sort"),
+    ("artist_credit", "artists_credit"),
+];
+
+/// The same for an album.
+const ALBUM_LIST_FIELDS: &[(&str, &str)] = &[
+    ("albumartist", "albumartists"),
+    ("mb_albumartistid", "mb_albumartistids"),
+    ("albumartist_sort", "albumartists_sort"),
+    ("albumartist_credit", "albumartists_credit"),
+    ("albumtype", "albumtypes"),
+];
+
+/// beets' `correct_list_fields`: a single value heads its list (MediaFile
+/// writes only the list, so the single value is otherwise lost). Our
+/// MusicBrainz data has no lists of its own yet, so a set value becomes
+/// the whole list.
+fn sync_list_fields(item: &mut Item, pairs: &[(&str, &str)]) {
+    for (single, list) in pairs {
+        let v = item.str(single).to_string();
+        if !v.is_empty() {
+            item.set_list(list, &[v]);
+        }
+    }
 }
 
 pub fn apply_album(cfg: &Config, items: &mut [Item], m: &AlbumMatch) {
@@ -643,6 +675,8 @@ pub fn apply_album(cfg: &Config, items: &mut [Item], m: &AlbumMatch) {
         }
         item.set_int("disc", track.medium as i64);
         item.set("comp", Value::Bool(info.va));
+        sync_list_fields(item, TRACK_LIST_FIELDS);
+        sync_list_fields(item, ALBUM_LIST_FIELDS);
     }
 }
 
@@ -719,6 +753,9 @@ mod tests {
         assert_eq!(items[0].str("mb_trackid"), "rec3");
         assert_eq!(items[0].int("year"), 2000);
         assert_eq!(items[0].str("albumartist"), "Band");
+        // The list fields MediaFile writes follow the single values.
+        assert_eq!(items[0].list("albumartists"), ["Band"]);
+        assert_eq!(items[0].list("artists"), [items[0].str("artist")]);
     }
 
     #[test]

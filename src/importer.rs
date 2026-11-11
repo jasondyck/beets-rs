@@ -2790,7 +2790,7 @@ mod tests {
     #[test]
     fn from_scratch_clears_tags_not_set_by_the_match() {
         let mut item = Item::new_item();
-        item.set_str("genre", "Polka");
+        item.set_list("genres", &["Polka"]);
         item.set_str("comments", "old rip");
         item.set_int("year", 1999);
         item.flex.insert("rating".into(), "5".into());
@@ -2803,7 +2803,7 @@ mod tests {
         };
         autotag::apply_track(&Config::defaults(), &mut item, &t);
         assert_eq!(item.str("title"), "New Title");
-        assert_eq!(item.str("genre"), "");
+        assert_eq!(item.str("genres"), "");
         assert_eq!(item.str("comments"), "");
         assert_eq!(item.int("year"), 0);
         // Only tag fields go: flexible attributes and the path stay.

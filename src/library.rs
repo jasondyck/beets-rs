@@ -62,6 +62,7 @@ fn attr_table(kind: Kind) -> &'static str {
 
 fn to_sql(v: &Value) -> SqlValue {
     match v {
+        Value::Null => SqlValue::Null,
         Value::Str(s) => SqlValue::Text(s.clone()),
         Value::Int(i) => SqlValue::Integer(*i),
         Value::Float(f) => SqlValue::Real(*f),
@@ -81,17 +82,107 @@ fn from_sql(v: SqlValue, ty: FieldType) -> Value {
         (FieldType::Path, SqlValue::Text(s)) => Value::Path(PathBuf::from(s)),
         (FieldType::Str, SqlValue::Text(s)) => Value::Str(s),
         (FieldType::Bool, SqlValue::Integer(i)) => Value::Bool(i != 0),
-        (FieldType::Float | FieldType::Duration | FieldType::Date, SqlValue::Real(f)) => {
-            Value::Float(f)
-        }
-        (FieldType::Float | FieldType::Duration | FieldType::Date, SqlValue::Integer(i)) => {
-            Value::Float(i as f64)
+        (
+            FieldType::Float | FieldType::NullFloat | FieldType::Duration | FieldType::Date,
+            SqlValue::Real(f),
+        ) => Value::Float(f),
+        (
+            FieldType::Float | FieldType::NullFloat | FieldType::Duration | FieldType::Date,
+            SqlValue::Integer(i),
+        ) => Value::Float(i as f64),
+        (FieldType::NullFloat, SqlValue::Text(s)) => {
+            s.trim().parse().map_or(Value::Null, Value::Float)
         }
         (_, SqlValue::Integer(i)) => Value::Int(i),
         (_, SqlValue::Real(f)) => Value::Int(f as i64),
         (_, SqlValue::Text(s)) => Value::Str(s),
         (t, _) => t.default_value(),
     }
+}
+
+/// beets' `MultiValueFieldMigration`s: single-valued fields beets 2.x
+/// replaced with lists, as (migration, old field, list field, tables).
+const MULTI_VALUE_MIGRATIONS: &[(&str, &str, &str, &[&str])] = &[
+    ("multi_genre_field", "genre", "genres", &["items", "albums"]),
+    ("multi_remixer_field", "remixer", "remixers", &["items"]),
+    ("multi_lyricist_field", "lyricist", "lyricists", &["items"]),
+    ("multi_composer_field", "composer", "composers", &["items"]),
+    ("multi_arranger_field", "arranger", "arrangers", &["items"]),
+];
+
+/// Backfill list fields from the old single-valued columns (a library
+/// from before beets-rs had them), once per table, recorded in beets'
+/// `migrations` table. Values with a "; ", ", " or " / " are split there.
+fn migrate_multi_value_fields(conn: &Connection) -> Result<()> {
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS migrations (
+            name TEXT NOT NULL,
+            table_name TEXT NOT NULL,
+            PRIMARY KEY(name, table_name));",
+    )?;
+    for (name, old, new, tables) in MULTI_VALUE_MIGRATIONS {
+        for t in *tables {
+            let done: bool = conn.query_row(
+                "SELECT EXISTS(SELECT 1 FROM migrations WHERE name = ? AND table_name = ?)",
+                [name, t],
+                |r| r.get(0),
+            )?;
+            if done {
+                continue;
+            }
+            let has_old = conn
+                .prepare(&format!("PRAGMA table_info({t})"))?
+                .query_map([], |r| r.get::<_, String>(1))?
+                .filter_map(|c| c.ok())
+                .any(|c| c == *old);
+            if has_old {
+                let rows: Vec<(i64, String, Option<String>)> = conn
+                    .prepare(&format!(
+                        "SELECT id, {old}, {new} FROM {t} WHERE {old} IS NOT NULL AND {old} != ''"
+                    ))?
+                    .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?
+                    .collect::<Result<_, _>>()?;
+                let total = rows.len();
+                let todo: Vec<&(i64, String, Option<String>)> = rows
+                    .iter()
+                    .filter(|(_, _, l)| l.as_deref().is_none_or(str::is_empty))
+                    .collect();
+                if !todo.is_empty() {
+                    let mut migrated = total - todo.len();
+                    println!("Migrating {new} for {total} {t}...");
+                    for chunk in todo.chunks(1000) {
+                        let tx = conn.unchecked_transaction()?;
+                        for (id, value, _) in chunk {
+                            tx.execute(
+                                &format!("UPDATE {t} SET {new} = ? WHERE id = ?"),
+                                rusqlite::params![legacy_to_list_value(value), id],
+                            )?;
+                        }
+                        tx.commit()?;
+                        migrated += chunk.len();
+                        println!("  Migrated {migrated} {t} ({migrated}/{total} processed)...");
+                    }
+                    println!("Migration complete: {migrated} of {total} {t} updated");
+                }
+            }
+            conn.execute(
+                "INSERT INTO migrations(name, table_name) VALUES (?, ?)",
+                [name, t],
+            )?;
+        }
+    }
+    Ok(())
+}
+
+/// `MultiValueFieldMigration.convert_to_list_value`: the first of the
+/// known separators the value holds becomes the list delimiter.
+fn legacy_to_list_value(value: &str) -> String {
+    for sep in ["; ", ", ", " / "] {
+        if value.contains(sep) {
+            return value.replace(sep, crate::model::MULTI);
+        }
+    }
+    value.to_string()
 }
 
 impl Library {
@@ -141,6 +232,7 @@ impl Library {
             "CREATE INDEX IF NOT EXISTS items_album_id ON items(album_id);
              CREATE INDEX IF NOT EXISTS items_path ON items(path);",
         )?;
+        migrate_multi_value_fields(&conn)?;
         Ok(Library {
             conn,
             memo: RefCell::new(HashMap::new()),
@@ -596,6 +688,58 @@ pub fn now() -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// beets' multi-value migrations: a library with the old `genre` and
+    /// `composer` columns gets `genres` and `composers`, split on the
+    /// known separators, once; lists already set are left alone.
+    #[test]
+    fn migrates_single_valued_fields_to_lists() {
+        let d = tempfile::tempdir().unwrap();
+        let db = d.path().join("library.db");
+        {
+            let c = Connection::open(&db).unwrap();
+            c.execute_batch(
+                "CREATE TABLE items (id INTEGER PRIMARY KEY, genre TEXT, composer TEXT, genres TEXT);
+                 CREATE TABLE albums (id INTEGER PRIMARY KEY, genre TEXT);
+                 INSERT INTO items VALUES (1, 'Rock, Pop', 'A / B', NULL);
+                 INSERT INTO items VALUES (2, 'Jazz', '', NULL);
+                 INSERT INTO items VALUES (3, 'Old', 'C', 'Kept');
+                 INSERT INTO albums VALUES (1, 'Rock; Pop');",
+            )
+            .unwrap();
+        }
+        let lib = Library::open(&db).unwrap();
+        let items = lib
+            .items(&Query::parse::<&str>(Kind::Item, &[]).unwrap())
+            .unwrap();
+        let get = |id: i64, f: &str| items.iter().find(|i| i.id == Some(id)).unwrap().list(f);
+        assert_eq!(get(1, "genres"), ["Rock", "Pop"]);
+        assert_eq!(get(1, "composers"), ["A", "B"]);
+        assert_eq!(get(2, "genres"), ["Jazz"]);
+        assert!(get(2, "composers").is_empty());
+        assert_eq!(get(3, "genres"), ["Kept"]);
+        assert_eq!(lib.all_albums().unwrap()[0].list("genres"), ["Rock", "Pop"]);
+        // Once only: a later change to the old column isn't migrated again.
+        lib.conn
+            .execute(
+                "UPDATE items SET genres = '', genre = 'New' WHERE id = 2",
+                [],
+            )
+            .unwrap();
+        drop(lib);
+        let lib = Library::open(&db).unwrap();
+        let items = lib
+            .items(&Query::parse::<&str>(Kind::Item, &[]).unwrap())
+            .unwrap();
+        assert!(
+            items
+                .iter()
+                .find(|i| i.id == Some(2))
+                .unwrap()
+                .list("genres")
+                .is_empty()
+        );
+    }
 
     // As beets' `Model.add`: every new record gets its own `added`; an
     // album without art stores NULL, as beets does.

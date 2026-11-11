@@ -46,6 +46,8 @@ from cases import (  # noqa: E402
     EXTRA_CONFIGS,
     IMPORTS,
     MODIFIES,
+    TAG_TEMPLATE,
+    TAG_WRITES,
     cases,
 )
 
@@ -188,6 +190,71 @@ def setup(work, ref, rs, verbose):
 
 
 # ---------------------------------------------------------------------------
+# Tag round trips
+
+
+AUDIO = (".mp3", ".flac", ".m4a", ".ogg", ".opus", ".wv", ".aiff", ".wav")
+
+
+def mediafile_view(path):
+    """The tags of `path` as MediaFile reads them, one `field: value` per
+    line. Values beets stores the same way compare equal: a missing string,
+    number, flag or list is the same as an empty one (beets writes those
+    as empty tags, beets-rs removes them); the nullable floats are kept."""
+    import mediafile
+
+    try:
+        mf = mediafile.MediaFile(path)
+    except Exception as exc:  # noqa: BLE001
+        return f"unreadable: {type(exc).__name__}"
+    lines = []
+    for field in sorted(mediafile.MediaFile.fields()):
+        if field in ("art", "images"):
+            continue
+        value = getattr(mf, field)
+        if isinstance(value, list) and not any(value):
+            value = None
+        if not isinstance(value, float) and not value:
+            value = None
+        lines.append(f"{field}: {value!r}")
+    return "\n".join(lines)
+
+
+def tag_cases(work, ref, rs):
+    """Results (cid, args, ref outcome, rs outcome) of the tag phase."""
+    results = []
+    for name, args in TAG_WRITES:
+        results.append((f"tags:{name}", args, outcome(ref, args, ref.root),
+                        outcome(rs, args, rs.root)))
+        lib = os.path.join(ref.root, "lib")
+        for dirpath, _, files in sorted(os.walk(lib)):
+            for f in sorted(files):
+                if not f.lower().endswith(AUDIO):
+                    continue
+                rel = os.path.relpath(os.path.join(dirpath, f), lib)
+                ours = os.path.join(rs.root, "lib", rel)
+                r = {"code": 0, "out": mediafile_view(os.path.join(lib, rel)), "err": ""}
+                if os.path.exists(ours):
+                    s = {"code": 0, "out": mediafile_view(ours), "err": ""}
+                else:
+                    s = {"code": 1, "out": "", "err": "no such file"}
+                results.append((f"tags:{name}:{rel}", ["(MediaFile)", rel], r, s))
+    # Both read the files reference beets wrote.
+    readers = []
+    for name, beet, var in (("ref", ref.beet, "BEETSDIR"), ("rs", rs.beet, "BEETSRSDIR")):
+        t = Tool(name, beet, os.path.join(work, f"read-{name}"), var)
+        write_config(t.root, work)
+        outcome(t, ["import", "-A", "-q", "-s", os.path.join(ref.root, "lib")])
+        readers.append(t)
+    args = ["ls", "-f", TAG_TEMPLATE]
+    r, s = (outcome(t, args) for t in readers)
+    for res in (r, s):
+        res["out"] = "\n".join(sorted(res["out"].splitlines()))
+    results.append(("tags:read", ["import", "-s", "<ref-written files>", "&&", *args], r, s))
+    return results
+
+
+# ---------------------------------------------------------------------------
 # Report
 
 
@@ -252,6 +319,14 @@ def main():
 
         with concurrent.futures.ThreadPoolExecutor(opts.jobs) as pool:
             results = list(pool.map(run_case, todo))
+        if not opts.only or any(o.startswith("tags") or o in "tags:" for o in opts.only):
+            print("tag round trips...", flush=True)
+            tag_results = [
+                r for r in tag_cases(work, ref, rs)
+                if not opts.only or any(o in r[0] for o in opts.only)
+            ]
+            seen.update(r[0] for r in tag_results)
+            results += tag_results
 
         counts = {"PASS": 0, "DIFF": 0, "EXPECTED": 0, "FIXED?": 0}
         for cid, args, r, s in results:

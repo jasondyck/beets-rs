@@ -1,6 +1,6 @@
 //! Ported from beets' `test/dbcore/test_query.py`, `test_queryparse.py`,
-//! `test_datequery.py` and `test_sort.py`, adapted to this schema (single
-//! `genre`, no multi-valued fields, no plugin-typed flexible fields).
+//! `test_datequery.py` and `test_sort.py`, adapted to this schema (no
+//! plugin-typed flexible fields).
 
 use super::*;
 use crate::library::Library;
@@ -156,7 +156,9 @@ fn get_lib() -> Library {
         ("album", "baz"),
         ("year", "2001"),
         ("comp", "true"),
-        ("genre", "rock"),
+        ("genres", "rock"),
+        ("artists", "one; eleven"),
+        ("composers", "composer"),
     ]);
     let second = item(&[
         ("title", "second"),
@@ -164,7 +166,8 @@ fn get_lib() -> Library {
         ("album", "baz"),
         ("year", "2002"),
         ("comp", "true"),
-        ("genre", "Rock"),
+        ("genres", "Rock"),
+        ("artists", "two; twelve"),
     ]);
     add_album(&lib, vec![first, second], &[("albumflex", "foo")]);
     let mut third = item(&[
@@ -173,7 +176,8 @@ fn get_lib() -> Library {
         ("album", "foo"),
         ("year", "2003"),
         ("comp", "false"),
-        ("genre", "Hard Rock"),
+        ("genres", "Hard Rock"),
+        ("artists", "three; one"),
         ("comments", "caf\u{e9}"),
     ]);
     third.flex.insert("Flex_Attr".into(), "flex".into());
@@ -201,18 +205,20 @@ fn get_queries_as_beets() {
         ("albumflex:foo", &["first", "second"]),
         ("artist::t.+r", &["third"]),
         ("artist:thrEE", &["third"]),
+        ("artists::eleven", &["first"]),
+        ("artists::one", &["first", "third"]),
         ("ArTiST:three", &["third"]),
         ("comments:caf\u{e9}", &["third"]),
         ("comp:true", &["first", "second"]),
         ("comp:false", &["third"]),
         ("flex_attr:flex", &["third"]),
         ("Flex_Attr:flex", &["third"]),
-        ("genre:=rock", &["first"]),
-        ("genre:=Rock", &["second"]),
-        ("genre:=\"Hard Rock\"", &["third"]),
-        ("genre:=~\"hard rock\"", &["third"]),
-        ("genre:=~rock", &["first", "second"]),
-        ("genre:=\"hard rock\"", &[]),
+        ("genres:=rock", &["first"]),
+        ("genres:=Rock", &["second"]),
+        ("genres:=\"Hard Rock\"", &["third"]),
+        ("genres:=~\"hard rock\"", &["third"]),
+        ("genres:=~rock", &["first", "second"]),
+        ("genres:=\"hard rock\"", &[]),
         ("popebear", &[]),
         ("pope:bear", &[]),
         ("singleton:true", &["third"]),
@@ -224,6 +230,11 @@ fn get_queries_as_beets() {
         ("year:2001", &["first"]),
         ("year:2000..2002", &["first", "second"]),
         ("xyzzy:nonsense", &[]),
+        // `test_legacy_field`: the old single-valued names query the lists.
+        ("genres::rock", &["first"]),
+        ("genre::rock", &["first"]),
+        ("composers::composer", &["first"]),
+        ("composer::composer", &["first"]),
         // OR between groups.
         ("first , title:third", &["first", "third"]),
         ("year:..2001 , year:2003..", &["first", "third"]),
@@ -351,7 +362,7 @@ fn field_queries_match_a_record() {
         ("disc", "6"),
         ("year", "1"),
         ("bitrate", "128000"),
-        ("genre", "Classical"),
+        ("genres", "Classical; Baroque"),
     ]);
     let obj = Obj::new(&it);
     for (s, want) in [
@@ -364,9 +375,11 @@ fn field_queries_match_a_record() {
         ("album:=~the album", true),
         ("album:=~THE ALBUM", true),
         ("album:=~album", false),
-        ("genre:=Classical", true),
-        ("genre:=Neoclassical", false),
-        ("genre:=~classical", true),
+        // In memory, a list matches if one of its values does.
+        ("genres:=Classical", true),
+        ("genres:=Neoclassical", false),
+        ("genres:=~classical", true),
+        ("genres:=~neoclassical", false),
         ("year:1", true),
         ("year:10", false),
         ("bitrate:100000..200000", true),

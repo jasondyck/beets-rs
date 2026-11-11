@@ -1,12 +1,10 @@
 //! Reading and writing tags in audio files (via lofty).
 
+use crate::mediafile::{Got, MediaFile};
 use crate::model::{Item, Value};
 use anyhow::{Context, Result};
-use lofty::config::WriteOptions;
-use lofty::file::{AudioFile, FileType, TaggedFile, TaggedFileExt};
+use lofty::file::{AudioFile, FileType, TaggedFileExt};
 use lofty::picture::{MimeType, Picture, PictureType};
-use lofty::prelude::{Accessor, ItemKey};
-use lofty::tag::Tag;
 use std::path::Path;
 
 pub const AUDIO_EXTENSIONS: &[&str] = &[
@@ -39,67 +37,7 @@ fn format_name(ft: FileType) -> &'static str {
     }
 }
 
-/// String-valued tag keys and the item fields they map to.
-const TEXT_KEYS: &[(&str, ItemKey)] = &[
-    ("artist_sort", ItemKey::TrackArtistSortOrder),
-    ("albumartist", ItemKey::AlbumArtist),
-    ("albumartist_sort", ItemKey::AlbumArtistSortOrder),
-    ("composer", ItemKey::Composer),
-    ("grouping", ItemKey::ContentGroup),
-    ("disctitle", ItemKey::SetSubtitle),
-    ("isrc", ItemKey::Isrc),
-    ("mb_trackid", ItemKey::MusicBrainzRecordingId),
-    ("mb_releasetrackid", ItemKey::MusicBrainzTrackId),
-    ("mb_albumid", ItemKey::MusicBrainzReleaseId),
-    ("mb_artistid", ItemKey::MusicBrainzArtistId),
-    ("mb_albumartistid", ItemKey::MusicBrainzReleaseArtistId),
-    ("mb_releasegroupid", ItemKey::MusicBrainzReleaseGroupId),
-    ("albumtype", ItemKey::MusicBrainzReleaseType),
-    ("label", ItemKey::Label),
-    ("catalognum", ItemKey::CatalogNumber),
-    ("country", ItemKey::ReleaseCountry),
-    ("media", ItemKey::OriginalMediaType),
-];
-
-/// Item fields stored in file tags (used by `write` to detect differences).
-pub const TAG_FIELDS: &[&str] = &[
-    "title",
-    "artist",
-    "album",
-    "genre",
-    "comments",
-    "track",
-    "tracktotal",
-    "disc",
-    "disctotal",
-    "bpm",
-    "year",
-    "month",
-    "day",
-    "original_year",
-    "original_month",
-    "original_day",
-    "comp",
-    "artist_sort",
-    "albumartist",
-    "albumartist_sort",
-    "composer",
-    "grouping",
-    "disctitle",
-    "lyrics",
-    "isrc",
-    "mb_trackid",
-    "mb_releasetrackid",
-    "mb_albumid",
-    "mb_artistid",
-    "mb_albumartistid",
-    "mb_releasegroupid",
-    "albumtype",
-    "label",
-    "catalognum",
-    "country",
-    "media",
-];
+pub use crate::mediafile::TAG_FIELDS;
 
 /// Audio properties `read` takes from the file besides its tags.
 pub const PROPERTY_FIELDS: &[&str] = &[
@@ -109,42 +47,14 @@ pub const PROPERTY_FIELDS: &[&str] = &[
     "bitdepth",
     "channels",
     "format",
+    "bitrate_mode",
+    "encoder_info",
+    "encoder_settings",
 ];
 
 /// beets' `Item._media_fields`: everything `read` sets from a file.
 pub fn media_fields() -> impl Iterator<Item = &'static str> {
     TAG_FIELDS.iter().chain(PROPERTY_FIELDS).copied()
-}
-
-/// Parse "YYYY", "YYYY-MM" or "YYYY-MM-DD..." into (year, month, day).
-fn parse_date(s: &str) -> (i64, i64, i64) {
-    let mut parts = s.trim().splitn(3, ['-', '/']);
-    let num = |p: Option<&str>| -> i64 {
-        p.map(|p| {
-            p.chars()
-                .take_while(|c| c.is_ascii_digit())
-                .collect::<String>()
-        })
-        .and_then(|p| p.parse().ok())
-        .unwrap_or(0)
-    };
-    let y = num(parts.next());
-    let m = num(parts.next());
-    let d = num(parts.next());
-    (y, m, d)
-}
-
-fn date_string(y: i64, m: i64, d: i64) -> Option<String> {
-    match (y, m, d) {
-        (0, _, _) => None,
-        (y, 0, _) => Some(format!("{y:04}")),
-        (y, m, 0) => Some(format!("{y:04}-{m:02}")),
-        (y, m, d) => Some(format!("{y:04}-{m:02}-{d:02}")),
-    }
-}
-
-fn pick_tag(file: &TaggedFile) -> Option<&Tag> {
-    file.primary_tag().or_else(|| file.first_tag())
 }
 
 /// An MP4 file's audio sample entry `samplesize` (mutagen's
@@ -224,33 +134,6 @@ fn mp4_sample_size(path: &Path) -> Option<i64> {
     None
 }
 
-/// The APEv2 tag of a WavPack or Monkey's Audio file. MediaFile reads
-/// some fields under names lofty's APE mapping lacks (mutagen's APE keys
-/// are case-insensitive): `DATE`/`YEAR`, `ALBUM_ARTIST`.
-fn ape_tag(path: &Path, ft: FileType) -> Option<lofty::ape::ApeTag> {
-    use lofty::config::ParseOptions;
-    let mut f = std::fs::File::open(path).ok()?;
-    let opts = ParseOptions::new().read_properties(false);
-    match ft {
-        FileType::WavPack => lofty::wavpack::WavPackFile::read_from(&mut f, opts)
-            .ok()?
-            .ape()
-            .cloned(),
-        FileType::Ape => lofty::ape::ApeFile::read_from(&mut f, opts)
-            .ok()?
-            .ape()
-            .cloned(),
-        _ => None,
-    }
-}
-
-/// The first of `keys` an APEv2 tag has as text.
-fn ape_text(ape: Option<&lofty::ape::ApeTag>, keys: &[&str]) -> Option<String> {
-    let ape = ape?;
-    keys.iter()
-        .find_map(|k| ape.get(k)?.value().text().map(str::to_string))
-}
-
 /// Read an audio file into a new (unsaved) item.
 pub fn read(path: &Path) -> Result<Item> {
     let file = lofty::read_from_path(path)
@@ -291,70 +174,20 @@ pub fn read(path: &Path) -> Result<Item> {
         (ft, _) => format_name(ft),
     };
     item.set_str("format", format);
-    let ape = ape_tag(path, file.file_type());
-    if let Some(tag) = pick_tag(&file) {
-        item.set_str("title", tag.title().unwrap_or_default());
-        item.set_str("artist", tag.artist().unwrap_or_default());
-        item.set_str("album", tag.album().unwrap_or_default());
-        item.set_str("genre", tag.genre().unwrap_or_default());
-        item.set_str("comments", tag.comment().unwrap_or_default());
-        item.set_int("track", tag.track().unwrap_or(0) as i64);
-        item.set_int("tracktotal", tag.track_total().unwrap_or(0) as i64);
-        item.set_int("disc", tag.disk().unwrap_or(0) as i64);
-        item.set_int("disctotal", tag.disk_total().unwrap_or(0) as i64);
-        for (field, key) in TEXT_KEYS {
-            if let Some(v) = tag.get_string(*key) {
-                item.set_str(field, v);
+    let mf = MediaFile::open(path)?;
+    for f in TAG_FIELDS {
+        let v = match mf.get(f) {
+            Some(Got::Str(Some(s))) => Value::Str(s),
+            Some(Got::Int(Some(i))) => Value::Int(i),
+            Some(Got::Bool(Some(b))) => Value::Bool(b),
+            Some(Got::Float(Some(x))) => Value::Float(x),
+            Some(Got::List(Some(v))) => {
+                item.set_list(f, &v);
+                continue;
             }
-        }
-        // ID3v2 only knows USLT, which lofty calls UnsyncLyrics.
-        if let Some(l) = tag
-            .get_string(ItemKey::Lyrics)
-            .or_else(|| tag.get_string(ItemKey::UnsyncLyrics))
-        {
-            item.set_str("lyrics", l);
-        }
-        // ID3 keeps the label in TPUB, which lofty reads back as Publisher.
-        if item.str("label").is_empty()
-            && let Some(v) = tag.get_string(ItemKey::Publisher)
-        {
-            item.set_str("label", v);
-        }
-        if item.str("albumartist").is_empty()
-            && let Some(v) = ape_text(ape.as_ref(), &["ALBUM_ARTIST"])
-        {
-            item.set_str("albumartist", v);
-        }
-        let date = tag
-            .get_string(ItemKey::RecordingDate)
-            .or_else(|| tag.get_string(ItemKey::Year))
-            .or_else(|| tag.get_string(ItemKey::ReleaseDate))
-            .map(str::to_string)
-            .or_else(|| ape_text(ape.as_ref(), &["DATE", "YEAR"]));
-        if let Some(d) = date {
-            let (y, m, dd) = parse_date(&d);
-            item.set_int("year", y);
-            item.set_int("month", m);
-            item.set_int("day", dd);
-        }
-        if let Some(d) = tag.get_string(ItemKey::OriginalReleaseDate) {
-            let (y, m, dd) = parse_date(d);
-            item.set_int("original_year", y);
-            item.set_int("original_month", m);
-            item.set_int("original_day", dd);
-        }
-        if let Some(c) = tag.get_string(ItemKey::FlagCompilation) {
-            item.set(
-                "comp",
-                Value::Bool(crate::model::parse_bool(c.trim()).unwrap_or(false)),
-            );
-        }
-        if let Some(b) = tag
-            .get_string(ItemKey::IntegerBpm)
-            .or_else(|| tag.get_string(ItemKey::Bpm))
-        {
-            item.set_int("bpm", b.trim().parse::<f64>().unwrap_or(0.0).round() as i64);
-        }
+            _ => Value::Null,
+        };
+        item.set(f, v);
     }
     // Last: setting the tag fields reset it (beets' `from_path`).
     refresh_mtime(&mut item);
@@ -380,53 +213,25 @@ pub fn refresh_mtime(item: &mut Item) {
     }
 }
 
-/// Open a file and make sure it has a primary tag to edit.
-fn open_for_edit(path: &Path) -> Result<TaggedFile> {
-    let mut file =
-        lofty::read_from_path(path).with_context(|| format!("reading {}", path.display()))?;
-    let tag_type = file.primary_tag_type();
-    if file.tag(tag_type).is_none() {
-        file.insert_tag(Tag::new(tag_type));
-    }
-    Ok(file)
-}
-
-fn save(file: &TaggedFile, path: &Path) -> Result<()> {
-    file.save_to_path(path, WriteOptions::default())
-        .with_context(|| format!("writing tags to {}", path.display()))
-}
-
-/// Embed an image as the front cover, replacing any existing front cover.
+/// Embed an image as the front cover, replacing any existing front cover
+/// (in the tag MediaFile uses, keeping every other tag as it is).
 pub fn embed_art(path: &Path, image: &[u8]) -> Result<()> {
-    let mut pic = Picture::from_reader(&mut &image[..])
+    let pic = Picture::from_reader(&mut &image[..])
         .map_err(|e| anyhow::anyhow!("not a usable image: {e}"))?;
-    pic.set_pic_type(PictureType::CoverFront);
-    let mut file = open_for_edit(path)?;
-    let tag = file.primary_tag_mut().unwrap();
-    if tag.tag_type() == lofty::tag::TagType::Mp4Ilst {
-        // MP4 cover atoms carry no picture type, so every one counts as "the" cover.
-        while tag.picture_count() > 0 {
-            tag.remove_picture(0);
-        }
-    } else {
-        tag.remove_picture_type(PictureType::CoverFront);
-    }
-    tag.push_picture(pic);
-    save(&file, path)
+    let mut mf = MediaFile::open(path)?;
+    mf.set_front_cover(pic);
+    mf.save(id3v23())
 }
 
-/// Whether any tag in the file carries a picture.
+/// Whether the file has embedded pictures (beets' `has_cover_art`:
+/// MediaFile's `images`).
 pub fn has_art(path: &Path) -> Result<bool> {
-    let file =
-        lofty::read_from_path(path).with_context(|| format!("reading {}", path.display()))?;
-    Ok(file.tags().iter().any(|t| t.picture_count() > 0))
+    Ok(!MediaFile::open(path)?.pictures().is_empty())
 }
 
 /// The embedded front cover (or else the first picture) and a file extension for it.
 pub fn extract_art(path: &Path) -> Result<Option<(Vec<u8>, &'static str)>> {
-    let file =
-        lofty::read_from_path(path).with_context(|| format!("reading {}", path.display()))?;
-    let pics: Vec<&Picture> = file.tags().iter().flat_map(|t| t.pictures()).collect();
+    let pics = MediaFile::open(path)?.pictures();
     let Some(pic) = pics
         .iter()
         .find(|p| p.pic_type() == PictureType::CoverFront)
@@ -444,21 +249,13 @@ pub fn extract_art(path: &Path) -> Result<Option<(Vec<u8>, &'static str)>> {
     Ok(Some((pic.data().to_vec(), ext)))
 }
 
-/// Remove every embedded picture. Returns whether anything was removed.
+/// Remove every embedded picture (from the tag MediaFile uses). Returns
+/// whether anything was removed.
 pub fn clear_art(path: &Path) -> Result<bool> {
-    let mut file =
-        lofty::read_from_path(path).with_context(|| format!("reading {}", path.display()))?;
-    let mut removed = false;
-    let types: Vec<_> = file.tags().iter().map(|t| t.tag_type()).collect();
-    for tt in types {
-        let tag = file.tag_mut(tt).unwrap();
-        while tag.picture_count() > 0 {
-            tag.remove_picture(0);
-            removed = true;
-        }
-    }
+    let mut mf = MediaFile::open(path)?;
+    let removed = mf.clear_pictures();
     if removed {
-        save(&file, path)?;
+        mf.save(id3v23())?;
     }
     Ok(removed)
 }
@@ -469,74 +266,26 @@ pub fn write(item: &Item) -> Result<()> {
 }
 
 pub fn write_to(item: &Item, path: &Path) -> Result<()> {
-    let mut file =
-        lofty::read_from_path(path).with_context(|| format!("reading {}", path.display()))?;
-    let tag_type = file.primary_tag_type();
-    if file.tag(tag_type).is_none() {
-        file.insert_tag(Tag::new(tag_type));
-    }
-    let tag = file.tag_mut(tag_type).unwrap();
+    write_with(item, path, id3v23())
+}
 
-    let set_text = |tag: &mut Tag, key: ItemKey, v: &str| {
-        if v.is_empty() {
-            tag.remove_key(key);
-        } else {
-            tag.insert_text(key, v.to_string());
-        }
-    };
-    set_text(tag, ItemKey::TrackTitle, item.str("title"));
-    set_text(tag, ItemKey::TrackArtist, item.str("artist"));
-    set_text(tag, ItemKey::AlbumTitle, item.str("album"));
-    set_text(tag, ItemKey::Genre, item.str("genre"));
-    set_text(tag, ItemKey::Comment, item.str("comments"));
-    for (field, key) in TEXT_KEYS {
-        set_text(tag, *key, item.str(field));
-    }
-    let lyrics = item.str("lyrics");
-    tag.remove_key(ItemKey::Lyrics);
-    tag.remove_key(ItemKey::UnsyncLyrics);
-    if !lyrics.is_empty() && !tag.insert_text(ItemKey::Lyrics, lyrics.to_string()) {
-        tag.insert_text(ItemKey::UnsyncLyrics, lyrics.to_string());
-    }
-    let num = |tag: &mut Tag, key: ItemKey, v: i64| {
-        if v > 0 {
-            tag.insert_text(key, v.to_string());
-        } else {
-            tag.remove_key(key);
-        }
-    };
-    num(tag, ItemKey::TrackNumber, item.int("track"));
-    num(tag, ItemKey::TrackTotal, item.int("tracktotal"));
-    num(tag, ItemKey::DiscNumber, item.int("disc"));
-    num(tag, ItemKey::DiscTotal, item.int("disctotal"));
-    num(tag, ItemKey::IntegerBpm, item.int("bpm"));
+/// beets' `Item.write`: every media field into the file's tags, MP3s'
+/// ID3 tags as ID3v2.3 with `id3v23`.
+pub fn write_with(item: &Item, path: &Path, id3v23: bool) -> Result<()> {
+    let mut mf = MediaFile::open(path)?;
+    mf.update(item);
+    mf.save(id3v23)
+}
 
-    tag.remove_key(ItemKey::Year);
-    match date_string(item.int("year"), item.int("month"), item.int("day")) {
-        Some(d) => {
-            tag.insert_text(ItemKey::RecordingDate, d);
-        }
-        None => tag.remove_key(ItemKey::RecordingDate),
-    }
-    match date_string(
-        item.int("original_year"),
-        item.int("original_month"),
-        item.int("original_day"),
-    ) {
-        Some(d) => {
-            tag.insert_text(ItemKey::OriginalReleaseDate, d);
-        }
-        None => tag.remove_key(ItemKey::OriginalReleaseDate),
-    }
-    if item.bool("comp") {
-        tag.insert_text(ItemKey::FlagCompilation, "1".into());
-    } else {
-        tag.remove_key(ItemKey::FlagCompilation);
-    }
+static ID3V23: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
-    file.save_to_path(path, WriteOptions::default())
-        .with_context(|| format!("writing tags to {}", path.display()))?;
-    Ok(())
+/// The `id3v23` option, set from the configuration at startup.
+pub fn set_id3v23(on: bool) {
+    ID3V23.store(on, std::sync::atomic::Ordering::Relaxed);
+}
+
+pub fn id3v23() -> bool {
+    ID3V23.load(std::sync::atomic::Ordering::Relaxed)
 }
 
 #[cfg(test)]
@@ -566,13 +315,6 @@ mod tests {
             return;
         }
         assert_eq!(read(&p).unwrap().int("bitdepth"), 16);
-    }
-
-    #[test]
-    fn dates() {
-        assert_eq!(parse_date("2003-05-12T00:00"), (2003, 5, 12));
-        assert_eq!(parse_date("1999"), (1999, 0, 0));
-        assert_eq!(date_string(1999, 3, 0).unwrap(), "1999-03");
     }
 }
 

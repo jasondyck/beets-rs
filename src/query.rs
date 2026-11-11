@@ -104,11 +104,14 @@ pub enum PyVal {
     Float(f64),
     Str(String),
     Bytes(Vec<u8>),
+    /// A list field's values (beets' `DelimitedString`).
+    List(Vec<String>),
 }
 
 impl PyVal {
     fn from_value(v: Value) -> PyVal {
         match v {
+            Value::Null => PyVal::None,
             Value::Str(s) => PyVal::Str(s),
             Value::Int(i) => PyVal::Int(i),
             Value::Float(f) => PyVal::Float(f),
@@ -135,6 +138,22 @@ impl PyVal {
             PyVal::Float(f) => py_float(*f),
             PyVal::Str(s) => s.clone(),
             PyVal::Bytes(b) => String::from_utf8_lossy(b).into_owned(),
+            // `str(list)`.
+            PyVal::List(v) => format!(
+                "[{}]",
+                v.iter()
+                    .map(|s| format!("'{s}'"))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ),
+        }
+    }
+
+    /// `StringFieldQuery.value_match`: a list matches if any value does.
+    fn strings(self) -> Vec<String> {
+        match self {
+            PyVal::List(v) => v,
+            v => vec![v.as_string()],
         }
     }
 
@@ -251,9 +270,9 @@ fn search_fields(kind: Kind) -> &'static [&'static str] {
             "comments",
             "album",
             "albumartist",
-            "genre",
+            "genres",
         ],
-        Kind::Album => &["album", "albumartist", "genre"],
+        Kind::Album => &["album", "albumartist", "genres"],
     }
 }
 
@@ -346,6 +365,9 @@ impl<'a> Obj<'a> {
             },
         }
         if has_own(rec.kind, key) {
+            if let Some(FieldType::List(_)) = own_type(rec.kind, key) {
+                return Some(PyVal::List(rec.list(key)));
+            }
             return rec.get(key).map(PyVal::from_value);
         }
         if let Some(v) = rec.flex.get(key) {
@@ -576,6 +598,7 @@ impl FieldQuery {
                     PyVal::Bytes(b) => SqlValue::Blob(b.clone()),
                     PyVal::None => SqlValue::Null,
                     PyVal::Str(s) => SqlValue::Text(s.clone()),
+                    PyVal::List(v) => SqlValue::Text(v.join(crate::model::MULTI)),
                 }],
             ),
             Test::Regexp(re) => (
@@ -652,15 +675,25 @@ impl FieldQuery {
     fn matches(&self, obj: &Obj) -> bool {
         let value = self.value(obj);
         match &self.test {
-            Test::Substring(p) => {
-                lower(&value.unwrap_or(PyVal::None).as_string()).contains(&lower(p))
-            }
-            Test::String(p) => lower(&value.unwrap_or(PyVal::None).as_string()) == lower(p),
-            Test::Match(p) => p.py_eq(&value.unwrap_or(PyVal::None)),
-            Test::Regexp(re) => {
-                let s: String = value.unwrap_or(PyVal::None).as_string().nfc().collect();
+            Test::Substring(p) => value
+                .unwrap_or(PyVal::None)
+                .strings()
+                .iter()
+                .any(|s| lower(s).contains(&lower(p))),
+            Test::String(p) => value
+                .unwrap_or(PyVal::None)
+                .strings()
+                .iter()
+                .any(|s| lower(s) == lower(p)),
+            // `MatchQuery.value_match`: `pattern in value` for a list.
+            Test::Match(p) => match value.unwrap_or(PyVal::None) {
+                PyVal::List(v) => v.iter().any(|s| p.py_eq(&PyVal::Str(s.clone()))),
+                v => p.py_eq(&v),
+            },
+            Test::Regexp(re) => value.unwrap_or(PyVal::None).strings().iter().any(|s| {
+                let s: String = s.nfc().collect();
                 re.is_match(&s).unwrap_or(false)
-            }
+            }),
             Test::Numeric { point, min, max } => {
                 let Some(v) = value else { return false };
                 let v = match v {
@@ -1097,7 +1130,10 @@ fn construct_query_part(kind: Kind, part: &str) -> Result<Pred, String> {
                 .map(|f| field_query(kind, f, &pattern, class))
                 .collect::<Result<_, _>>()?,
         ),
-        Some(k) => field_query(kind, &lower(&k), &pattern, class)?,
+        Some(k) => {
+            let field = crate::model::replace_legacy_field(kind, &lower(&k), false);
+            field_query(kind, &field, &pattern, class)?
+        }
     };
     Ok(if negate { Pred::Not(Box::new(q)) } else { q })
 }
@@ -1276,6 +1312,7 @@ fn py_cmp(a: &PyVal, b: &PyVal) -> Ordering {
         PyVal::Bool(_) | PyVal::Int(_) | PyVal::Float(_) => 1,
         PyVal::Str(_) => 2,
         PyVal::Bytes(_) => 3,
+        PyVal::List(_) => 4,
     };
     match (a, b) {
         (PyVal::Str(x), PyVal::Str(y)) => x.cmp(y),

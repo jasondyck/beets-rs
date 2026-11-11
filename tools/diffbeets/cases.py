@@ -45,6 +45,7 @@ replace:
     "nocaseins.yaml": "sort_case_insensitive: no\n",
     "sortcfg.yaml": "sort_item: title- \nsort_album: year+ album-\n",
     "art.yaml": "art_filename: 'cover-$album'\n",
+    "id3v23.yaml": "id3v23: yes\n",
 }
 
 # ---------------------------------------------------------------------------
@@ -140,6 +141,22 @@ CORPUS = (
            ("flac", "flac", "1.37"), ("m4a", "m4a", "1.37"), ("m4a", "alac", "0.5"),
            ("ogg", "ogg", "3.33"), ("opus", "opus", "1.37"), ("wv", "wv", "2.05"),
            ("aiff", "aiff", "1.37")], 1)]
+    # Tags for MediaFile's other fields, as ffmpeg writes them per format
+    # (MP3 frames and TXXX, Vorbis comments, APEv2): alternative keys
+    # ("ALBUM ARTIST" before "ALBUMARTIST"), "; " in a genre (a list in
+    # beets), ReplayGain/R128, an MP3 "compilation" (ffmpeg's TXXX:TCMP,
+    # which beets ignores).
+    + [(f"a15/{n:02d}.{ext}", ext,
+        {"artist": "Zoo Keeper", "album": "Tag Zoo", "title": f"Zoo {ext}",
+         "track": str(n), "date": "2018-06-01", "composer": "Comp One",
+         "genre": "Rock; Pop", "ARTISTS": "Zoo Keeper", "grouping": "Grp",
+         "MusicBrainz Artist Id": "mbid-1", "REPLAYGAIN_TRACK_GAIN": "-4.20 dB",
+         "R128_TRACK_GAIN": "-512", "compilation": "1", "initialkey": "Ebm",
+         "BPM": "99", "ISRC": "US1234", "LABEL": "Lbl", "publisher": "Pub",
+         "ALBUM ARTIST": "Zoo Band", "album_artist": "Zoo Band 2", "disc": "2/3",
+         "lyrics": "la la", "MUSICBRAINZ_ARTISTID": "mbid-v", "ARRANGER": "Arr",
+         "ORIGINALDATE": "1999-02", "RELEASETYPE": "album", "SCRIPT": "Latn"})
+       for n, ext in enumerate(["mp3", "flac", "ogg", "opus", "wv"], 1)]
     + [
         ("s03/pcm.wav", "wav", {"_d": "1.37"}),
         ("s01/lone1.mp3", "mp3", {"artist": "Solo Artist", "title": "Lone Track",
@@ -158,7 +175,7 @@ CORPUS = (
 IMPORTS = [
     ["import", "-A", "-q", d]
     for d in ["a01", "a02", "a03", "a04", "a05", "a06", "a07", "a08", "a09",
-              "a10", "a11", "a12", "a13", "a14"]
+              "a10", "a11", "a12", "a13", "a14", "a15"]
 ] + [
     ["import", "-A", "-q", "-s", "s01"],
     ["import", "-A", "-q", "-s", "s02"],
@@ -183,6 +200,15 @@ MODIFIES = [
     ["modify", "-y", "title:Other Two", "title=Other Two (Live)", "year=2006"],
     ["modify", "-y", "album:No Year", "mood!"],
     ["modify", "-y", "title:Ogg", "mood=calm", "rating=7"],
+    # Multi-valued fields: assignment ("; " separated), += and -=, the
+    # legacy single-valued names, nullable floats and musical keys.
+    ["modify", "-y", "title:Hit One", "genres=Pop; Rock", "artists=Artist C; Guest",
+     "composers=X; Y", "rg_track_gain=-6.5", "initial_key=Ebm", "mb_artistids=m1; m2"],
+    ["modify", "-y", "album:Tag Zoo", "genres+=Jazz; Pop"],
+    ["modify", "-y", "album:Tag Zoo", "format:FLAC", "genres-=Rock"],
+    ["modify", "-y", "title:Hit Three", "genre=Ska", "composer=Solo"],
+    ["modify", "-y", "-a", "album:Vorbis Album", "genres=Ambient; Drone",
+     "albumtypes=album; live", "rg_album_gain=1.5"],
 ]
 
 # ---------------------------------------------------------------------------
@@ -442,9 +468,51 @@ QUERIES = [
     "./Compilations",
     "path:./Compilations",
     "path:Lossless/../Compilations",
-    # multi-valued (beets 2.14 lists) -- known gap
+    # multi-valued (beets 2.14 lists): SQL matches the joined string
     "genres:rock",
     "genre:Rock",
+    "Genre:Rock",
+    "genres:pop",
+    "genres::^Pop",
+    "genres::Rock$",
+    "genres:=Pop",
+    "genres:=Ska",
+    "genres:=Pop; Rock",
+    "genres:=~ska",
+    "genres:Rock genres:Pop",
+    "genres:Jazz -format:FLAC",
+    "genres:",
+    "genre:jazz , composer:solo",
+    "composer:X",
+    "composers:Y",
+    "composers:Comp",
+    "artists:Guest",
+    "artists::^Artist C",
+    "albumtypes:live",
+    "ska",
+    "drone",
+    # new fields read from tags; nullable floats
+    "rg_track_gain:-7..-6",
+    "rg_track_gain:..0",
+    "rg_track_gain:-4.2",
+    "rg_album_gain:1.5",
+    "rg_album_gain:",
+    "r128_track_gain:-2",
+    "initial_key:D#m",
+    "initial_key:Ebm",
+    "initial_key:",
+    "label:Lbl",
+    "label:Pub",
+    "bpm:99",
+    "isrc:US1234",
+    "mb_artistid:mbid",
+    "mb_artistids:m2",
+    "encoder:Lav",
+    "comp:true album:Tag",
+    "arrangers:Arr",
+    "original_year:1999",
+    "script:Latn",
+    "albumtype:album",
 ]
 
 # ---------------------------------------------------------------------------
@@ -594,6 +662,22 @@ TEMPLATES = [
     "$title (%if{$year,$year,unknown})",
     "%right{000$track,3}",
     "${title}${year}",
+    # multi-valued fields, legacy names, MediaFile fields
+    "$genres",
+    "$genre $composer",
+    "$artists | $composers | $arrangers",
+    "%first{$genres}",
+    "%first{$genres,1,1}",
+    "$mb_artistids $mb_artistid",
+    "$albumtypes $albumtype",
+    "$rg_track_gain $rg_track_peak $rg_album_gain $rg_album_peak",
+    "$r128_track_gain $r128_album_gain",
+    "$initial_key",
+    "$label $isrc $bpm $lyrics $script",
+    "$disc/$disctotal $original_year-$original_month",
+    "$albumartist $albumartists $grouping $comp",
+    "$lyricists $remixers $subtitle $work $trackdisambig",
+    "%if{$genres,$genres,none}",
 ]
 
 # Path formats for `mv -p -d <root>/dest`, given with `-c` so they replace
@@ -628,6 +712,8 @@ PATHS = [
     "$title.$format",
     "%time{$added,%Y}/$title",
     "$length/$title",
+    "$genres/$title",
+    "%first{$genres}/$albumartist/$title",
 ]
 
 
@@ -687,6 +773,30 @@ STATS = [[], ["-e"], ["Hit"], ["-e", "Hit"], ["-l", "3"], ["-e", "-l", "3"],
          ["-l", "2", "title+"], ["-e", "-l", "4", "singleton:true"]]
 
 
+# Tag round trips (after the cases above): each tool writes its library's
+# tags into its files (`write`, then `write -f` as ID3v2.3), the files
+# are compared as MediaFile reads them; then both tools import the files
+# reference beets wrote and list every tag field.
+TAG_WRITES = [("write", ["write"]), ("write id3v23", ["-c", f"{ROOT}/id3v23.yaml", "write", "-f"])]
+TAG_FIELDS = [
+    "acoustid_fingerprint", "acoustid_id", "album", "albumartist", "albumartist_credit",
+    "albumartist_sort", "albumartists", "albumartists_credit", "albumartists_sort",
+    "albumdisambig", "albumstatus", "albumtype", "albumtypes", "arrangers", "artist",
+    "artist_credit", "artist_sort", "artists", "artists_credit", "artists_sort", "asin",
+    "barcode", "bpm", "catalognum", "comments", "comp", "composer_sort", "composers",
+    "country", "day", "disc", "disctitle", "disctotal", "encoder", "genres", "grouping",
+    "initial_key", "isrc", "label", "language", "lyricists", "lyrics", "mb_albumartistid",
+    "mb_albumartistids", "mb_albumid", "mb_artistid", "mb_artistids", "mb_releasegroupid",
+    "mb_releasetrackid", "mb_trackid", "mb_workid", "media", "month", "original_day",
+    "original_month", "original_year", "r128_album_gain", "r128_track_gain", "remixers",
+    "rg_album_gain", "rg_album_peak", "rg_track_gain", "rg_track_peak", "script",
+    "subtitle", "title", "track", "tracktotal", "year",
+]
+# (No $path: which of two same-titled singletons gets the plain name depends
+# on the import order.)
+TAG_TEMPLATE = "|".join(f"{f}=${f}" for f in TAG_FIELDS)
+
+
 def cases():
     out = []
     for q in RAW_DASH:
@@ -743,11 +853,14 @@ _ALBUM_SORT_DUP = ("beets bug: sorting albums by an item field LEFT JOINs the "
 _ALBUM_SORT_CRASH = ("beets bug: sorting albums by a field both tables have "
                      "(after the item join) crashes with sqlite3 "
                      "'ambiguous column name'; beets-rs sorts by the album's field")
-_MULTI = ("multi-valued fields (beets 2.x `genres`, `artists`, ...; `genre` "
-          "deprecated with a warning) are PORTING.md 3.3")
-_ENCODER = "`encoder` (and other MediaFile fields) not read yet: PORTING.md 3.3"
+
+_EMPTY_TAGS = ("beets writes an empty list field to APEv2 as an empty value (beets-rs "
+               "removes the tag; MediaFile reads both as no value) and reads that back "
+               "as [''], so its `write -f` after its first `write` lists the WavPack "
+               "file's empty list fields as changed")
 
 EXPECTED = {
+    "tags:write id3v23": _EMPTY_TAGS,
     **{f"ls (no --):{q}": _CLI for q in RAW_DASH},
     "ls:year::199(": _REGEX,
     "ls -a:year::199(": _REGEX,
@@ -764,10 +877,4 @@ EXPECTED = {
         "artist+ title-", "album+ disc- track-", "added- title+", "comp+ title+",
         "artist:artist year- title+",
     ]},
-    "ls:genres:rock": _MULTI,
-    "ls -a:genres:rock": _MULTI,
-    "ls:genre:Rock": _MULTI,
-    "ls -a:genre:Rock": _MULTI,
-    "ls -f:$encoder": _ENCODER,
-    "mv -p paths:$genre/$artist/$title": _MULTI,
 }
