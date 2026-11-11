@@ -381,16 +381,16 @@ pub fn recommend(cfg: &Config, dists: &[&Distance]) -> Recommendation {
         return Recommendation::None;
     };
     let d = best.distance();
-    let mut rec = if d <= cfg.f64("match.strong_rec_thresh") {
+    // As beets' `_recommendation`: strong is strictly below its threshold,
+    // and several close candidates give no recommendation at all.
+    let mut rec = if d < cfg.f64("match.strong_rec_thresh") {
         Recommendation::Strong
     } else if d <= cfg.f64("match.medium_rec_thresh") {
         Recommendation::Medium
-    } else if dists.len() == 1 {
+    } else if dists.len() == 1 || dists[1].distance() - d >= cfg.f64("match.rec_gap_thresh") {
         Recommendation::Low
-    } else if dists[1].distance() - d >= cfg.f64("match.rec_gap_thresh") {
-        Recommendation::Medium
     } else {
-        Recommendation::Low
+        return Recommendation::None;
     };
     for (key, max) in cfg.mapping("match.max_rec") {
         if best.has(&key) {
@@ -720,5 +720,22 @@ mod tests {
         let m = match_album(&cfg, &items, info());
         assert!(m.distance.distance() > 0.4, "{}", m.distance.distance());
         assert_eq!(recommend(&cfg, &[&m.distance]), Recommendation::Low);
+    }
+
+    #[test]
+    fn close_weak_candidates_give_no_recommendation() {
+        let cfg = Config::defaults();
+        let mut items = vec![item("Foo", 1, 30.0), item("Bar", 2, 500.0)];
+        for i in &mut items {
+            i.set_str("artist", "Someone Else");
+            i.set_str("album", "Other");
+        }
+        let a = match_album(&cfg, &items, info());
+        let b = match_album(&cfg, &items, info());
+        // Two equally weak candidates: beets has no recommendation.
+        assert_eq!(
+            recommend(&cfg, &[&a.distance, &b.distance]),
+            Recommendation::None
+        );
     }
 }

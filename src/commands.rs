@@ -57,31 +57,54 @@ pub fn run(cli: Cli) -> Result<()> {
             copy,
             nocopy,
             mv,
+            nomove,
             write,
             nowrite,
             quiet,
+            quiet_fallback,
+            log,
             timid,
+            autotag,
             noautotag,
             singletons,
             group_albums,
             search_id,
+            flat,
             pretend,
+            set,
             incremental,
             noincremental,
+            incremental_skip_later,
+            noincremental_skip_later,
             resume,
             noresume,
             paths,
         } => {
             let mut opts = ImportOptions::from_config(&cfg);
+            // As beets: -c/-C and -m/-M override `copy` and `move`
+            // separately, -c also turns move off, and move wins over copy.
+            let mut do_copy = cfg.bool("import.copy");
+            let mut do_move = cfg.bool("import.move");
             if copy {
-                opts.op = FileOp::Copy;
+                do_copy = true;
+                do_move = false;
             }
             if nocopy {
-                opts.op = FileOp::None;
+                do_copy = false;
             }
             if mv {
-                opts.op = FileOp::Move;
+                do_move = true;
             }
+            if nomove {
+                do_move = false;
+            }
+            opts.op = if do_move {
+                FileOp::Move
+            } else if do_copy {
+                FileOp::Copy
+            } else {
+                FileOp::None
+            };
             if write {
                 opts.write = true;
             }
@@ -89,12 +112,36 @@ pub fn run(cli: Cli) -> Result<()> {
                 opts.write = false;
             }
             opts.quiet |= quiet;
+            if let Some(f) = quiet_fallback {
+                opts.quiet_fallback_asis = f == "asis";
+            }
+            if log.is_some() {
+                opts.log = log;
+            }
             opts.timid |= timid;
-            opts.autotag &= !noautotag;
+            if autotag {
+                opts.autotag = true;
+            }
+            if noautotag {
+                opts.autotag = false;
+            }
             opts.singletons |= singletons;
             opts.group_albums |= group_albums;
+            opts.flat |= flat;
             opts.search_ids = search_id;
-            opts.pretend = pretend;
+            opts.pretend |= pretend;
+            for kv in &set {
+                // `--set` pairs override `import.set_fields` entries of the same name.
+                let (k, v) = importer::parse_set_field(kv)?;
+                opts.set_fields.retain(|(f, _)| f != k);
+                opts.set_fields.push((k.to_string(), v.to_string()));
+            }
+            if incremental_skip_later {
+                opts.incremental_skip_later = true;
+            }
+            if noincremental_skip_later {
+                opts.incremental_skip_later = false;
+            }
             if incremental {
                 opts.incremental = true;
             }
@@ -107,8 +154,15 @@ pub fn run(cli: Cli) -> Result<()> {
             if noresume {
                 opts.resume = Resume::No;
             }
+            if opts.quiet && opts.timid {
+                bail!("can't be both quiet and timid");
+            }
+            let pretend = opts.pretend;
             let mut imp = Importer::new(&cfg, &lib, opts, &plugins)?;
             imp.run(&paths)?;
+            if pretend {
+                return Ok(());
+            }
             let s = &imp.stats;
             println!();
             let already = if s.already > 0 {

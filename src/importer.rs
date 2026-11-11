@@ -10,10 +10,12 @@ use crate::model::{Album, Item, Value, format_duration};
 use crate::paths::PathFormatter;
 use crate::plugins::{self, Plugin, PluginCtx};
 use crate::state::ImportState;
+use crate::template::{self, Template};
 use crate::ui::{self, Choice};
 use anyhow::{Context, Result, bail};
 use regex::Regex;
 use std::collections::BTreeMap;
+use std::io::Write as _;
 use std::path::{Path, PathBuf};
 use std::sync::LazyLock;
 
@@ -41,6 +43,49 @@ pub struct ImportOptions {
     /// With `incremental`, don't record skipped albums, so they come back.
     pub incremental_skip_later: bool,
     pub resume: Resume,
+    /// `import.set_fields` / `--set`: field name and value template.
+    pub set_fields: Vec<(String, String)>,
+    /// `import.log` / `-l`: where to log skipped and as-is albums.
+    pub log: Option<PathBuf>,
+    /// `--flat`: each import path is one album, however deep its files are.
+    pub flat: bool,
+    pub none_rec_action: NoneRecAction,
+    /// `import.detail`: list every track in a match, not just changed ones.
+    pub detail: bool,
+}
+
+/// `import.none_rec_action`: what to do, outside quiet mode, when the
+/// autotagger has no recommendation at all.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NoneRecAction {
+    Ask,
+    AsIs,
+    Skip,
+}
+
+/// Split a `--set` argument into field and value, as beets' `_store_dict`.
+pub fn parse_set_field(kv: &str) -> Result<(&str, &str)> {
+    match kv.split_once('=') {
+        Some((k, v)) if !k.is_empty() && !v.is_empty() => Ok((k, v)),
+        _ => bail!("supplied argument `{kv}' is not of the form `key=value'"),
+    }
+}
+
+/// Template context for `set_fields`: the record's own fields, then (for
+/// an item) its album's.
+struct SetCtx<'a> {
+    rec: &'a Item,
+    album: Option<&'a Album>,
+}
+
+impl template::Context for SetCtx<'_> {
+    fn field(&self, name: &str) -> Option<String> {
+        if self.rec.has_field(name) {
+            self.rec.formatted(name)
+        } else {
+            self.album.and_then(|a| a.formatted(name))
+        }
+    }
 }
 
 /// `import.resume`: what to do when an earlier import of a path was interrupted.
@@ -78,7 +123,7 @@ impl ImportOptions {
             singletons: cfg.bool("import.singletons"),
             group_albums: cfg.bool("import.group_albums"),
             search_ids: vec![],
-            pretend: false,
+            pretend: cfg.bool("import.pretend"),
             incremental: cfg.bool("import.incremental"),
             incremental_skip_later: cfg.bool("import.incremental_skip_later"),
             resume: match cfg.str("import.resume").as_str() {
@@ -86,6 +131,20 @@ impl ImportOptions {
                 "no" | "false" => Resume::No,
                 _ => Resume::Ask,
             },
+            set_fields: cfg.mapping("import.set_fields"),
+            // A relative path in the config file is relative to the config
+            // dir (like confuse's `as_filename`); `-l` is relative to the cwd.
+            log: match cfg.str("import.log") {
+                s if s.is_empty() => None,
+                s => Some(cfg.config_dir.join(crate::config::expand_tilde(&s))),
+            },
+            flat: cfg.bool("import.flat"),
+            none_rec_action: match cfg.str("import.none_rec_action").as_str() {
+                "asis" => NoneRecAction::AsIs,
+                "skip" => NoneRecAction::Skip,
+                _ => NoneRecAction::Ask,
+            },
+            detail: cfg.bool("import.detail"),
         }
     }
 }
@@ -162,6 +221,7 @@ pub struct Importer<'a> {
     plugins: &'a [Box<dyn Plugin>],
     state: ImportState,
     state_path: PathBuf,
+    log: Option<std::fs::File>,
 }
 
 static DISC_DIR: LazyLock<Regex> =
@@ -306,7 +366,20 @@ impl<'a> Importer<'a> {
         opts: ImportOptions,
         plugins: &'a [Box<dyn Plugin>],
     ) -> Result<Self> {
+        let log = match &opts.log {
+            Some(path) => Some(
+                std::fs::OpenOptions::new()
+                    .create(true)
+                    .append(true)
+                    .open(path)
+                    .map_err(|_| {
+                        anyhow::anyhow!("Could not open log file for writing: {}", path.display())
+                    })?,
+            ),
+            None => None,
+        };
         Ok(Importer {
+            log,
             cfg,
             lib,
             fmt: PathFormatter::new(cfg)?,
@@ -321,6 +394,11 @@ impl<'a> Importer<'a> {
     }
 
     pub fn run(&mut self, paths: &[PathBuf]) -> Result<()> {
+        if self.log.is_some() {
+            // Python's time.asctime(), as in beets' "import started" line.
+            let now = chrono::Local::now().format("%a %b %e %H:%M:%S %Y");
+            self.log_line(&format!("import started {now}"));
+        }
         // As in beets: incremental imports use history instead of progress,
         // `resume: no` neither resumes nor records progress, and quiet mode
         // never asks, so `resume: ask` behaves like `no` there.
@@ -352,7 +430,13 @@ impl<'a> Importer<'a> {
                 }
                 Default::default()
             };
-            for (key, group) in group_files(&p)? {
+            let groups = if self.opts.flat && p.is_dir() {
+                let files = group_files(&p)?.into_iter().flat_map(|(_, f)| f).collect();
+                vec![(p.clone(), files)]
+            } else {
+                group_files(&p)?
+            };
+            for (key, group) in groups {
                 if done.contains(&key) {
                     self.stats.already += 1;
                     continue;
@@ -366,6 +450,10 @@ impl<'a> Importer<'a> {
                         ))
                     );
                     self.stats.already += 1;
+                    continue;
+                }
+                if self.opts.pretend {
+                    self.log_files(&key, &group)?;
                     continue;
                 }
                 let outcome = if self.opts.singletons {
@@ -382,7 +470,7 @@ impl<'a> Importer<'a> {
                     }
                     outcome
                 } else {
-                    self.import_album(&group)?
+                    self.import_album(&key, &group)?
                 };
                 if outcome == Outcome::Aborted {
                     // Progress so far stays recorded, so the import can resume.
@@ -475,16 +563,52 @@ impl<'a> Importer<'a> {
 
     // ------------------------------------------------------------- albums
 
-    fn import_album(&mut self, files: &[PathBuf]) -> Result<Outcome> {
+    /// `--pretend`: list what would be imported, as beets' `log_files`.
+    fn log_files(&mut self, key: &Path, files: &[PathBuf]) -> Result<()> {
+        let items = self.read_items(files)?;
+        if self.opts.singletons {
+            for i in &items {
+                println!("Singleton: {}", i.path().display());
+            }
+        } else if !items.is_empty() {
+            println!("Album: {}", key.display());
+            for i in &items {
+                println!("  {}", i.path().display());
+            }
+        }
+        Ok(())
+    }
+
+    /// Append a line to the import log, if there is one.
+    fn log_line(&mut self, line: &str) {
+        if let Some(f) = &mut self.log
+            && let Err(e) = writeln!(f, "{line}")
+        {
+            eprintln!("warning: writing import log: {e}");
+        }
+    }
+
+    /// beets' `tag_log`: a status and the task's paths, `; `-separated.
+    fn tag_log(&mut self, status: &str, paths: &[PathBuf]) {
+        let paths: Vec<String> = paths.iter().map(|p| p.display().to_string()).collect();
+        self.log_line(&format!("{status} {}", paths.join("; ")));
+    }
+
+    /// `key` is the album's directory (or the import path with `--flat`).
+    fn import_album(&mut self, key: &Path, files: &[PathBuf]) -> Result<Outcome> {
         let items = self.read_items(files)?;
         if items.is_empty() {
             return Ok(Outcome::Done);
         }
-        let dir = files[0].parent().unwrap_or(Path::new("")).to_path_buf();
+        let dir = if self.opts.flat && key.is_dir() {
+            key.to_path_buf()
+        } else {
+            files[0].parent().unwrap_or(Path::new("")).to_path_buf()
+        };
         if self.opts.group_albums {
             self.import_groups(items, &dir)
         } else {
-            self.import_album_items(items, &dir)
+            self.import_album_items(items, &dir, &[key.to_path_buf()])
         }
     }
 
@@ -494,7 +618,9 @@ impl<'a> Importer<'a> {
     fn import_groups(&mut self, items: Vec<Item>, dir: &Path) -> Result<Outcome> {
         let mut outcome = Outcome::Done;
         for group in group_albums(items) {
-            match self.import_album_items(group, dir)? {
+            // Grouped by tag, so (as in beets) the log names the files.
+            let paths: Vec<PathBuf> = group.iter().map(|i| i.path().to_path_buf()).collect();
+            match self.import_album_items(group, dir, &paths)? {
                 Outcome::Done => {}
                 Outcome::Skipped => outcome = Outcome::Skipped,
                 Outcome::Aborted => return Ok(Outcome::Aborted),
@@ -514,12 +640,20 @@ impl<'a> Importer<'a> {
         Ok(Outcome::Done)
     }
 
-    fn import_album_items(&mut self, mut items: Vec<Item>, dir: &Path) -> Result<Outcome> {
+    /// `paths` identify the album in the import log.
+    fn import_album_items(
+        &mut self,
+        mut items: Vec<Item>,
+        dir: &Path,
+        paths: &[PathBuf],
+    ) -> Result<Outcome> {
         println!();
         println!("{} ({} items)", dir.display(), items.len());
 
         let decision = if self.opts.autotag {
-            self.choose_album(&items)?
+            let d = self.choose_album(&items)?;
+            self.log_choice(&d, paths);
+            d
         } else {
             Decision::AsIs
         };
@@ -535,7 +669,7 @@ impl<'a> Importer<'a> {
             Decision::Group => return self.import_groups(items, dir),
         };
 
-        if !self.resolve_duplicates(&items, m.as_deref())? {
+        if !self.resolve_duplicates(&items, m.as_deref(), paths)? {
             self.stats.skipped += 1;
             return Ok(Outcome::Skipped);
         }
@@ -563,12 +697,6 @@ impl<'a> Importer<'a> {
                 );
             }
         }
-        if self.opts.pretend {
-            for i in &items {
-                println!("  {}", i.path().display());
-            }
-            return Ok(Outcome::Done);
-        }
         self.finalize_album(items, m.is_some(), dir)?;
         Ok(Outcome::Done)
     }
@@ -586,35 +714,21 @@ impl<'a> Importer<'a> {
         // for anything but the first); None shows the candidate list.
         let mut fresh = true;
         let mut focus: Option<(usize, bool)> = None;
+        // As in beets, the summary judgment covers only the first lookup.
+        if let Some(d) = self.summary_judgment(rec) {
+            return Ok(d);
+        }
         loop {
             if fresh {
                 fresh = false;
-                if self.opts.quiet {
-                    return Ok(match (cands.into_iter().next(), rec) {
-                        (Some(m), Recommendation::Strong) => {
-                            self.show_album_match(items, &m);
-                            Decision::Apply(Box::new(m))
-                        }
-                        _ => {
-                            let asis = self.opts.quiet_fallback_asis;
-                            println!(
-                                "{}",
-                                if asis {
-                                    "Importing as-is (no strong match)."
-                                } else {
-                                    "Skipping (no strong match)."
-                                }
-                            );
-                            if asis { Decision::AsIs } else { Decision::Skip }
-                        }
-                    });
-                }
                 if !cands.is_empty() && rec == Recommendation::Strong && !self.opts.timid {
                     self.show_album_match(items, &cands[0]);
                     return Ok(Decision::Apply(Box::new(cands.swap_remove(0))));
                 }
-                // Show the best match directly when it's good enough.
-                focus = (!cands.is_empty() && rec >= Recommendation::Medium).then_some((0, true));
+                // As beets: show the best match directly unless there's no
+                // recommendation; at low, Apply isn't the default.
+                focus = (!cands.is_empty() && rec != Recommendation::None)
+                    .then_some((0, rec > Recommendation::Low));
             }
 
             let choice = if let Some((k, default_apply)) = focus {
@@ -648,7 +762,9 @@ impl<'a> Importer<'a> {
 
             match choice {
                 None | Some(Choice::Letter('b')) => return Ok(Decision::Abort),
-                Some(Choice::Number(n)) => focus = Some((n - 1, n == 1)),
+                Some(Choice::Number(n)) => {
+                    focus = Some((n - 1, n == 1 && rec > Recommendation::Low));
+                }
                 Some(Choice::Letter('s')) => return Ok(Decision::Skip),
                 Some(Choice::Letter('u')) => return Ok(Decision::AsIs),
                 Some(Choice::Letter('t')) => return Ok(Decision::Tracks),
@@ -767,6 +883,9 @@ impl<'a> Importer<'a> {
                 .length
                 .is_some_and(|l| (l - item.float("length")).abs() > 10.0);
             if !(title_changed || idx_changed || len_off) {
+                if self.opts.detail {
+                    println!("   {} (#{})", old_title, item.int("track"));
+                }
                 continue;
             }
             let td = autotag::track_distance(self.cfg, item, track, info.va).distance();
@@ -833,7 +952,12 @@ impl<'a> Importer<'a> {
     }
 
     /// Returns false to skip this album.
-    fn resolve_duplicates(&mut self, items: &[Item], m: Option<&AlbumMatch>) -> Result<bool> {
+    fn resolve_duplicates(
+        &mut self,
+        items: &[Item],
+        m: Option<&AlbumMatch>,
+        paths: &[PathBuf],
+    ) -> Result<bool> {
         let (artist, album, mbid) = match m {
             Some(m) => (
                 if m.info.va {
@@ -875,6 +999,14 @@ impl<'a> Importer<'a> {
                 _ => 's',
             },
         };
+        self.tag_log(
+            match choice {
+                'k' => "duplicate-keep",
+                'r' => "duplicate-replace",
+                _ => "duplicate-skip",
+            },
+            paths,
+        );
         match choice {
             'k' => Ok(true),
             'r' => {
@@ -914,7 +1046,11 @@ impl<'a> Importer<'a> {
         let n = items.len();
         let lib = self.lib;
         let mut album = lib.transaction(|lib| {
-            let album = lib.add_album(&mut items)?;
+            let mut album = lib.add_album(&mut items)?;
+            if !self.opts.set_fields.is_empty() {
+                self.apply_set_fields(Some(&mut album), &mut items);
+                lib.store(&album)?;
+            }
             for item in &mut items {
                 self.place_and_write(item, Some(&album), tagged)?;
                 lib.store(item)?;
@@ -934,6 +1070,71 @@ impl<'a> Importer<'a> {
         self.stats.albums += 1;
         self.stats.items += n;
         Ok(())
+    }
+
+    /// beets' `set_fields`: evaluate each value template against the album
+    /// and against each item, before files are placed and tags written.
+    fn apply_set_fields(&self, mut album: Option<&mut Album>, items: &mut [Item]) {
+        let set = |rec: &mut Item, field: &str, value: String| {
+            if let Err(e) = rec.set_parsed(field, &value) {
+                eprintln!("warning: can't set {field}={value}: {e:#}");
+            }
+        };
+        for (field, value) in &self.opts.set_fields {
+            let t = Template::parse(value);
+            if let Some(a) = album.as_deref_mut() {
+                let v = t.render(&SetCtx {
+                    rec: a,
+                    album: None,
+                });
+                set(a, field, v);
+            }
+            for item in items.iter_mut() {
+                let v = t.render(&SetCtx {
+                    rec: item,
+                    album: album.as_deref(),
+                });
+                set(item, field, v);
+            }
+        }
+    }
+
+    /// beets' `log_choice` for a prompt decision: skips and as-is imports.
+    fn log_choice<M>(&mut self, d: &Decision<M>, paths: &[PathBuf]) {
+        match d {
+            Decision::Skip => self.tag_log("skip", paths),
+            Decision::AsIs => self.tag_log("asis", paths),
+            _ => {}
+        }
+    }
+
+    /// beets' `_summary_judgment`: decide without asking, in quiet mode or
+    /// per `none_rec_action`. None means ask the user, or (quiet with a
+    /// strong recommendation) apply the best match.
+    fn summary_judgment<M>(&self, rec: Recommendation) -> Option<Decision<M>> {
+        let asis = if self.opts.quiet {
+            if rec == Recommendation::Strong {
+                return None;
+            }
+            self.opts.quiet_fallback_asis
+        } else if self.opts.timid || rec != Recommendation::None {
+            return None;
+        } else {
+            match self.opts.none_rec_action {
+                NoneRecAction::Ask => return None,
+                NoneRecAction::AsIs => true,
+                NoneRecAction::Skip => false,
+            }
+        };
+        println!(
+            "{}",
+            if asis {
+                "Importing as-is."
+            } else {
+                "Skipping."
+            }
+        );
+        Some(if asis { Decision::AsIs } else { Decision::Skip })
     }
 
     fn plugin_ctx(&self) -> PluginCtx<'a> {
@@ -996,7 +1197,9 @@ impl<'a> Importer<'a> {
         println!();
         println!("{}", item.path().display());
         let decision = if self.opts.autotag {
-            self.choose_item(&item)?
+            let d = self.choose_item(&item)?;
+            self.log_choice(&d, &[item.path().to_path_buf()]);
+            d
         } else {
             Decision::AsIs
         };
@@ -1013,11 +1216,9 @@ impl<'a> Importer<'a> {
             }
             Decision::Tracks | Decision::Group => unreachable!("not offered for tracks"),
         };
-        if self.opts.pretend {
-            return Ok(Outcome::Done);
-        }
         item.set("added", Value::Float(now()));
         item.set_int("album_id", 0);
+        self.apply_set_fields(None, std::slice::from_mut(&mut item));
         self.place_and_write(&mut item, None, tagged)?;
         self.lib.add(&mut item)?;
         let ctx = self.plugin_ctx();
@@ -1035,14 +1236,10 @@ impl<'a> Importer<'a> {
         let ids = self.opts.search_ids.clone();
         let (mut cands, mut rec) = autotag::item_candidates(self.cfg, &self.mb, item, None, &ids)?;
         let (strong, medium) = self.thresholds();
+        if let Some(d) = self.summary_judgment(rec) {
+            return Ok(d);
+        }
         loop {
-            if self.opts.quiet {
-                return Ok(match (cands.into_iter().next(), rec) {
-                    (Some(m), Recommendation::Strong) => Decision::Apply(Box::new(m)),
-                    _ if self.opts.quiet_fallback_asis => Decision::AsIs,
-                    _ => Decision::Skip,
-                });
-            }
             if !cands.is_empty() && rec == Recommendation::Strong && !self.opts.timid {
                 let m = cands.swap_remove(0);
                 println!(
@@ -1439,5 +1636,210 @@ mod tests {
         // The state key is still the directory, not the tag groups.
         let st = ImportState::load(&cfg.state_path());
         assert_eq!(st.history.iter().collect::<Vec<_>>(), [&mixed]);
+    }
+
+    #[test]
+    fn set_field_arguments_need_key_and_value() {
+        assert_eq!(
+            parse_set_field("genre=Rock=Pop").unwrap(),
+            ("genre", "Rock=Pop")
+        );
+        for bad in ["genre", "=Rock", "genre="] {
+            let e = parse_set_field(bad).unwrap_err().to_string();
+            assert!(e.contains("is not of the form `key=value'"), "{e}");
+        }
+    }
+
+    #[test]
+    fn summary_judgment_follows_quiet_timid_and_none_rec_action() {
+        let (_d, cfg, lib, _src) = setup(&[]);
+        let judge = |f: &dyn Fn(&mut ImportOptions), rec| {
+            let mut o = opts(&cfg);
+            f(&mut o);
+            let imp = Importer::new(&cfg, &lib, o, &[]).unwrap();
+            match imp.summary_judgment::<AlbumMatch>(rec) {
+                None => "ask",
+                Some(Decision::AsIs) => "asis",
+                Some(Decision::Skip) => "skip",
+                Some(_) => "other",
+            }
+        };
+        use Recommendation as R;
+        assert_eq!(judge(&|_| {}, R::None), "ask");
+        assert_eq!(
+            judge(&|o| o.none_rec_action = NoneRecAction::Skip, R::None),
+            "skip"
+        );
+        assert_eq!(
+            judge(&|o| o.none_rec_action = NoneRecAction::AsIs, R::None),
+            "asis"
+        );
+        // Only "no recommendation" triggers it, and timid always asks.
+        assert_eq!(
+            judge(&|o| o.none_rec_action = NoneRecAction::Skip, R::Low),
+            "ask"
+        );
+        assert_eq!(
+            judge(
+                &|o| {
+                    o.none_rec_action = NoneRecAction::Skip;
+                    o.timid = true;
+                },
+                R::None
+            ),
+            "ask"
+        );
+        // Quiet: strong applies (None here), anything else uses the fallback.
+        assert_eq!(judge(&|o| o.quiet = true, R::Strong), "ask");
+        assert_eq!(judge(&|o| o.quiet = true, R::Medium), "skip");
+        assert_eq!(
+            judge(
+                &|o| {
+                    o.quiet = true;
+                    o.quiet_fallback_asis = true;
+                },
+                R::Medium
+            ),
+            "asis"
+        );
+    }
+
+    /// Two real tagged tracks in `src/<dir>` (None without ffmpeg).
+    fn album_dir(src: &Path, dir: &str, album: &str) -> Option<PathBuf> {
+        let d = src.join(dir);
+        for t in 1..=2 {
+            if !make_track(&d, &format!("{t}.mp3"), "Artist", album, t) {
+                return None;
+            }
+        }
+        Some(d)
+    }
+
+    #[test]
+    fn set_fields_are_templates_applied_to_album_and_items() {
+        let (_d, cfg, lib, src) = setup(&[]);
+        let Some(_) = album_dir(&src, "a", "Some Album") else {
+            return;
+        };
+        let mut o = opts(&cfg);
+        o.set_fields = vec![
+            ("genre".into(), "Genre of $album".into()),
+            ("collection".into(), "Unordered".into()),
+            ("disctotal".into(), "3".into()),
+        ];
+        let mut imp = Importer::new(&cfg, &lib, o, &[]).unwrap();
+        imp.run(std::slice::from_ref(&src)).unwrap();
+        let albums = lib.all_albums().unwrap();
+        assert_eq!(albums.len(), 1);
+        let a = &albums[0];
+        assert_eq!(a.str("genre"), "Genre of Some Album");
+        assert_eq!(a.str("collection"), "Unordered");
+        let items = lib.album_items(a.id.unwrap()).unwrap();
+        assert_eq!(items.len(), 2);
+        for i in &items {
+            assert_eq!(i.str("genre"), "Genre of Some Album");
+            assert_eq!(i.str("collection"), "Unordered");
+            // Typed fields are parsed, not stored as text.
+            assert_eq!(i.int("disctotal"), 3);
+        }
+    }
+
+    #[test]
+    fn log_records_start_choices_and_duplicates() {
+        let (d, mut cfg, lib, src) = setup(&[]);
+        let Some(album) = album_dir(&src, "a", "Dup Album") else {
+            return;
+        };
+        cfg.set("directory", d.path().join("lib").to_string_lossy().into());
+        cfg.set("import.duplicate_action", "skip".into());
+        let log = d.path().join("import.log");
+        let run = || {
+            let mut o = opts(&cfg);
+            o.op = FileOp::Copy;
+            o.log = Some(log.clone());
+            let mut imp = Importer::new(&cfg, &lib, o, &[]).unwrap();
+            imp.run(std::slice::from_ref(&src)).unwrap();
+            imp
+        };
+        run();
+        // The second import finds the copy already in the library.
+        let mut imp = run();
+        assert_eq!(imp.stats.skipped, 1);
+        // Prompt decisions are logged the same way (these need no lookup).
+        imp.log_choice(&Decision::<AlbumMatch>::Skip, std::slice::from_ref(&album));
+        imp.log_choice(
+            &Decision::<AlbumMatch>::AsIs,
+            &[album.join("1.mp3"), album.join("2.mp3")],
+        );
+        imp.log_choice(&Decision::<AlbumMatch>::Abort, std::slice::from_ref(&album));
+        drop(imp);
+
+        let text = std::fs::read_to_string(&log).unwrap();
+        let lines: Vec<&str> = text.lines().collect();
+        assert_eq!(lines.len(), 5, "{text}");
+        assert!(lines[0].starts_with("import started "));
+        assert!(lines[1].starts_with("import started "));
+        let a = album.display();
+        assert_eq!(lines[2], format!("duplicate-skip {a}"));
+        assert_eq!(lines[3], format!("skip {a}"));
+        assert_eq!(lines[4], format!("asis {a}/1.mp3; {a}/2.mp3"));
+    }
+
+    #[test]
+    fn unwritable_log_is_an_error() {
+        let (d, cfg, lib, _src) = setup(&[]);
+        let mut o = opts(&cfg);
+        o.log = Some(d.path().join("missing-dir/import.log"));
+        let e = Importer::new(&cfg, &lib, o, &[]).err().unwrap().to_string();
+        assert!(
+            e.starts_with("Could not open log file for writing: "),
+            "{e}"
+        );
+    }
+
+    #[test]
+    fn flat_imports_the_whole_tree_as_one_album() {
+        let (_d, cfg, lib, src) = setup(&[]);
+        let top = src.join("box");
+        let (Some(_), Some(_)) = (
+            album_dir(&top, "Disc A", "Box Set"),
+            album_dir(&top, "extras/Bonus", "Box Set"),
+        ) else {
+            return;
+        };
+        let mut o = opts(&cfg);
+        o.flat = true;
+        o.incremental = true;
+        let mut imp = Importer::new(&cfg, &lib, o, &[]).unwrap();
+        imp.run(std::slice::from_ref(&top)).unwrap();
+        assert_eq!((imp.stats.albums, imp.stats.items), (1, 4));
+        // The import path itself is the album's key.
+        let st = ImportState::load(&cfg.state_path());
+        assert_eq!(st.history.iter().collect::<Vec<_>>(), [&top]);
+    }
+
+    #[test]
+    fn pretend_imports_and_records_nothing() {
+        let (d, cfg, lib, src) = setup(&[]);
+        let Some(_) = album_dir(&src, "a", "Pretend Album") else {
+            return;
+        };
+        let log = d.path().join("import.log");
+        let mut o = opts(&cfg);
+        o.pretend = true;
+        o.incremental = true;
+        o.autotag = true; // never reached: pretend doesn't look anything up
+        o.set_fields = vec![("genre".into(), "x".into())];
+        o.log = Some(log.clone());
+        let mut imp = Importer::new(&cfg, &lib, o, &[]).unwrap();
+        imp.run(std::slice::from_ref(&src)).unwrap();
+        assert_eq!(
+            (imp.stats.albums, imp.stats.items, imp.stats.skipped),
+            (0, 0, 0)
+        );
+        assert!(lib.all_albums().unwrap().is_empty());
+        assert!(!cfg.state_path().exists());
+        let text = std::fs::read_to_string(&log).unwrap();
+        assert_eq!(text.lines().count(), 1, "only the start line: {text}");
     }
 }

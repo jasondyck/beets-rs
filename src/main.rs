@@ -44,9 +44,12 @@ pub enum Cmd {
         /// Don't copy files
         #[arg(short = 'C', long = "nocopy")]
         nocopy: bool,
-        /// Move files into the library directory
-        #[arg(short = 'm', long = "move")]
+        /// Move files into the library directory (overrides -c)
+        #[arg(short = 'm', long = "move", overrides_with = "nomove")]
         mv: bool,
+        /// Don't move files into the library (overrides -m)
+        #[arg(short = 'M', long = "nomove")]
+        nomove: bool,
         /// Write new metadata to files' tags
         #[arg(short = 'w', long = "write", overrides_with = "nowrite")]
         write: bool,
@@ -56,9 +59,18 @@ pub enum Cmd {
         /// Never prompt: apply strong matches, otherwise use quiet_fallback
         #[arg(short = 'q', long)]
         quiet: bool,
+        /// Decision in quiet mode when there's no strong match
+        #[arg(long = "quiet-fallback", value_parser = ["skip", "asis"])]
+        quiet_fallback: Option<String>,
+        /// File to log untaggable albums to for later review
+        #[arg(short = 'l', long = "log", value_name = "FILE")]
+        log: Option<PathBuf>,
         /// Always confirm matches, even strong ones
         #[arg(short = 't', long)]
         timid: bool,
+        /// Infer tags for imported files (default)
+        #[arg(short = 'a', long = "autotag", overrides_with = "noautotag")]
+        autotag: bool,
         /// Don't autotag; import files as-is
         #[arg(short = 'A', long = "noautotag")]
         noautotag: bool,
@@ -71,20 +83,36 @@ pub enum Cmd {
         /// Restrict matching to this MusicBrainz release/recording ID (repeatable)
         #[arg(short = 'S', long = "search-id")]
         search_id: Vec<String>,
-        /// Only show what would be imported
-        #[arg(short = 'p', long)]
+        /// Import an entire tree as a single album
+        #[arg(long)]
+        flat: bool,
+        /// Just print the files to import
+        #[arg(long)]
         pretend: bool,
+        /// Set the given fields to the supplied values (repeatable)
+        #[arg(long = "set", value_name = "FIELD=VALUE")]
+        set: Vec<String>,
         /// Skip directories imported by earlier incremental imports
         #[arg(short = 'i', long, overrides_with = "noincremental")]
         incremental: bool,
         /// Import everything, even previously imported directories
         #[arg(short = 'I', long)]
         noincremental: bool,
+        /// Don't record skipped albums during an incremental import
+        #[arg(
+            short = 'R',
+            long = "incremental-skip-later",
+            overrides_with = "noincremental_skip_later"
+        )]
+        incremental_skip_later: bool,
+        /// Record skipped albums during an incremental import
+        #[arg(short = 'r', long = "noincremental-skip-later")]
+        noincremental_skip_later: bool,
         /// Resume an interrupted import without asking
-        #[arg(long, overrides_with = "noresume")]
+        #[arg(short = 'p', long, overrides_with = "noresume")]
         resume: bool,
         /// Start over instead of resuming an interrupted import
-        #[arg(long)]
+        #[arg(short = 'P', long)]
         noresume: bool,
         #[arg(required = true)]
         paths: Vec<PathBuf>,

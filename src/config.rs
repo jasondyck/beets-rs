@@ -15,7 +15,13 @@ import:
     move: no
     quiet: no
     quiet_fallback: skip
+    none_rec_action: ask
     timid: no
+    log:
+    detail: no
+    flat: no
+    pretend: no
+    set_fields: {}
     autotag: yes
     singletons: no
     group_albums: no
