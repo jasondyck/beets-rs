@@ -22,7 +22,16 @@ dir (under `$TMPDIR`, or `--workdir DIR`):
 4. runs every case with both, from inside the library directory, and compares
    stdout, stderr and exit status, with each tool's own temp root replaced by
    `<ROOT>`;
-5. then the tag round trips (`tags:` cases): each tool runs `write` (and
+5. then the migration phase (`migrate:` cases): beets-rs' `migrate-beets
+   copies reference beets' `library.db` (with `--beets-config`) into a third
+   library (`migrated/`, whose `directory:` is reference beets' library, so
+   it points at the same files); `migrate:migrate-beets` checks it succeeds
+   with no warnings, `migrate:read-only` that the beets database's bytes,
+   mtime and directory are unchanged, and every `ls`, `mv`, `stats` and
+   `fields` case runs again on the migrated library, compared with reference
+   beets' output on its own library (`migrate:<case>`; a case's expected
+   difference applies to its `migrate:` twin);
+6. then the tag round trips (`tags:` cases): each tool runs `write` (and
    `write -f` with `id3v23: yes`), every file in the two libraries is read
    with MediaFile (the reference venv's) and compared field by field (an
    empty value and a missing tag count as the same, as beets stores them),

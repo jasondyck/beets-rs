@@ -309,7 +309,6 @@ pub const ITEM_FIELDS: &[(&str, FieldType)] = &[
     ("discogs_albumid", Int),
     ("discogs_artistid", Int),
     ("discogs_labelid", Int),
-    ("data_source", Str),
     ("length", Duration),
     ("bitrate", Bitrate),
     ("bitrate_mode", Str),
@@ -366,7 +365,6 @@ pub const ALBUM_FIELDS: &[(&str, FieldType)] = &[
     ("discogs_albumid", Int),
     ("discogs_artistid", Int),
     ("discogs_labelid", Int),
-    ("data_source", Str),
 ];
 
 /// beets' `ITEM_LEGACY_TO_LIST_FIELD` / `ALBUM_LEGACY_TO_LIST_FIELD`:

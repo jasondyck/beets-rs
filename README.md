@@ -5,9 +5,10 @@ library manager: import with MusicBrainz autotagging, a SQLite library, beets'
 query language and path-format templates.
 
 The binary is `beet`, and the query, template and config syntax follow beets,
-so the [beets docs](https://beets.readthedocs.io/) mostly apply. The database
-schema is its own. Config and library live in `~/.config/beets-rs/`
-(override with `$BEETSRSDIR`) so a real beets `library.db` is never touched.
+so the [beets docs](https://beets.readthedocs.io/) mostly apply. The library
+database has beets 2.14's schema, but config and library live in
+`~/.config/beets-rs/` (override with `$BEETSRSDIR`) so a real beets
+`library.db` is never touched; `beet migrate-beets` copies one in (see below).
 
 ```sh
 cargo build --release
@@ -44,6 +45,8 @@ beet update -F title -F artist                      # re-read changed tags (only
 | Global options | before the command, as in beets: `-l/--library`, `-d/--directory`, `-c/--config FILE` (repeatable; each file goes over the user config and the files before it, as in beets), `-v/--verbose` (repeatable: `-v` logs config/library paths, plugin loading, MusicBrainz searches and lookups, duplicates found; `-vv` also each MusicBrainz request), `-p/--plugins LIST` and `-P/--disable-plugins LIST` (comma-separated; also the `disabled_plugins` config key), `-h/--help`, `--version` |
 | Tags | MP3, FLAC, M4A/ALAC, Ogg Vorbis/Opus/Speex, WavPack, APE, Musepack, AIFF, WAV, through a port of MediaFile's field table on lofty's per-format tags: every field beets reads and writes (`title`, `artist(s)`, `album`, `albumartist(s)`, the `_sort`/`_credit` variants and their lists, `genres`, `composers`, `composer_sort`, `lyricists`, `arrangers` (ID3 `TIPL`), `remixers`, `grouping`, `subtitle`, track/disc numbers and totals, dates and original dates, `comments`, `lyrics`, `bpm`, `comp`, `label`, `catalognum`, `barcode`, `isrc`, `asin`, `script`, `language`, `country`, `albumstatus`, `albumtype(s)`, `media`, `albumdisambig`, `disctitle`, `encoder`, `initial_key`, every `mb_*` id incl. the artist id lists, AcoustID, ReplayGain gain/peak (incl. iTunes Sound Check `iTunNORM`) and R128 gains) under MediaFile's frames, `TXXX` descriptions, MP4 atoms and `----:com.apple.iTunes:` names, Vorbis and APEv2 keys, alternative and read-only keys included (`ALBUM ARTIST`, `UPC`, `CATALOGID`, ...); reading follows MediaFile's rules (first style with a value wins, `YEAR` as the date's fallback, ID3v1 merged in, ID3v2.3 lists split on `/` where MediaFile does, ffmpeg's `TXXX:TCMP` ignored, ID3 genres through mutagen's `TCON.genres`: `80` or `(17)Rock` are ID3v1 genre names, with mutagen's genre table) and writing writes every writable style in MediaFile's order (where beets writes an empty value or 0, beets-rs removes the tag: MediaFile reads both the same); `id3v23: yes` writes MP3s as ID3v2.3 (lists joined with `/`, genres as names, dates as `TYER`/`TDAT`/`TORY`, as mutagen does); `length` and `bitrate` exactly as beets stores them (mutagen's per-format values, read from the headers: MP3 Xing/Info/LAME/VBRI or the stream size, FLAC/WavPack/APE sample counts, MP4 `mdhd` and sample-entry bitrates, Ogg Vorbis/Opus granule positions, WAV/AIFF; MediaFile's file-size estimate where the format has no bitrate), AAC `bitdepth` from the sample entry; MP3 `bitrate_mode` (CBR/VBR/ABR), `encoder_info` (`LAME 3.100.0+`, `FhG`) and `encoder_settings` (mutagen's guess, e.g. `-V 2`, `--preset 128`) from the Xing/Info, LAME and VBRI headers as mutagen reads them (empty for other formats, as in beets); WAV's format is `WAVE`; as in beets, changing a tag field in the library resets the item's `mtime` until the file is written, so `update` re-reads it (an as-is import that fills in `albumartist`/`comp` without writing counts too). Not yet: ASF/WMA (lofty has no ASF support) |
 | Multi-valued fields | beets 2.x's lists (`genres`, `artists`, `albumartists`, `composers`, `lyricists`, `arrangers`, `remixers`, `mb_artistids`, `albumtypes`, ...): stored joined with beets' `\␀` delimiter (`albumtypes` with `; `), shown and parsed with `; `; queries in SQL see the joined string, in-memory matches any value; `modify field=a; b`, `field+=c` (adds missing values), `field-=a`; changes listed as beets' `+ value`/`- value` lines; the legacy single-valued names (`genre`, `composer`, `lyricist`, `arranger`, `remixer`) in queries and `modify` mean the lists, with beets' deprecation warning; an existing beets-rs library's `genre`/`composer` columns are migrated once (split on `; `, `, `, ` / `, as beets does), after a backup to `<library>-before-<table>-<migration>.bak` with beets' "Created database backup at: ..." message (`create_backup_before_migrations`, default on; unlike beets, only made when a migration changes data, so a new library gets none); autotagged single values (`artist`, `mb_artistid`, `albumtype`, ...) head their lists. Also beets' nullable `rg_*`/`r128_*` floats and the normalized `initial_key` (`Ebm` is `D#m`) |
+| Library database | beets 2.14's `library.db` format, statement for statement: the `items`/`albums` tables with beets' columns and types (sorted by name), `item_attributes`/`album_attributes` (flexible attributes, `data_source` among them), the `idx_item_album_id` index and the `migrations` table; paths (`path`, `artpath`) stored as blobs relative to `directory` when inside it (absolute otherwise), a singleton's `album_id` NULL, `added`/`mtime` floats. beets' data migrations run once each on opening (multi-valued fields, `relative_path`, `remove_inherited_artpath`, lyrics metadata and instrumental markers into flexible attributes; beets' `langdetect` language guess isn't ported, and an instrumental marker is left for the instrumental migration rather than blanked first). A library made by an older beets-rs is rebuilt in this layout once (backed up to `<library>-before-beets_layout.bak`). Unlike beets, the database uses SQLite's WAL journal |
+| `migrate-beets` | `beet migrate-beets [--beets-config PATH] [-d DIR] [-f] LIBRARY_DB` copies a beets library's items, albums and flexible attributes into the beets-rs library, ids kept (so album links hold). The beets database is opened read-only and immutable (SQLite `mode=ro&immutable=1`): never written, no journal or lock file made beside it; refused while a `-journal`/`-wal` file shows beets may be writing. beets stores paths relative to its `directory`: give it with `-d/--directory DIR` or `--beets-config PATH` (its `directory:`, `~` expanded, relative to the config's folder, beets' `~/Music` if unset; the file is only read). Paths are then stored relative to beets-rs' own `directory` when inside it. Refused when the beets-rs library already has items or albums, unless `-f/--force`, which replaces them after a backup to `<library>-before-migrate-beets.bak` (no merging). Columns beets keeps that beets-rs doesn't (such as an old beets' `genre`) are kept too, and beets' migrations that the source library hadn't had yet run on the copy. Afterwards it warns if items' files don't exist (a wrong directory) |
 | Release preferences | `match.preferred.countries` / `media` (regex lists, earlier = better) and `original_year`, as in beets |
 | Plugins | enabled with `plugins:`; import hooks + subcommands. **fetchart** (folder image, then Cover Art Archive; `beet fetchart [-f]`), **lyrics** (LRCLIB, plain or synced; `beet lyrics [-p] [-f]`), **embedart** (embeds the album art on import, always after fetchart; `beet embedart [-f IMAGE] [-y]`, `beet extractart [-o PATH] [-a] [-n NAME]`, `beet clearart [-y]`; options `ifempty`, `remove_art_file`) |
 | `move` | as beets: consolidates into the library directory, or `-d/--dest DIR`; `-c/--copy` (copy and point the library at the copies), `-e/--export` (copy, library unchanged), `-p/--pretend` (beets' `Source -> Destination` listing, two lines per file when it doesn't fit), `-t/--timid` ("Really move? (Yes/no/select)"), `-a`, `-l/--limit`; "Moving N items (M already in place)."; taken destinations get beets' `.1`, `.2` suffixes; missing files are skipped; emptied library directories are pruned (`clutter` ignored) |
@@ -67,21 +70,22 @@ lyrics:
 
 ## Not yet
 
-More plugins (replaygain, duplicates, web), image resizing,
-reading or writing beets' own `library.db`.
+More plugins (replaygain, duplicates, web), image resizing.
 
 ## Differential testing
 
 `tools/diffbeets/diffbeets.py` builds the same library with reference beets
 and with beets-rs (generated audio, same config) and compares `ls`, `ls -a`,
 `-f` templates and `mv -p` destinations over ~1000 cases taken from beets' own
-tests, then has each tool write its tags and compares the files as MediaFile
-reads them (and both tools' reading of the files beets wrote); known,
+tests, runs the same cases on a beets-rs library made with `migrate-beets` from
+reference beets' library, then has each tool write its tags and compares the
+files as MediaFile reads them (and both tools' reading of the files beets
+wrote); known,
 deliberate differences are listed with their reasons in
 `tools/diffbeets/cases.py`. See `tools/diffbeets/README.md`.
 
 ## Layout
 
-`model` (typed fields + flex attrs) · `library` (SQLite) · `query` · `template` ·
+`model` (typed fields + flex attrs) · `library` (SQLite, beets' schema and migrations) · `migrate` (`migrate-beets`) · `query` · `template` ·
 `paths` · `duplicates` (duplicate keys, Upgrade, prompt summaries) · `fileops` (copy/move/link/reflink, pruning, ignore globs) · `media` (reading/writing items' files, art) · `mediafile` (port of MediaFile's tag mapping) · `props` (mutagen's length and bitrate) · `mb` (MusicBrainz) · `autotag` · `importer` ·
 `commands` · `diff` (change highlighting) · `logging` (`-v`) · `state` (import resume/history) · `ui` · `plugins/` (`fetchart`, `embedart`, `lyrics`).

@@ -1292,8 +1292,8 @@ impl<'a> Importer<'a> {
     fn record_replaced(&self, items: &[Item]) -> Result<Replaced> {
         let mut r = Replaced::default();
         let mut album_ids = HashSet::new();
-        for item in items {
-            let dups = self.lib.items_with_path(item.path())?;
+        let paths: Vec<&Path> = items.iter().map(|i| i.path()).collect();
+        for dups in self.lib.items_with_paths(&paths)? {
             for d in &dups {
                 let id = d.int("album_id");
                 if id != 0
@@ -2582,7 +2582,6 @@ mod tests {
 
     #[test]
     fn preserve_flex_lets_fresh_fields_from_the_new_match_win() {
-        // `data_source` is a fixed field here; the plugin IDs are flexible.
         let mut old = Item::new_item();
         old.flex.insert("spotify_album_id".into(), "old".into());
         old.flex.insert("mood".into(), "sunny".into());

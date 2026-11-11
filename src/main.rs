@@ -13,6 +13,7 @@ mod logging;
 mod mb;
 mod media;
 mod mediafile;
+mod migrate;
 mod model;
 mod paths;
 mod plugins;
@@ -309,6 +310,21 @@ pub enum Cmd {
     },
     /// List available fields
     Fields,
+    /// Copy a beets library database (opened read-only) into this library
+    #[command(name = "migrate-beets")]
+    MigrateBeets {
+        /// Take beets' library directory from this beets config file
+        #[arg(long = "beets-config", value_name = "PATH")]
+        beets_config: Option<PathBuf>,
+        /// beets' library directory (relative paths in its database are under it)
+        #[arg(short = 'd', long, value_name = "DIR")]
+        directory: Option<PathBuf>,
+        /// Replace what this library holds (backed up first)
+        #[arg(short = 'f', long)]
+        force: bool,
+        /// The beets library database (library.db)
+        database: PathBuf,
+    },
     /// Fetch album art (plugin: fetchart)
     Fetchart {
         /// Re-fetch even if the album already has art

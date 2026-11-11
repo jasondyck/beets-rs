@@ -652,7 +652,8 @@ impl FieldQuery {
                 )
             }
             Test::IsNone => {
-                // Our singletons have album_id 0 where beets has NULL.
+                // A singleton's album_id is NULL (an album_id of 0, which
+                // beets-rs used to store, links nothing either).
                 if self.field == "album_id" {
                     (format!("({col} IS NULL OR {col} = 0)"), vec![])
                 } else {
@@ -731,8 +732,8 @@ impl FieldQuery {
                 case_sensitive,
             } => {
                 let mut path = match value {
-                    Some(PyVal::Bytes(b)) => b,
-                    Some(v) => v.as_string().into_bytes(),
+                    Some(PyVal::Bytes(b)) => db_path(&b),
+                    Some(v) => db_path(v.as_string().as_bytes()),
                     None => return false,
                 };
                 if !case_sensitive {
@@ -749,53 +750,23 @@ impl FieldQuery {
 
 /// Python's `os.path.normpath(os.path.abspath(os.path.expanduser(p)))`.
 pub fn normpath(p: &Path) -> PathBuf {
-    let p = crate::config::expand_tilde(&p.to_string_lossy());
+    let p = if p.as_os_str().as_bytes().starts_with(b"~") {
+        crate::config::expand_tilde(&p.to_string_lossy())
+    } else {
+        p.to_path_buf()
+    };
     let p = if p.is_absolute() {
         p
     } else {
         std::env::current_dir().unwrap_or_default().join(p)
     };
-    let mut out: Vec<std::ffi::OsString> = vec![];
-    for c in p.components() {
-        use std::path::Component as C;
-        match c {
-            C::RootDir | C::Prefix(_) | C::CurDir => {}
-            C::ParentDir => {
-                out.pop();
-            }
-            C::Normal(s) => out.push(s.to_os_string()),
-        }
-    }
-    let mut r = PathBuf::from("/");
-    r.extend(out);
-    r
+    crate::library::lexical_normpath(&p)
 }
 
-/// beets' `normalize_path_for_db`: a path inside the library directory
-/// relative to it, others unchanged.
+/// beets' `normalize_path_for_db` with the configured library directory:
+/// a path inside it relative to it, others unchanged.
 fn db_path(path: &[u8]) -> Vec<u8> {
-    let Some(music) = context().music_dir else {
-        return path.to_vec();
-    };
-    if !path.starts_with(b"/") {
-        return path.to_vec();
-    }
-    let music = music.as_os_str().as_bytes();
-    if path == music {
-        return b".".to_vec();
-    }
-    let mut prefix = music.to_vec();
-    if !prefix.ends_with(b"/") {
-        prefix.push(b'/');
-    }
-    match path.strip_prefix(prefix.as_slice()) {
-        Some(rel) => {
-            let p = Path::new(std::ffi::OsStr::from_bytes(rel));
-            let n = normpath(&Path::new("/").join(p));
-            n.as_os_str().as_bytes()[1..].to_vec()
-        }
-        None => path.to_vec(),
-    }
+    crate::library::to_db_path(path, context().music_dir.as_deref())
 }
 
 /// beets' `util.case_sensitive`: whether the filesystem holding `path` is
@@ -843,7 +814,9 @@ fn path_test(pattern: &str) -> Test {
     }
     let path = normpath(&p);
     let case_sensitive = case_sensitive(&path);
-    let mut pattern = path.as_os_str().as_bytes().to_vec();
+    // Path queries compare against the stored form, relative to the
+    // library directory when inside it.
+    let mut pattern = db_path_of(&path);
     if !case_sensitive {
         pattern.make_ascii_lowercase();
     }

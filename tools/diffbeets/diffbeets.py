@@ -130,6 +130,8 @@ class Tool:
         self.env["NO_COLOR"] = "1"
         self.env["PYTHONWARNINGS"] = "ignore"
         self.env["LC_ALL"] = "C.UTF-8"
+        # Other directories its output may name, shown as <ROOT> too.
+        self.other_roots = []
 
     def run(self, args, stdin="", cwd=None):
         args = [a.replace(ROOT, self.root) for a in args]
@@ -152,7 +154,8 @@ NOISE = [
 
 
 def normalise(tool, text):
-    text = text.replace(tool.root, "<ROOT>")
+    for root in (tool.root, *tool.other_roots):
+        text = text.replace(root, "<ROOT>")
     lines = [
         line for line in text.splitlines() if not any(n.match(line) for n in NOISE)
     ]
@@ -272,7 +275,55 @@ def tag_cases(work, ref, rs):
 
 
 # ---------------------------------------------------------------------------
+# Migration from a beets library
+
+
+def file_state(path):
+    """A file's bytes (hashed), mtime and the names beside it."""
+    import hashlib
+
+    with open(path, "rb") as f:
+        digest = hashlib.sha256(f.read()).hexdigest()
+    return digest, os.stat(path).st_mtime_ns, sorted(os.listdir(os.path.dirname(path)))
+
+
+def migrate_setup(work, ref, rs):
+    """A beets-rs library made by `migrate-beets` from reference beets'
+    library (same directory, so the same files), and the results of the
+    migration itself: it succeeds and never writes the beets database."""
+    mig = Tool("migrated", rs.beet, os.path.join(work, "migrated"), "BEETSRSDIR")
+    mig.other_roots = [ref.root]
+    write_config(mig.root, work)
+    ref_lib = os.path.join(ref.root, "lib")
+    path = os.path.join(mig.root, "config.yaml")
+    with open(path) as f:
+        text = f.read()
+    with open(path, "w") as f:
+        f.write(text.replace(f"directory: {mig.root}/lib", f"directory: {ref_lib}"))
+    db = os.path.join(ref.root, "library.db")
+    before = file_state(db)
+    args = ["migrate-beets", "--beets-config", os.path.join(ref.root, "config.yaml"), db]
+    res = outcome(mig, args)
+    after = file_state(db)
+    unchanged = {"code": 0, "out": "beets library unchanged", "err": ""}
+    state = dict(unchanged, out="beets library unchanged" if before == after
+                 else f"beets library changed: {before} -> {after}")
+    want = {"code": 0, "out": "Copied <N> items", "err": ""}
+    got = dict(res, out=re.sub(r"^Copied \d+ items.*", "Copied <N> items", res["out"]))
+    return mig, [
+        ("migrate:migrate-beets", args, want, got),
+        ("migrate:read-only", args, unchanged, state),
+    ]
+
+
+# ---------------------------------------------------------------------------
 # Report
+
+
+def runs_on_migrated(args):
+    """Cases run on the migrated library too: listings, templates, path
+    formats, stats and fields (all of them, as none writes)."""
+    return any(a in ("ls", "mv", "stats", "fields") for a in args)
 
 
 def render(res):
@@ -314,7 +365,11 @@ def main():
         rs = Tool("rs", os.path.abspath(opts.rs), os.path.join(work, "rs"), "BEETSRSDIR")
         setup(work, ref, rs, opts.verbose)
 
-        todo = [c for c in cases() if not opts.only or any(o in c[0] for o in opts.only)]
+        def wanted(cid):
+            return not opts.only or any(o in cid for o in opts.only)
+
+        # A migrated case needs its plain case's reference output.
+        todo = [c for c in cases() if wanted(c[0]) or wanted(f"migrate:{c[0]}")]
         seen = set()
         for cid, _ in todo:
             if cid in seen:
@@ -336,6 +391,25 @@ def main():
 
         with concurrent.futures.ThreadPoolExecutor(opts.jobs) as pool:
             results = list(pool.map(run_case, todo))
+        if any(wanted(f"migrate:{cid}") for cid, _ in todo) or wanted("migrate:"):
+            # The same cases on a library migrated from reference beets'
+            # (before the tag phase rewrites its files), against beets'
+            # output on its own library.
+            print("migrated library...", flush=True)
+            mig, mig_results = migrate_setup(work, ref, rs)
+            ref_out = {cid: r for cid, _, r, _ in results}
+
+            def run_migrated(case):
+                cid, args = case
+                return (f"migrate:{cid}", args, ref_out[cid],
+                        outcome(mig, args, os.path.join(ref.root, "lib")))
+
+            todo_mig = [c for c in todo if wanted(f"migrate:{c[0]}") and runs_on_migrated(c[1])]
+            with concurrent.futures.ThreadPoolExecutor(opts.jobs) as pool:
+                mig_results += list(pool.map(run_migrated, todo_mig))
+            mig_results = [r for r in mig_results if wanted(r[0])]
+            seen.update(r[0] for r in mig_results)
+            results = [r for r in results if wanted(r[0])] + mig_results
         if not opts.only or any(o.startswith("tags") or o in "tags:" for o in opts.only):
             print("tag round trips...", flush=True)
             tag_results = [
@@ -349,6 +423,8 @@ def main():
         for cid, args, r, s in results:
             same = r == s
             expected = EXPECTED.get(cid)
+            if expected is None and cid.startswith("migrate:"):
+                expected = EXPECTED.get(cid.removeprefix("migrate:"))
             if same and not expected:
                 status = "PASS"
             elif same:

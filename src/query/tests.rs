@@ -537,7 +537,10 @@ fn related_queries_as_beets() {
 // ------------------------------------------------------------- path queries
 
 fn path_lib() -> Library {
-    let lib = Library::in_memory().unwrap();
+    path_lib_in(Library::in_memory().unwrap())
+}
+
+fn path_lib_in(lib: Library) -> Library {
     for (p, t) in [
         ("/aaa/bb/c.mp3", "path item"),
         ("/x/y/z.mp3", "another item"),
@@ -597,7 +600,7 @@ fn path_queries_are_relative_to_the_library_and_follow_case_sensitivity() {
     let music = d.path().join("lib");
     std::fs::create_dir_all(music.join("relative")).unwrap();
     set_ctx(Some(&music), true);
-    let lib = path_lib();
+    let lib = path_lib_in(Library::in_memory_at(&music).unwrap());
     let inside = music.join("relative/item.mp3");
     lib.add(&mut item(&[
         ("path", inside.to_str().unwrap()),

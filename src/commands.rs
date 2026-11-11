@@ -97,6 +97,7 @@ pub fn run(cli: Cli) -> Result<()> {
 
     let lib = Library::open_with(
         &cfg.library_path(),
+        Some(&cfg.directory()),
         cfg.bool("create_backup_before_migrations"),
     )?;
     debug!(
@@ -359,6 +360,19 @@ pub fn run(cli: Cli) -> Result<()> {
             query,
         } => lyrics(&cfg, &lib, print, force, &query),
         Cmd::Fields => fields(&lib),
+        Cmd::MigrateBeets {
+            beets_config,
+            directory,
+            force,
+            database,
+        } => crate::migrate::migrate_beets(
+            &cfg,
+            &lib,
+            &database,
+            beets_config.as_deref(),
+            directory.as_deref(),
+            force,
+        ),
         Cmd::Config { .. } | Cmd::Version | Cmd::Help { .. } => unreachable!(),
     }
 }
@@ -1961,12 +1975,10 @@ fn fields(lib: &Library) -> Result<()> {
 /// then the flexible attributes the library holds (in the order SQLite's
 /// `SELECT DISTINCT` gives them). No loaded plugin adds template fields.
 fn fields_lines(lib: &Library) -> Result<Vec<String>> {
-    // beets 2.14 keeps `data_source` as a flexible attribute.
     let names = |fields: &[(&str, FieldType)], computed: &[&'static str]| {
         let mut v: Vec<&str> = fields
             .iter()
             .map(|(n, _)| *n)
-            .filter(|n| *n != "data_source")
             .chain(std::iter::once("id"))
             .chain(computed.iter().copied())
             .collect();
@@ -2094,8 +2106,8 @@ mod tests {
             &lines[at("Item flexible attributes:")..],
             [
                 "Item flexible attributes:",
-                "  mood",
                 "  data_source",
+                "  mood",
                 "Album flexible attributes:"
             ]
         );
