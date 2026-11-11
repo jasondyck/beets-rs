@@ -33,7 +33,7 @@ config`, plugins fetchart / lyrics / embedart, release preferences.
 - [ ] **3.1 Queries**: relative dates (`added:-1w..`, `-2d`, `-1y..`), item queries matching album-level fields and album flex attrs, `sort_case_insensitive`, regex case flags, `^`/`-` edge cases, `path:` with relative/`~` paths, `:` escaping in values
 - [ ] **3.2 Templates**: `%sunique`; `$format`/`$bitrate`/`$samplerate` and other computed fields in path formats; `path_sep_replace`; `overwrite_null`
 - [ ] **3.3 Tag field coverage**: every MediaFile field beets reads/writes (composer, lyricist, arranger, work, mb_workid, artist_sort/credit, albumartists multi-valued, genres, R128 gains, barcode, isrc, asin, script, language, etc.); `id3v23`; multi-valued fields
-- [ ] **3.4 library.db compatibility**: schema identical to beets' (column names, types, path as BLOB, `added`/`mtime` floats, flex tables), so beets' own `library.db` format is readable and writable. Tested only against synthetic beets-format DBs (see Needs the maintainer)
+- [ ] **3.4 library.db compatibility**: schema identical to beets' (column names, types, path as BLOB, `added`/`mtime` floats, flex tables), so beets' own `library.db` format is readable and writable; plus a migration command (decided by the maintainer) that opens a beets `library.db` at a path the user passes **read-only** (SQLite `mode=ro`/`immutable=1`, never written) and copies items, albums and flex attributes into the beets-rs DB. Tests use synthetic beets-format DBs only; never point it at `~/.config/beets/library.db`
 - [ ] **3.5 Performance**: push query filtering/sorting into SQL where possible (currently in-memory), so 50k+ item libraries stay fast; import pipeline threading (`threaded`)
 
 ## 4. Core: autotagger
@@ -58,7 +58,7 @@ Done: fetchart (filesystem + CAA), lyrics (LRCLIB), embedart.
 - [ ] **5.11 missing**: `beet missing [-c] [-t] [-a] [-f FMT]`
 - [ ] **5.12 mbsync**: `beet mbsync [-p] [-M] [-W] [-f]` re-fetching MusicBrainz metadata by ID
 - [ ] **5.13 the, zero**: `the` template function (`%the{}`, a/an options); `zero` (`fields`, `keep_fields`, per-field patterns, `update_database`, `beet zero`)
-- [ ] **5.14 inline**: inline fields; see Needs the maintainer (beets evaluates Python)
+- [ ] **5.14 inline**: inline fields (`item_fields`, `album_fields`) via a small built-in expression language covering common inline uses (field access, string ops, conditionals, arithmetic), as decided by the maintainer; no embedded Python (no pyo3). Python `pluginpath` plugins are out of scope
 - [ ] **5.15 smartplaylist**: m3u generation from queries, `playlist_dir`, `relative_to`, `prefix`, `auto` on db change, `beet splupdate`
 - [ ] **5.16 web**: HTTP JSON API compatible with beets' web plugin (`/item/`, `/album/`, queries, `/item/<id>/file`), plus a minimal browser UI
 - [ ] **5.17 types**: declare flex attribute types (int/float/bool/date) for queries and sorting
@@ -73,5 +73,4 @@ Done: fetchart (filesystem + CAA), lyrics (LRCLIB), embedart.
 
 ## Needs the maintainer
 
-- **Reading a real beets library.db** (3.4): the rules say never touch `~/.config/beets/library.db`. Should beets-rs get a migration command that opens a beets DB **read-only** at a path you pass and copies it into the beets-rs DB? Until you decide, 3.4 is built and tested only against synthetic beets-format DBs.
-- **inline plugin / Python plugins** (5.14): beets' inline fields and `pluginpath` third-party plugins are Python code. Options: (a) a small expression language covering common inline uses (string ops, conditionals, field access), (b) embed a Python interpreter (pyo3), (c) skip. Default plan until you decide: (a).
+Nothing open.
