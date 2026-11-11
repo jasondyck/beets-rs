@@ -10,6 +10,11 @@ Already done before this list: import (album/singleton, copy/move/in place,
 queries, templates, path formats, `ls modify rm mv update write stats fields
 config`, plugins fetchart / lyrics / embedart, release preferences.
 
+## 0. Priority (next after the current item)
+
+- [ ] **0.1 Import is quadratic** (from the maintainer's beets vs beets-rs benchmark, release build of b5c4a33, 10k tracks / 1000 albums, `import -A`): 100/200/400/800 albums take 0.5/1.8/6.2/24.3 s; 10k tracks 38 s vs beets 55 s, while everything else is 7–70x faster than beets. Cause: `Importer::find_duplicates` (src/importer.rs ~1122) loads `lib.all_albums()` and filters in memory per imported album, and loads every item for singletons. Fix: build an SQL query from the `duplicate_keys` values as beets does (flex keys via the attributes table), so only matching albums/items are read; check the other per-album importer paths for the same pattern. Add a regression timing test (ignored by default, like the 50k query test) showing import stays roughly linear, e.g. 800 albums well under 2 s.
+- [ ] **0.2 Output differences from the benchmark** (add both to diffbeets): `beet stats` "Approximate total size" should be beets' estimate (bitrate × length), not the real file size (52.8 MiB vs beets' 39.9 MiB on the benchmark), and beets prints a blank line after "Total time"; `import -A -q` prints a coloured per-album header on stdout (with ANSI codes even when stdout isn't a TTY) where beets prints nothing on stdout. Check beets' rules for when headers print in quiet mode and when colour is used on a non-TTY, and match them.
+
 ## 1. Core: import
 
 - [x] **1.1 Resume and incremental imports**: `-i/-I`, `incremental_skip_later`, `resume: ask/yes/no`, `--resume/--noresume`, statefile. Differs from beets on purpose: `--noresume` discards saved progress, and singleton history is keyed by folder
