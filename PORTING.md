@@ -46,6 +46,7 @@ config`, plugins fetchart / lyrics / embedart, release preferences.
 - [x] **3.4 library.db compatibility**: schema identical to beets' (column names, types, path as BLOB relative to the library directory as beets stores it (ours are absolute), singleton album_id NULL (ours 0), `added`/`mtime` floats, flex tables), so beets' own `library.db` format is readable and writable; plus a migration command (decided by the maintainer) that opens a beets `library.db` at a path the user passes **read-only** (SQLite `mode=ro`/`immutable=1`, never written) and copies items, albums and flex attributes into the beets-rs DB. Tests use synthetic beets-format DBs only; never point it at `~/.config/beets/library.db`
 - [x] **3.5 Performance**: query filtering/sorting in SQL done in 3.1 (50k items: 0.03–0.6s); import pipeline threading (`threaded`) done in 3.5: reads and MusicBrainz lookups run up to 4 units ahead of the prompt; file copying/tag writing don't overlap yet
 - [ ] **3.6 Queries on computed album fields**: beets can query album getters (`albumtotal`, plugin template fields like `missing` with their declared types: `ls -a missing:1..`); our query engine can't evaluate album computed fields yet
+- [ ] **3.7 %aunique across albums imported in one run** (found in 5.7): `import -A src/a src/b` with two same-named albums puts reference beets' first album under `Alb [1]/`, ours under `Alb/`; probably beets' threaded pipeline adding the second album before the first's files are placed. Low priority; decide whether to match
 
 ## 4. Core: autotagger
 
@@ -61,7 +62,7 @@ Done: fetchart (filesystem + CAA), lyrics (LRCLIB), embedart.
 - [x] **5.1 fetchart/embedart completion**: image resizing (`maxwidth`, `quality`, `max_filesize`), `minwidth`, `enforce_ratio`, `cautious`, `cover_format`, `store_source`; more sources (itunes, amazon, albumart, wikipedia, fanarttv, lastfm); embedart `maxwidth`, `compare_threshold`
 - [x] **5.2 lastgenre**: Last.fm genre lookup with whitelist/canonicalization tree, `count`, `source`, `fallback`, `force`, `-a/-s`
 - [x] **5.3 chroma**: AcoustID fingerprinting via `fpcalc` (shell out), as an extra candidate source in import; `beet fingerprint`, `beet submit`
-- [ ] **5.4 replaygain**: ffmpeg backend (track + album gain, R128 for Opus), `beet replaygain [-a] [-f]`, `auto`, `targetlevel`, `overwrite`
+- [x] **5.4 replaygain**: ffmpeg backend (track + album gain, R128 for Opus), `beet replaygain [-a] [-f]`, `auto`, `targetlevel`, `overwrite`
 - [ ] **5.5 convert**: ffmpeg transcoding with `formats`, `format`, `dest`, `-k` keep new, `-t` threads, `-y`, `-p`, `no_convert`, `max_bitrate`, `auto` on import, `embed`, copy album art
 - [ ] **5.6 scrub**: strip all tags and rewrite beets' metadata, `auto` on import
 - [ ] **5.7 duplicates**: `beet duplicates [-a] [-c] [-k KEY] [-f FMT] [-d] [-m DEST] [-s] [-t TAG] [-p] [-F]`

@@ -91,6 +91,31 @@ def build_art_corpus(src, ffmpeg_audio):
              "-metadata:s:v", "comment=Cover (front)", out],
             check=True,
         )
+    build_rg_corpus(src)
+
+
+# replaygain (`rg/`): an MP3 album over two discs whose tracks differ in
+# loudness, an Opus album (R128) and a FLAC single.
+RG_AUDIO = [
+    ("a/01.mp3", "sine=frequency=440:duration=1", "One", "RG Album", "1"),
+    ("a/02.mp3", "anoisesrc=d=1:a=0.3:seed=7", "Two", "RG Album", "1"),
+    ("a/03.mp3", "sine=frequency=1000:duration=2,volume=0.3", "Three", "RG Album", "2"),
+    ("o/01.opus", "sine=frequency=300:duration=1", "Op One", "RG Opus", "1"),
+    ("o/02.opus", "anoisesrc=d=1:a=0.1:seed=3", "Op Two", "RG Opus", "1"),
+    ("f/01.flac", "anoisesrc=d=1:a=0.5:seed=5", "Flac One", "RG Flac", "1"),
+]
+
+
+def build_rg_corpus(src):
+    for i, (rel, lavfi, title, album, disc) in enumerate(RG_AUDIO, 1):
+        out = os.path.join(src, "rg", rel)
+        os.makedirs(os.path.dirname(out), exist_ok=True)
+        tags = {"title": title, "artist": "RG Artist", "album_artist": "RG Artist",
+                "album": album, "track": str(i), "disc": disc}
+        cmd = ["ffmpeg", "-nostdin", "-loglevel", "error", "-y", "-f", "lavfi", "-i", lavfi]
+        for k, v in tags.items():
+            cmd += ["-metadata", f"{k}={v}"]
+        subprocess.run([*cmd, out], check=True)
 
 
 class ArtServer:

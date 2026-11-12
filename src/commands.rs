@@ -508,6 +508,40 @@ pub fn run(cli: Cli) -> Result<()> {
                 },
             )
         }
+        Cmd::Replaygain {
+            album,
+            threads,
+            force,
+            write,
+            nowrite,
+            limit,
+            query,
+        } => {
+            require_plugin(&cfg, "replaygain")?;
+            if !plugins.iter().any(|p| p.name() == "replaygain") {
+                // It failed to load (and said why).
+                bail!("unknown command 'replaygain'");
+            }
+            // Set up again (it said what it had to when it loaded).
+            let rg = crate::logging::capture(|| plugins::replaygain::ReplayGain::new(&cfg)).0?;
+            let write = match (write, nowrite) {
+                (true, _) => Some(true),
+                (_, true) => Some(false),
+                _ => None,
+            };
+            rg.command(
+                &cfg,
+                &lib,
+                plugins::replaygain::CmdOpts {
+                    album,
+                    force,
+                    threads,
+                    write,
+                    limit,
+                    query,
+                },
+            )
+        }
         Cmd::Missing {
             count,
             total,

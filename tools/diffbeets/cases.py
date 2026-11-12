@@ -1382,3 +1382,63 @@ EXPECTED.update({
     "art:cmd-not-enabled:1": _NOT_ENABLED,
     "art:extractart:2": _EXTRACT_CRASH,
 })
+
+# replaygain, ffmpeg backend (`rg/`: an MP3 album on two discs, an Opus album,
+# a FLAC album): gains computed on import and by the command, as stored
+# (`ls`) and as written to the files (`info`).
+_RG_LS = ["ls", "-f", "$title|$disc|$rg_track_gain|$rg_track_peak|$rg_album_gain|$rg_album_peak"
+          "|$r128_track_gain|$r128_album_gain"]
+_RG_DB = ["ls", "-f", "$title %ifdef{{rg_track_gain,$rg_track_gain,-}} "
+          "%ifdef{{rg_album_peak,$rg_album_peak,-}} %ifdef{{r128_album_gain,$r128_album_gain,-}}"]
+_RG_TAGS = ["-p", "info", "info", "-i",
+            "title,rg_track_gain,rg_track_peak,rg_album_gain,rg_album_peak,r128_track_gain,"
+            "r128_album_gain", "artist:RG Artist"]
+
+
+def _rg(cfg=""):
+    return "{{plugins: [replaygain], replaygain: {{backend: ffmpeg" + cfg + "}}}}"
+
+
+ART_CASES += [
+    ("rg-import", "rg", {}, _rg(), [_IMP, _RG_LS, _RG_DB, _RG_TAGS]),
+    ("rg-import-write", "rg", {}, "{{import: {{write: yes}}, " + _rg()[2:],
+     [_IMP, _RG_TAGS]),
+    ("rg-import-singletons", "rg", {}, _rg(), [["import", "-A", "-q", "-s", "{music}"], _RG_LS]),
+    ("rg-import-parallel", "rg", {}, _rg(", parallel_on_import: yes, threads: 2"),
+     [_IMP, _RG_LS]),
+    ("rg-auto-off", "rg", {}, _rg(", auto: no"), [_IMP, _RG_LS, ["replaygain", "-a"], _RG_LS]),
+    ("rg-cmd", "rg", {}, _rg(", auto: no"),
+     [_IMP, ["replaygain"], _RG_LS, ["replaygain"], ["replaygain", "-a", "album:RG Album"],
+      _RG_LS, ["replaygain", "-a"], ["replaygain", "-f", "-t", "0", "title:One"],
+      ["replaygain", "-a", "-l", "1", "-f"], _RG_DB, _RG_TAGS]),
+    ("rg-cmd-write", "rg", {}, _rg(", auto: no"),
+     [_IMP, ["replaygain", "-a", "-w", "-t", "1"], _RG_TAGS, ["write", "-p"]]),
+    ("rg-cmd-nowrite", "rg", {}, "{{import: {{write: yes}}, " + _rg(", auto: no")[2:],
+     [_IMP, ["replaygain", "-W"], _RG_TAGS, ["replaygain", "-a"], _RG_TAGS]),
+    ("rg-targetlevel", "rg", {}, _rg(", targetlevel: 84, r128_targetlevel: 89, peak: sample"),
+     [_IMP, _RG_LS]),
+    ("rg-per-disc", "rg", {}, _rg(", per_disc: yes"), [_IMP, _RG_LS]),
+    ("rg-r128-formats", "rg", {}, _rg(", r128: [MP3, FLAC]"), [_IMP, _RG_LS, _RG_TAGS]),
+    ("rg-no-r128", "rg", {}, _rg(", r128: []"), [_IMP, _RG_LS]),
+    ("rg-overwrite", "rg", {}, _rg(", overwrite: yes, auto: no"),
+     [_IMP, ["replaygain", "-a"], ["modify", "-y", "rg_track_gain=1.5", "title:One"],
+      ["replaygain", "-a"], ["replaygain", "-a", "-f"], _RG_LS]),
+    ("rg-mixed-album", "rg", {}, _rg(", auto: no"),
+     [["import", "-A", "-q", "--flat", "{music}"], ["replaygain", "-a"], _RG_LS]),
+    ("rg-bad-backend", "rg", {}, "{{plugins: [replaygain], replaygain: {{backend: bogus}}}}",
+     [["replaygain"]]),
+    ("rg-bad-peak", "rg", {}, _rg(", peak: loud"), [["replaygain"]]),
+    ("rg-gstreamer", "rg", {}, "{{plugins: [replaygain], replaygain: {{backend: gstreamer}}}}",
+     [["replaygain"]]),
+    ("rg-command-missing", "rg", {}, "{{plugins: [replaygain]}}", [["replaygain"]]),
+]
+EXPECTED.update({
+    "art:rg-bad-backend:1": _PLUGIN_LOAD,
+    "art:rg-bad-peak:1": _PLUGIN_LOAD,
+    "art:rg-gstreamer:1": _PLUGIN_LOAD,
+    "art:rg-command-missing:1": _PLUGIN_LOAD,
+    "art:rg-bad-backend:state": _PLUGIN_LOAD,
+    "art:rg-bad-peak:state": _PLUGIN_LOAD,
+    "art:rg-gstreamer:state": _PLUGIN_LOAD,
+    "art:rg-command-missing:state": _PLUGIN_LOAD,
+})

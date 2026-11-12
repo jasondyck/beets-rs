@@ -11,6 +11,7 @@ pub mod info;
 pub mod lastgenre;
 pub mod lyrics;
 pub mod missing;
+pub mod replaygain;
 pub mod requests;
 pub mod the;
 pub mod zero;
@@ -106,6 +107,7 @@ pub const AVAILABLE: &[&str] = &[
     "lyrics",
     "missing",
     "musicbrainz",
+    "replaygain",
     "the",
     "zero",
 ];
@@ -144,6 +146,10 @@ pub fn load(cfg: &Config) -> Result<Vec<Box<dyn Plugin>>> {
             "info" => out.push(Box::new(info::InfoPlugin)),
             "ftintitle" => out.push(Box::new(ftintitle::FtInTitle::new(cfg))),
             "missing" => out.push(Box::new(missing::MissingPlugin)),
+            "replaygain" => match replaygain::ReplayGain::new(cfg) {
+                Ok(p) => out.push(Box::new(p)),
+                Err(e) => crate::logging::emit(format!("** error loading plugin {name}\n{e:#}")),
+            },
             // Also a metadata source: its lookups and candidates are wired
             // into `MbSource` and `autotag` (see the module docs).
             "chroma" => out.push(Box::new(chroma::Chroma)),
@@ -217,6 +223,10 @@ impl PluginLog {
 
     pub fn set_base_level(&self, level: u8) {
         self.base_level.set(level);
+    }
+
+    pub fn base_level(&self) -> u8 {
+        self.base_level.get()
     }
 
     /// Run `f` with the base level at `level`, restoring it afterwards.

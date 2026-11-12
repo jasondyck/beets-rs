@@ -263,6 +263,18 @@ zero:
     update_database: no
     omit_single_disc: no
 
+replaygain:
+    overwrite: no
+    auto: yes
+    backend: command
+    threads: CPU_COUNT
+    parallel_on_import: no
+    per_disc: no
+    peak: 'true'
+    targetlevel: 89
+    r128: [Opus]
+    r128_targetlevel: 84
+
 chroma:
     search_limit: 5
     data_source_mismatch_penalty: 0.5
@@ -371,7 +383,18 @@ const PLUGIN_SECTIONS: &[&str] = &[
     "zero",
     "chroma",
     "ftintitle",
+    "replaygain",
 ];
+
+/// `DEFAULT_CONFIG` parsed, with the defaults computed at run time
+/// (replaygain's `threads`: `os.cpu_count()`).
+fn default_tree() -> Y {
+    let text = DEFAULT_CONFIG.replace(
+        "threads: CPU_COUNT",
+        &format!("threads: {}", crate::plugins::replaygain::cpu_count()),
+    );
+    serde_yaml::from_str(&text).expect("default config parses")
+}
 
 /// confuse's `ConfigReadError`: "PATH could not be read: REASON".
 fn read_yaml(file: &Path) -> Result<Y> {
@@ -486,7 +509,7 @@ impl Config {
 
     /// `load` with the configuration directory given.
     pub fn load_in(dir: &Path, overlays: &[PathBuf]) -> Result<Config> {
-        let defaults: Y = serde_yaml::from_str(DEFAULT_CONFIG).expect("default config parses");
+        let defaults: Y = default_tree();
         let mut cfg = Config {
             root: defaults,
             user: Y::Mapping(Mapping::new()),
@@ -542,7 +565,7 @@ impl Config {
 
     pub fn defaults() -> Config {
         Config {
-            root: serde_yaml::from_str(DEFAULT_CONFIG).unwrap(),
+            root: default_tree(),
             user: Y::Mapping(Mapping::new()),
             config_dir: default_config_dir(),
             sources: vec![],
@@ -571,7 +594,7 @@ impl Config {
         let mut out = if full {
             self.root.clone()
         } else {
-            let defaults: Y = serde_yaml::from_str(DEFAULT_CONFIG).unwrap();
+            let defaults: Y = default_tree();
             let mut base = Mapping::new();
             for p in PLUGIN_SECTIONS.iter().filter(|p| enabled(p)) {
                 if let Some(v) = defaults.get(*p) {

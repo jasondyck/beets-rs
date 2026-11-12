@@ -468,6 +468,31 @@ pub enum Cmd {
         #[arg(allow_hyphen_values = true)]
         args: Vec<String>,
     },
+    /// Analyze for ReplayGain (plugin: replaygain)
+    Replaygain {
+        /// Match albums instead of tracks
+        #[arg(short = 'a', long)]
+        album: bool,
+        /// Change the number of threads, defaults to maximum available
+        /// processors
+        #[arg(short = 't', long)]
+        threads: Option<usize>,
+        /// Analyze all files, including those that already have ReplayGain
+        /// metadata
+        #[arg(short = 'f', long)]
+        force: bool,
+        /// Write new metadata to files' tags
+        #[arg(short = 'w', long, overrides_with = "nowrite")]
+        write: bool,
+        /// Don't write metadata (opposite of -w)
+        #[arg(short = 'W', long, overrides_with = "write")]
+        nowrite: bool,
+        /// Limit query results
+        #[arg(short = 'l', long)]
+        limit: Option<usize>,
+        #[arg(allow_hyphen_values = true)]
+        query: Vec<String>,
+    },
     /// List missing tracks (plugin: missing)
     #[command(visible_alias = "miss")]
     Missing {
