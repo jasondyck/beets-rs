@@ -601,6 +601,36 @@ pub fn run(cli: Cli) -> Result<()> {
                 },
             )
         }
+        Cmd::Mbsync {
+            pretend,
+            mv,
+            nomove,
+            nowrite,
+            format,
+            limit,
+            query,
+        } => {
+            require_plugin(&cfg, "mbsync")?;
+            plugins::mbsync::command(
+                &cfg,
+                &lib,
+                plugins::mbsync::CmdOpts {
+                    pretend,
+                    // The last of -m/-M given wins (clap's overrides).
+                    mv: if mv {
+                        Some(true)
+                    } else if nomove {
+                        Some(false)
+                    } else {
+                        None
+                    },
+                    write: nowrite.then_some(false),
+                    format,
+                    limit,
+                    query,
+                },
+            )
+        }
         Cmd::Missing {
             count,
             total,
@@ -896,7 +926,7 @@ fn model_changes_in(old: &Record, new: &Record, only: Option<&[String]>) -> Vec<
 
 /// beets' `show_model_changes`: print `label` (the object, formatted as
 /// it was) and its changes, if there are any. Returns whether there were.
-fn show_model_changes(label: &str, old: &Record, new: &Record) -> bool {
+pub(crate) fn show_model_changes(label: &str, old: &Record, new: &Record) -> bool {
     show_changes(label, old, new, None, false)
 }
 
@@ -1618,7 +1648,12 @@ fn move_obj(
 /// beets' `Item.move` for the file: copy or move it to `dest` (made unique
 /// if taken by another file), set the path and prune the vacated directory after a move.
 /// False when the file is missing.
-fn move_item_file(cfg: &Config, item: &mut Item, dest: &Path, op: FileOp) -> Result<bool> {
+pub(crate) fn move_item_file(
+    cfg: &Config,
+    item: &mut Item,
+    dest: &Path,
+    op: FileOp,
+) -> Result<bool> {
     let src = item.path().to_path_buf();
     if !src.exists() {
         let what = if op == FileOp::Move {
