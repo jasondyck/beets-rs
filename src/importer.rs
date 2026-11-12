@@ -270,6 +270,9 @@ enum Decision<M> {
     /// "Rescan directory": walk the task's directories again (albums with
     /// a directory scope only).
     Rescan,
+    /// beets' `Action.RETAG`, from a plugin's prompt choice (edit): import
+    /// these items, as the plugin changed them, as tagged.
+    Retag(Vec<Item>),
 }
 
 /// The album prompt's choices after the candidate-specific ones, in beets'
@@ -1333,6 +1336,7 @@ impl<'a> Importer<'a> {
             eprintln!("{}", shown.join("\n"));
         }
 
+        let mut retag: Option<Vec<Item>> = None;
         let decision = if self.opts.autotag {
             let d = self.choose_album(&items, rescan)?;
             self.log_choice(&d, paths);
@@ -1351,14 +1355,24 @@ impl<'a> Importer<'a> {
             Decision::Tracks => return self.import_as_tracks(items),
             Decision::Group => return self.import_groups(items, dir),
             Decision::Rescan => return self.rescan(paths),
+            Decision::Retag(edited) => {
+                retag = Some(edited);
+                None
+            }
         };
 
         // Apply the choice to a copy: a merge starts over from the
         // untouched items, and the duplicate check and upgrade compare
         // against the new metadata.
         let album_keys = self.cfg.list("import.duplicate_keys.album");
-        let mut applied = items.clone();
-        let want = if let Some(m) = &m {
+        let retagged = retag.is_some();
+        let mut applied = retag.unwrap_or_else(|| items.clone());
+        let want = if retagged {
+            // beets' `align_album_level_fields` for RETAG (as for a
+            // match); the duplicate check uses the files' own tags.
+            align_retag(&mut applied);
+            duplicates::likely_key_values(&items, &album_keys)
+        } else if let Some(m) = &m {
             if self.opts.from_scratch {
                 for &(i, _) in &m.mapping {
                     clear_tags(&mut applied[i]);
@@ -1411,11 +1425,13 @@ impl<'a> Importer<'a> {
                 graft = album_id;
             }
         }
-        self.finalize_album(applied, m.as_ref().map(|m| &m.info), dir, graft)?;
+        self.finalize_album(applied, m.as_ref().map(|m| &m.info), retagged, dir, graft)?;
         Ok(Outcome::Done)
     }
 
     fn choose_album(&mut self, items: &[Item], rescan: bool) -> Result<Decision<AlbumMatch>> {
+        // The task's items as plugins' prompt choices see (and change) them.
+        let mut cur = items.to_vec();
         let (mut cands, mut rec) = match self.prefetched(items) {
             Some(Ok(Candidates::Album(c, r))) => (c, r),
             Some(Err(e)) => return Err(e),
@@ -1446,11 +1462,14 @@ impl<'a> Importer<'a> {
                     .then_some((0, rec > Recommendation::Low));
             }
 
+            let extra =
+                self.plugin_choices(true, &mut cur, cands.len(), focus.map(|f| f.0), rescan);
+            let extra_long: Vec<&'static str> = extra.iter().map(|(_, c)| c.long).collect();
             let choice = if let Some((k, has_default)) = focus {
                 self.show_album_match(items, &cands[k]);
                 self.bell();
                 match ui::options(
-                    &album_choices(true, rescan),
+                    &[album_choices(true, rescan), extra_long.clone()].concat(),
                     None,
                     has_default
                         .then_some(self.opts.default_action)
@@ -1473,8 +1492,37 @@ impl<'a> Importer<'a> {
                         "For help, see: https://beets.readthedocs.org/en/latest/faq.html#nomatch"
                     );
                 }
-                self.pick_album_candidate(items, &cands, rescan)?
+                self.pick_album_candidate(items, &cands, rescan, &extra_long)?
             };
+
+            // A plugin's choice (beets' `PromptChoice` callbacks).
+            if let Some(Choice::Letter(c)) = choice
+                && let Some((pi, _)) = extra.iter().find(|(_, p)| p.short == c)
+            {
+                let cfg = self.cfg;
+                let from_scratch = self.opts.from_scratch;
+                let apply = |n: usize, its: &mut Vec<Item>| {
+                    if from_scratch {
+                        for &(i, _) in &cands[n].mapping {
+                            clear_tags(&mut its[i]);
+                        }
+                    }
+                    autotag::apply_album(cfg, its, &cands[n]);
+                };
+                let mut task = plugins::ChoiceTask {
+                    cfg,
+                    is_album: true,
+                    items: &mut cur,
+                    candidates: cands.len(),
+                    selected: focus.map(|f| f.0),
+                    apply_candidate: &apply,
+                };
+                if self.plugins[*pi].run_prompt_choice(c, &mut task)? {
+                    return Ok(Decision::Retag(cur));
+                }
+                fresh = true;
+                continue;
+            }
 
             match choice {
                 None | Some(Choice::Letter('b')) => return Ok(Decision::Abort),
@@ -1511,14 +1559,45 @@ impl<'a> Importer<'a> {
         }
     }
 
+    /// The plugins' prompt choices (beets' `before_choose_candidate`), with
+    /// the index of each one's plugin.
+    fn plugin_choices(
+        &self,
+        is_album: bool,
+        items: &mut Vec<Item>,
+        candidates: usize,
+        selected: Option<usize>,
+        rescan: bool,
+    ) -> Vec<(usize, plugins::PromptChoice)> {
+        if self.plugins.is_empty() {
+            return vec![];
+        }
+        let noop = |_: usize, _: &mut Vec<Item>| {};
+        let task = plugins::ChoiceTask {
+            cfg: self.cfg,
+            is_album,
+            items,
+            candidates,
+            selected,
+            apply_candidate: &noop,
+        };
+        let builtin = if is_album {
+            album_choices(false, rescan)
+        } else {
+            ITEM_CHOICES.to_vec()
+        };
+        plugins::prompt_choices(self.plugins, &task, &builtin)
+    }
+
     /// beets' candidate list ("Finding tags for album ...") and prompt.
     fn pick_album_candidate(
         &self,
         items: &[Item],
         cands: &[AlbumMatch],
         rescan: bool,
+        extra: &[&'static str],
     ) -> Result<Option<Choice>> {
-        let choices = album_choices(false, rescan);
+        let choices = [album_choices(false, rescan), extra.to_vec()].concat();
         if cands.is_empty() {
             return Ok(ui::options(&choices, None, Some(Choice::Letter('s'))));
         }
@@ -1836,10 +1915,11 @@ impl<'a> Importer<'a> {
         &mut self,
         mut items: Vec<Item>,
         matched: Option<&crate::mb::AlbumInfo>,
+        retag: bool,
         source_dir: &Path,
         graft: Option<i64>,
     ) -> Result<()> {
-        let tagged = matched.is_some();
+        let tagged = matched.is_some() || retag;
         let n = items.len();
         let lib = self.lib;
         let mut moved_in_library = false;
@@ -2166,6 +2246,10 @@ impl<'a> Importer<'a> {
                 self.send_task_apply(std::slice::from_mut(&mut item), &paths);
                 true
             }
+            Decision::Retag(mut edited) => {
+                item = edited.remove(0);
+                true
+            }
             Decision::Tracks | Decision::Group | Decision::Rescan => {
                 unreachable!("not offered for tracks")
             }
@@ -2252,6 +2336,7 @@ impl<'a> Importer<'a> {
         // serves both): `fresh` after a lookup, `focus` while confirming.
         let mut fresh = true;
         let mut focus: Option<(usize, bool)> = None;
+        let mut cur = vec![item.clone()];
         loop {
             if fresh {
                 fresh = false;
@@ -2265,12 +2350,15 @@ impl<'a> Importer<'a> {
                     .then_some((0, rec > Recommendation::Low));
             }
 
+            let extra =
+                self.plugin_choices(false, &mut cur, cands.len(), focus.map(|f| f.0), false);
+            let extra_long: Vec<&'static str> = extra.iter().map(|(_, c)| c.long).collect();
             let choice = if let Some((k, has_default)) = focus {
                 disp.show_track_change(item, &cands[k]);
                 disp.flush();
                 self.bell();
                 match ui::options(
-                    &ITEM_CONFIRM,
+                    &[ITEM_CONFIRM.to_vec(), extra_long.clone()].concat(),
                     None,
                     has_default
                         .then_some(self.opts.default_action)
@@ -2287,8 +2375,34 @@ impl<'a> Importer<'a> {
                     other => other,
                 }
             } else {
-                self.pick_item_candidate(&disp, item, &cands)
+                self.pick_item_candidate(&disp, item, &cands, &extra_long)
             };
+
+            if let Some(Choice::Letter(c)) = choice
+                && let Some((pi, _)) = extra.iter().find(|(_, p)| p.short == c)
+            {
+                let cfg = self.cfg;
+                let from_scratch = self.opts.from_scratch;
+                let apply = |n: usize, its: &mut Vec<Item>| {
+                    if from_scratch {
+                        clear_tags(&mut its[0]);
+                    }
+                    autotag::apply_track(cfg, &mut its[0], &cands[n].info);
+                };
+                let mut task = plugins::ChoiceTask {
+                    cfg,
+                    is_album: false,
+                    items: &mut cur,
+                    candidates: cands.len(),
+                    selected: focus.map(|f| f.0),
+                    apply_candidate: &apply,
+                };
+                if self.plugins[*pi].run_prompt_choice(c, &mut task)? {
+                    return Ok(Decision::Retag(cur));
+                }
+                fresh = true;
+                continue;
+            }
 
             match choice {
                 None | Some(Choice::Letter('b')) => return Ok(Decision::Abort),
@@ -2327,10 +2441,12 @@ impl<'a> Importer<'a> {
         disp: &Display,
         item: &Item,
         cands: &[TrackMatch],
+        extra: &[&'static str],
     ) -> Option<Choice> {
+        let choices = [ITEM_CHOICES.to_vec(), extra.to_vec()].concat();
         if cands.is_empty() {
             println!("No matching recordings found.");
-            return ui::options(&ITEM_CHOICES, None, Some(Choice::Letter('s')));
+            return ui::options(&choices, None, Some(Choice::Letter('s')));
         }
         println!();
         println!(
@@ -2350,7 +2466,54 @@ impl<'a> Importer<'a> {
                 println!("{line}");
             }
         }
-        ui::options(&ITEM_CHOICES, Some(cands.len()), Some(Choice::Number(1)))
+        ui::options(&choices, Some(cands.len()), Some(Choice::Number(1)))
+    }
+}
+
+/// beets' `align_album_level_fields` for `Action.RETAG` (as for an applied
+/// match): the album artist (and its ids) from the first item's artist
+/// when unset, on every item.
+fn align_retag(items: &mut [Item]) {
+    let Some(first) = items.first() else {
+        return;
+    };
+    let mut changes: Vec<(&str, Vec<String>, bool)> = vec![];
+    if first.str("albumartist").is_empty() {
+        changes.push(("albumartist", vec![first.str("artist").to_string()], false));
+    }
+    if first.list("albumartists").is_empty() {
+        let a = first.list("artists");
+        let a = if a.is_empty() {
+            vec![first.str("artist").to_string()]
+        } else {
+            a
+        };
+        changes.push(("albumartists", a, true));
+    }
+    if first.str("mb_albumartistid").is_empty() {
+        changes.push((
+            "mb_albumartistid",
+            vec![first.str("mb_artistid").to_string()],
+            false,
+        ));
+    }
+    if first.list("mb_albumartistids").is_empty() {
+        let a = first.list("mb_artistids");
+        let a = if a.is_empty() {
+            vec![first.str("mb_artistid").to_string()]
+        } else {
+            a
+        };
+        changes.push(("mb_albumartistids", a, true));
+    }
+    for item in items.iter_mut() {
+        for (f, v, list) in &changes {
+            if *list {
+                item.set_list(f, v);
+            } else {
+                item.set_str(f, v[0].clone());
+            }
+        }
     }
 }
 
@@ -4153,6 +4316,70 @@ mod tests {
         ui::script::set(answers);
         imp.run(&[path.to_path_buf()]).unwrap();
         ui::script::prompts()
+    }
+
+    /// beets' test_edit `EditDuringImporter` cases without candidates:
+    /// "eDit" at the prompt, with a script as the editor.
+    fn edit_import(
+        singleton: bool,
+        answers: &[&'static str],
+    ) -> Option<(tempfile::TempDir, Library, Vec<String>)> {
+        let (d, mut cfg, lib, top, _) = rescan_setup()?;
+        let ed = d.path().join("editor.sh");
+        std::fs::write(
+            &ed,
+            "#!/bin/sh\nsed -i -e 's/title: one/title: Edited one/' \"$1\"\n",
+        )
+        .unwrap();
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&ed, std::fs::Permissions::from_mode(0o755)).unwrap();
+        cfg.set("editor", ed.display().to_string().into());
+        cfg.set("plugins", serde_yaml::from_str("[edit]").unwrap());
+        let plugins: Vec<Box<dyn Plugin>> =
+            vec![Box::new(crate::plugins::edit::EditPlugin::new(&cfg))];
+        let mut o = opts(&cfg);
+        o.autotag = true;
+        o.singletons = singleton;
+        let (fake, _) = FakeSource::new(0);
+        let mut imp = Importer::new(&cfg, &lib, o, &plugins)
+            .unwrap()
+            .with_source(fake);
+        ui::script::set(answers.iter().map(|a| (*a, None)).collect());
+        imp.run(&[top]).unwrap();
+        let titles = all_items(&lib)
+            .iter()
+            .map(|i| i.str("title").to_string())
+            .collect();
+        Some((d, lib, titles))
+    }
+
+    #[test]
+    fn edit_apply_asis() {
+        let Some((_d, lib, titles)) = edit_import(false, &["d", "a"]) else {
+            return;
+        };
+        assert_eq!(titles, ["Edited one", "two"]);
+        // Imported as tagged (RETAG), not from a candidate.
+        let a = &albums(&lib)[0];
+        assert_eq!(a.str("mb_albumid"), "");
+        assert_eq!(a.str("albumartist"), all_items(&lib)[0].str("artist"));
+    }
+
+    #[test]
+    fn edit_discard_asis() {
+        let Some((_d, _lib, titles)) = edit_import(false, &["d", "c", "u"]) else {
+            return;
+        };
+        assert_eq!(titles, ["one", "two"]);
+    }
+
+    #[test]
+    fn edit_apply_asis_singleton() {
+        let Some((_d, lib, titles)) = edit_import(true, &["d", "a", "s"]) else {
+            return;
+        };
+        assert_eq!(titles, ["Edited one"]);
+        assert_eq!(all_items(&lib)[0].int("album_id"), 0);
     }
 
     fn albums(lib: &Library) -> Vec<Album> {

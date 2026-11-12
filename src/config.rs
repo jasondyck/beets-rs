@@ -368,6 +368,11 @@ convert:
     refresh: no
     keep_new: no
 
+edit:
+    albumfields: album albumartist
+    itemfields: track title artist album
+    ignore_fields: id path
+
 musicbrainz:
     host: musicbrainz.org
     https: no
@@ -446,6 +451,7 @@ const PLUGIN_SECTIONS: &[&str] = &[
     "duplicates",
     "scrub",
     "convert",
+    "edit",
 ];
 
 /// `DEFAULT_CONFIG` parsed, with the defaults computed at run time

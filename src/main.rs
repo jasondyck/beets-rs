@@ -21,6 +21,7 @@ mod paths;
 mod pipeline;
 mod plugins;
 mod props;
+mod pyyaml;
 mod query;
 mod state;
 mod template;
@@ -654,6 +655,20 @@ pub enum Cmd {
         /// Limit query results
         #[arg(long)]
         limit: Option<usize>,
+        #[arg(allow_hyphen_values = true)]
+        query: Vec<String>,
+    },
+    /// Interactively edit metadata (plugin: edit)
+    Edit {
+        /// Edit this field also
+        #[arg(short = 'f', long = "field", value_name = "FIELD")]
+        field: Vec<String>,
+        /// Edit all fields
+        #[arg(long)]
+        all: bool,
+        /// Match albums instead of tracks
+        #[arg(short = 'a', long)]
+        album: bool,
         #[arg(allow_hyphen_values = true)]
         query: Vec<String>,
     },
