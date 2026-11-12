@@ -504,6 +504,48 @@ pub enum Cmd {
         #[arg(allow_hyphen_values = true)]
         query: Vec<String>,
     },
+    /// Submit Acoustid fingerprints (plugin: chroma)
+    Submit {
+        /// Limit query results
+        #[arg(short = 'l', long)]
+        limit: Option<usize>,
+        #[arg(allow_hyphen_values = true)]
+        query: Vec<String>,
+    },
+    /// Generate fingerprints for items without them (plugin: chroma)
+    Fingerprint {
+        /// Limit query results
+        #[arg(short = 'l', long)]
+        limit: Option<usize>,
+        #[arg(allow_hyphen_values = true)]
+        query: Vec<String>,
+    },
+    /// Search local database by chroma fingerprint (plugin: chroma)
+    Chromasearch {
+        /// Print paths for matched items or albums
+        #[arg(short = 'p', long)]
+        path: bool,
+        /// Print with custom format
+        #[arg(short = 'f', long)]
+        format: Option<String>,
+        /// Fingerprint to search for (from the output of fpcalc -plain)
+        #[arg(short = 's', long)]
+        search: Option<String>,
+        /// Number of items in result
+        #[arg(short = 'c', long, default_value_t = 5, allow_negative_numbers = true)]
+        count: i64,
+        /// Don't stop searching once we found an exact match
+        #[arg(long)]
+        full: bool,
+        /// Write computed fingerprints to files
+        #[arg(short = 'w', long)]
+        write: bool,
+        /// Limit query results
+        #[arg(short = 'l', long)]
+        limit: Option<usize>,
+        #[arg(allow_hyphen_values = true)]
+        query: Vec<String>,
+    },
     /// Output version information
     Version,
     /// Give detailed help on a specific sub-command

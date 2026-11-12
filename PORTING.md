@@ -60,7 +60,7 @@ Done: fetchart (filesystem + CAA), lyrics (LRCLIB), embedart.
 - [x] **5.P Plugin import stages before file placement**: beets runs `early_import_stages` and `import_stages` (lastgenre, ftintitle, fetchart's fetch, zero...) before `manipulate_files` (beets/importer/session.py), so plugin changes affect destination paths and the first tag write; ours run after placement and re-write. Port the stage order and move existing plugins onto it
 - [x] **5.1 fetchart/embedart completion**: image resizing (`maxwidth`, `quality`, `max_filesize`), `minwidth`, `enforce_ratio`, `cautious`, `cover_format`, `store_source`; more sources (itunes, amazon, albumart, wikipedia, fanarttv, lastfm); embedart `maxwidth`, `compare_threshold`
 - [x] **5.2 lastgenre**: Last.fm genre lookup with whitelist/canonicalization tree, `count`, `source`, `fallback`, `force`, `-a/-s`
-- [ ] **5.3 chroma**: AcoustID fingerprinting via `fpcalc` (shell out), as an extra candidate source in import; `beet fingerprint`, `beet submit`
+- [x] **5.3 chroma**: AcoustID fingerprinting via `fpcalc` (shell out), as an extra candidate source in import; `beet fingerprint`, `beet submit`
 - [ ] **5.4 replaygain**: ffmpeg backend (track + album gain, R128 for Opus), `beet replaygain [-a] [-f]`, `auto`, `targetlevel`, `overwrite`
 - [ ] **5.5 convert**: ffmpeg transcoding with `formats`, `format`, `dest`, `-k` keep new, `-t` threads, `-y`, `-p`, `no_convert`, `max_bitrate`, `auto` on import, `embed`, copy album art
 - [ ] **5.6 scrub**: strip all tags and rewrite beets' metadata, `auto` on import

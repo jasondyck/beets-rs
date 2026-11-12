@@ -528,6 +528,40 @@ pub fn run(cli: Cli) -> Result<()> {
                 },
             )
         }
+        Cmd::Submit { limit, query } => {
+            require_plugin(&cfg, "chroma")?;
+            plugins::chroma::submit_command(&cfg, &lib, limit, &query)
+        }
+        Cmd::Fingerprint { limit, query } => {
+            require_plugin(&cfg, "chroma")?;
+            plugins::chroma::fingerprint_command(&cfg, &lib, limit, &query)
+        }
+        Cmd::Chromasearch {
+            path,
+            format,
+            search,
+            count,
+            full,
+            write,
+            limit,
+            query,
+        } => {
+            require_plugin(&cfg, "chroma")?;
+            plugins::chroma::chromasearch_command(
+                &cfg,
+                &lib,
+                plugins::chroma::SearchOpts {
+                    search,
+                    count,
+                    full,
+                    write,
+                    path,
+                    format,
+                    limit,
+                    query,
+                },
+            )
+        }
         Cmd::Fields => fields(&lib),
         Cmd::MigrateBeets {
             beets_config,

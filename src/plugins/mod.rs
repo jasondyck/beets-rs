@@ -3,6 +3,7 @@
 //! their own subcommands (wired up in `main.rs`/`commands.rs`).
 
 pub mod art;
+pub mod chroma;
 pub mod embedart;
 pub mod fetchart;
 pub mod info;
@@ -86,9 +87,16 @@ pub trait Plugin {
     /// beets' `import_task_choice`: the user (or `-q`) chose what to do
     /// with a task while autotagging; `asis` for "Use as-is".
     fn import_task_choice(&self, _asis: bool) {}
+
+    /// beets' `import_task_apply`: a match was applied to the task's items
+    /// (before they're added to the library).
+    fn import_task_apply(&self, _ctx: &PluginCtx, _task: &mut ImportTask) -> Result<()> {
+        Ok(())
+    }
 }
 
 pub const AVAILABLE: &[&str] = &[
+    "chroma",
     "embedart",
     "fetchart",
     "info",
@@ -133,6 +141,9 @@ pub fn load(cfg: &Config) -> Result<Vec<Box<dyn Plugin>>> {
             "embedart" => out.push(Box::new(embedart::EmbedArt::new(cfg))),
             "info" => out.push(Box::new(info::InfoPlugin)),
             "missing" => out.push(Box::new(missing::MissingPlugin)),
+            // Also a metadata source: its lookups and candidates are wired
+            // into `MbSource` and `autotag` (see the module docs).
+            "chroma" => out.push(Box::new(chroma::Chroma)),
             // `%the{}` lives in the template environment (`FormatEnv`);
             // loading only logs the config warnings.
             "the" => out.push(Box::new(the::The::load(cfg))),

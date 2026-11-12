@@ -263,6 +263,11 @@ zero:
     update_database: no
     omit_single_disc: no
 
+chroma:
+    search_limit: 5
+    data_source_mismatch_penalty: 0.5
+    auto: yes
+
 musicbrainz:
     host: musicbrainz.org
     https: no
@@ -321,6 +326,7 @@ pub const REDACTED_KEYS: &[(&str, &str)] = &[
     ("lyrics", "lyrics.google_API_key"),
     ("lyrics", "lyrics.google_engine_ID"),
     ("lyrics", "lyrics.genius_api_key"),
+    ("chroma", "acoustid.apikey"),
 ];
 
 /// Plugins whose default settings are in `DEFAULT_CONFIG`: beets adds a
@@ -334,6 +340,7 @@ const PLUGIN_SECTIONS: &[&str] = &[
     "missing",
     "the",
     "zero",
+    "chroma",
 ];
 
 /// confuse's `ConfigReadError`: "PATH could not be read: REASON".

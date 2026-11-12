@@ -19,6 +19,9 @@ use std::sync::{Arc, LazyLock};
 /// Artist names meaning "various artists" (beets' `VA_ARTISTS`).
 const VA_ARTISTS: [&str; 5] = ["", "various artists", "various", "va", "unknown"];
 
+/// The plugins that are beets `MetadataSourcePlugin`s.
+const METADATA_SOURCES: &[&str] = &["musicbrainz", "chroma"];
+
 /// What the distance functions read from the config, gathered once per
 /// lookup (beets caches the same values).
 #[derive(Debug, Clone)]
@@ -31,6 +34,9 @@ pub struct Ctx {
     original_year: bool,
     /// The MusicBrainz source's `data_source_mismatch_penalty`.
     source_penalty: f64,
+    /// How many metadata source plugins are enabled (beets'
+    /// `find_metadata_source_plugins()`).
+    metadata_sources: usize,
     required: Vec<String>,
     ignored: Vec<String>,
     max_rec: Vec<(String, Recommendation)>,
@@ -78,6 +84,10 @@ impl Ctx {
                 .collect(),
             original_year: cfg.bool("match.preferred.original_year"),
             source_penalty,
+            metadata_sources: METADATA_SOURCES
+                .iter()
+                .filter(|p| crate::plugins::enabled(cfg, p))
+                .count(),
             required: cfg.list("match.required"),
             ignored: cfg.list("match.ignored"),
             max_rec: cfg
@@ -171,10 +181,11 @@ impl Distance {
         self.add(key, if b != 0.0 { n / b } else { 0.0 });
     }
 
-    /// beets' `add_data_source`, with MusicBrainz the only source: a
-    /// mismatch costs only when the old data came from somewhere.
+    /// beets' `add_data_source`: a mismatch costs when the old data came
+    /// from somewhere, or whenever more than one metadata source is
+    /// enabled (chroma alongside musicbrainz, say).
     fn add_data_source(&mut self, ctx: &Ctx, before: &str, after: &str) {
-        if before != after && !before.is_empty() {
+        if before != after && (!before.is_empty() || ctx.metadata_sources > 1) {
             let penalty = if after == "MusicBrainz" {
                 ctx.source_penalty
             } else {
@@ -715,6 +726,11 @@ pub fn album_candidates(
         let va_likely = cur.va || VA_ARTISTS.contains(&artist.to_lowercase().as_str());
         let release_ids = mb.search_releases(items, &artist, &album, va_likely)?;
         add_ids(&mut cands, &release_ids);
+        // The other metadata source's candidates (beets queries every
+        // source's `candidates`).
+        for info in crate::plugins::chroma::album_candidates(cfg, mb, items) {
+            add_candidate(&ctx, &cur, items, &mut cands, info);
+        }
     }
     sort_by_distance(&mut cands, |m| m.distance.distance());
     let rec = rec_of(&cands);
@@ -801,6 +817,9 @@ pub fn item_candidates(
     };
     let title = if st.is_empty() { item.str("title") } else { st };
     for t in mb.search_recordings(artist, title)? {
+        push(&mut cands, t);
+    }
+    for t in crate::plugins::chroma::item_candidates(cfg, mb, item) {
         push(&mut cands, t);
     }
     let rec = rec_of(&mut cands);

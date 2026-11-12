@@ -336,10 +336,14 @@ struct MbSource {
 
 impl CandidateSource for MbSource {
     fn album(&self, items: &[Item]) -> Result<(Vec<AlbumMatch>, Recommendation)> {
+        // beets' `import_task_start` event, sent as the task's lookup
+        // begins (chroma's fingerprinting, with `auto`).
+        plugins::chroma::fingerprint_task(&self.cfg, items);
         autotag::album_candidates(&self.cfg, &self.mb, items, None, &self.ids)
     }
 
     fn item(&self, item: &Item) -> Result<(Vec<TrackMatch>, Recommendation)> {
+        plugins::chroma::fingerprint_task(&self.cfg, std::slice::from_ref(item));
         autotag::item_candidates(&self.cfg, &self.mb, item, None, &self.ids)
     }
 }
@@ -1362,6 +1366,7 @@ impl<'a> Importer<'a> {
             }
             // Items with no matching track are dropped, as in beets.
             autotag::apply_album(self.cfg, &mut applied, m);
+            self.send_task_apply(&mut applied, paths);
             let keep: Vec<usize> = m.mapping.iter().map(|(i, _)| *i).collect();
             let mut idx = 0;
             applied.retain(|_| {
@@ -1920,6 +1925,19 @@ impl<'a> Importer<'a> {
         Ok(())
     }
 
+    /// beets' `import_task_apply` event, after a match is applied.
+    fn send_task_apply(&self, items: &mut [Item], paths: &[PathBuf]) {
+        let ctx = self.plugin_ctx();
+        let mut task = plugins::ImportTask {
+            album: None,
+            items,
+            paths,
+            asis: false,
+            op: self.opts.op,
+        };
+        plugins::each(self.plugins, |p| p.import_task_apply(&ctx, &mut task));
+    }
+
     /// beets' plugin stages (`plugin_stage`): every plugin's early import
     /// stage, then every import stage, in the order the plugins are
     /// listed, each followed by reloading the task from the library (as
@@ -2145,6 +2163,7 @@ impl<'a> Importer<'a> {
                     clear_tags(&mut item);
                 }
                 autotag::apply_track(self.cfg, &mut item, &m.info);
+                self.send_task_apply(std::slice::from_mut(&mut item), &paths);
                 true
             }
             Decision::Tracks | Decision::Group | Decision::Rescan => {
