@@ -12,6 +12,10 @@ use std::os::unix::ffi::{OsStrExt, OsStringExt};
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
+/// A table's `SELECT *` column mapping: the `id` column, then each schema
+/// field's column.
+type Columns = Rc<(usize, Vec<usize>)>;
+
 pub struct Library {
     conn: Connection,
     /// Values computed from the library's contents (beets' `_memotable`),
@@ -20,6 +24,9 @@ pub struct Library {
     /// The library directory (normalized): paths inside it are stored
     /// relative to it, as beets does. None: stored as they are.
     music_dir: Option<PathBuf>,
+    /// Each table's `SELECT *` column mapping, by kind (items, albums):
+    /// every load of a kind has the same columns.
+    cols: RefCell<[Option<Columns>; 2]>,
 }
 
 fn table(kind: Kind) -> &'static str {
@@ -27,6 +34,40 @@ fn table(kind: Kind) -> &'static str {
         Kind::Item => "items",
         Kind::Album => "albums",
     }
+}
+
+/// The INSERT and UPDATE statements for a kind: the same for every record
+/// of that kind, so they're built once (their statements stay in the
+/// connection's statement cache).
+fn add_sql(kind: Kind) -> &'static str {
+    static ITEM: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    static ALBUM: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    let cell = match kind {
+        Kind::Item => &ITEM,
+        Kind::Album => &ALBUM,
+    };
+    cell.get_or_init(|| {
+        let cols: Vec<&str> = schema(kind).iter().map(|(n, _)| *n).collect();
+        format!(
+            "INSERT INTO {} ({}) VALUES ({})",
+            table(kind),
+            cols.join(","),
+            vec!["?"; cols.len()].join(",")
+        )
+    })
+}
+
+fn store_sql(kind: Kind) -> &'static str {
+    static ITEM: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    static ALBUM: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    let cell = match kind {
+        Kind::Item => &ITEM,
+        Kind::Album => &ALBUM,
+    };
+    cell.get_or_init(|| {
+        let sets: Vec<String> = schema(kind).iter().map(|(n, _)| format!("{n}=?")).collect();
+        format!("UPDATE {} SET {} WHERE id=?", table(kind), sets.join(","))
+    })
 }
 
 fn other(kind: Kind) -> Kind {
@@ -731,6 +772,7 @@ impl Library {
             conn,
             memo: RefCell::new(HashMap::new()),
             music_dir,
+            cols: RefCell::new([None, None]),
         })
     }
 
@@ -783,17 +825,10 @@ impl Library {
     pub fn add(&self, rec: &mut Record) -> Result<i64> {
         self.invalidate();
         rec.set("added", Value::Float(now()));
-        let t = table(rec.kind);
-        let cols: Vec<&str> = rec.fixed_values().map(|(n, _)| n).collect();
         let vals: Vec<SqlValue> = rec.fixed_values().map(|(n, v)| self.to_sql(n, v)).collect();
-        let placeholders = vec!["?"; cols.len()].join(",");
-        self.conn.execute(
-            &format!(
-                "INSERT INTO {t} ({}) VALUES ({placeholders})",
-                cols.join(",")
-            ),
-            rusqlite::params_from_iter(vals),
-        )?;
+        self.conn
+            .prepare_cached(add_sql(rec.kind))?
+            .execute(rusqlite::params_from_iter(vals))?;
         let id = self.conn.last_insert_rowid();
         rec.id = Some(id);
         self.store_flex(rec)?;
@@ -804,14 +839,11 @@ impl Library {
     pub fn store(&self, rec: &Record) -> Result<()> {
         self.invalidate();
         let id = rec.id.context("record has no id; add it first")?;
-        let t = table(rec.kind);
-        let sets: Vec<String> = rec.fixed_values().map(|(n, _)| format!("{n}=?")).collect();
         let mut vals: Vec<SqlValue> = rec.fixed_values().map(|(n, v)| self.to_sql(n, v)).collect();
         vals.push(SqlValue::Integer(id));
-        self.conn.execute(
-            &format!("UPDATE {t} SET {} WHERE id=?", sets.join(",")),
-            rusqlite::params_from_iter(vals),
-        )?;
+        self.conn
+            .prepare_cached(store_sql(rec.kind))?
+            .execute(rusqlite::params_from_iter(vals))?;
         self.store_flex(rec)
     }
 
@@ -819,7 +851,8 @@ impl Library {
         let a = attr_table(rec.kind);
         let id = rec.id.unwrap();
         self.conn
-            .execute(&format!("DELETE FROM {a} WHERE entity_id=?"), [id])?;
+            .prepare_cached(&format!("DELETE FROM {a} WHERE entity_id=?"))?
+            .execute([id])?;
         let mut stmt = self.conn.prepare_cached(&format!(
             "INSERT INTO {a} (entity_id, key, value) VALUES (?,?,?)"
         ))?;
@@ -848,12 +881,23 @@ impl Library {
     }
 
     /// The column of each schema field (and `id`) in a statement's result.
-    fn columns(kind: Kind, stmt: &rusqlite::Statement) -> rusqlite::Result<(usize, Vec<usize>)> {
+    /// Every `SELECT *` on a table has the same columns, so the mapping is
+    /// made once (finding 97 columns by name on every load was noticeable).
+    fn columns(&self, kind: Kind, stmt: &rusqlite::Statement) -> rusqlite::Result<Columns> {
+        let index = match kind {
+            Kind::Item => 0,
+            Kind::Album => 1,
+        };
+        if let Some(cols) = &self.cols.borrow()[index] {
+            return Ok(cols.clone());
+        }
         let fields = schema(kind)
             .iter()
             .map(|(n, _)| stmt.column_index(n))
             .collect::<rusqlite::Result<_>>()?;
-        Ok((stmt.column_index("id")?, fields))
+        let cols = Rc::new((stmt.column_index("id")?, fields));
+        self.cols.borrow_mut()[index] = Some(cols.clone());
+        Ok(cols)
     }
 
     fn row_to_record(
@@ -878,7 +922,7 @@ impl Library {
         let mut stmt = self
             .conn
             .prepare_cached(&format!("SELECT * FROM {t} {where_sql}"))?;
-        let cols = Self::columns(kind, &stmt)?;
+        let cols = self.columns(kind, &stmt)?;
         let mut recs: Vec<Record> = stmt
             .query_map(rusqlite::params_from_iter(args.iter()), |r| {
                 self.row_to_record(kind, r, &cols)
@@ -988,7 +1032,7 @@ impl Library {
         };
         crate::query::register_sql_functions(&self.conn)?;
         let mut stmt = self.conn.prepare(&sql)?;
-        let cols = Self::columns(kind, &stmt)?;
+        let cols = self.columns(kind, &stmt)?;
         let mut recs: Vec<Record> = stmt
             .query_map(rusqlite::params_from_iter(args.iter()), |r| {
                 self.row_to_record(kind, r, &cols)

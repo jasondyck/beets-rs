@@ -1967,9 +1967,6 @@ impl<'a> Importer<'a> {
                 self.apply_set_fields(Some(&mut album), &mut items);
             }
             lib.store(&album)?;
-            for item in &items {
-                lib.store(item)?;
-            }
             Ok((album, replaced))
         })?;
         let (mut album, replaced) = added;
@@ -2040,6 +2037,12 @@ impl<'a> Importer<'a> {
     ) -> Result<()> {
         if self.plugins.is_empty() {
             return Ok(());
+        }
+        // The stages see the library's copy of the task (beets' `reload`),
+        // so store the changes made since the item was added. Without
+        // plugins, the items are stored once, after their files are placed.
+        for item in items.iter() {
+            self.lib.store(item)?;
         }
         let ctx = self.plugin_ctx();
         for early in [true, false] {

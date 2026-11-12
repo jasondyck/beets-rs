@@ -29,6 +29,7 @@ use lofty::mp4::{Atom, AtomData, AtomIdent, DataType, Ilst};
 use lofty::ogg::OggPictureStorage;
 use lofty::ogg::tag::VorbisComments;
 use lofty::picture::{Picture, PictureType};
+use lofty::properties::FileProperties;
 use lofty::tag::{Accessor, ItemValue, TagExt};
 use std::borrow::Cow;
 use std::path::{Path, PathBuf};
@@ -1936,8 +1937,33 @@ pub enum Got {
     List(Option<Vec<String>>),
 }
 
+/// A field by its name (`FIELDS`, then `EXTRA_FIELDS`).
+fn field_named(name: &str) -> Option<&'static Field> {
+    static MAP: std::sync::OnceLock<std::collections::HashMap<&'static str, &'static Field>> =
+        std::sync::OnceLock::new();
+    MAP.get_or_init(|| {
+        FIELDS
+            .iter()
+            .chain(EXTRA_FIELDS)
+            .map(|f| (f.name, f))
+            .collect()
+    })
+    .get(name)
+    .copied()
+}
+
 impl MediaFile {
+    /// A file's tags.
     pub fn open(path: &Path) -> Result<MediaFile> {
+        Ok(Self::open_impl(path, false)?.0)
+    }
+
+    /// A file's tags and audio properties, from one read of the file.
+    pub fn open_with_properties(path: &Path) -> Result<(MediaFile, FileProperties)> {
+        Self::open_impl(path, true)
+    }
+
+    fn open_impl(path: &Path, read_properties: bool) -> Result<(MediaFile, FileProperties)> {
         let ft = lofty::probe::Probe::open(path)
             .with_context(|| format!("reading {}", path.display()))?
             .guess_file_type()?
@@ -1946,31 +1972,46 @@ impl MediaFile {
         let mut file =
             std::fs::File::open(path).with_context(|| format!("reading {}", path.display()))?;
         // Pictures are read too: saving the tag writes back what it holds.
-        let opts = ParseOptions::new().read_properties(false);
+        let opts = ParseOptions::new().read_properties(read_properties);
         // mutagen leaves "DISCNUMBER=2/3" alone (lofty would split it).
         let vorbis_opts = ParseOptions::new()
-            .read_properties(false)
+            .read_properties(read_properties)
             .implicit_conversions(false);
-        let tags = match ft {
+        let (tags, properties): (Tags, FileProperties) = match ft {
             FileType::Mpeg => {
                 let f = lofty::mpeg::MpegFile::read_from(&mut file, opts)?;
-                Self::id3(f.id3v2().cloned(), f.id3v1().cloned())
+                (
+                    Self::id3(f.id3v2().cloned(), f.id3v1().cloned()),
+                    (*f.properties()).into(),
+                )
             }
             FileType::Aiff => {
                 let f = lofty::iff::aiff::AiffFile::read_from(&mut file, opts)?;
-                Self::id3(f.id3v2().cloned(), None)
+                (
+                    Self::id3(f.id3v2().cloned(), None),
+                    f.properties().clone().into(),
+                )
             }
             FileType::Wav => {
                 let f = lofty::iff::wav::WavFile::read_from(&mut file, opts)?;
-                Self::id3(f.id3v2().cloned(), None)
+                (
+                    Self::id3(f.id3v2().cloned(), None),
+                    (*f.properties()).into(),
+                )
             }
             FileType::Aac => {
                 let f = lofty::aac::AacFile::read_from(&mut file, opts)?;
-                Self::id3(f.id3v2().cloned(), None)
+                (
+                    Self::id3(f.id3v2().cloned(), None),
+                    (*f.properties()).into(),
+                )
             }
             FileType::Mp4 => {
                 let f = lofty::mp4::Mp4File::read_from(&mut file, opts)?;
-                Tags::Mp4(f.ilst().cloned().unwrap_or_default())
+                (
+                    Tags::Mp4(f.ilst().cloned().unwrap_or_default()),
+                    f.properties().clone().into(),
+                )
             }
             FileType::Flac => {
                 let f = lofty::flac::FlacFile::read_from(&mut file, vorbis_opts)?;
@@ -1980,40 +2021,66 @@ impl MediaFile {
                 for (p, info) in f.pictures() {
                     vc.insert_picture(p.clone(), Some(*info))?;
                 }
-                Tags::Vorbis(vc)
+                (Tags::Vorbis(vc), (*f.properties()).into())
             }
             FileType::Vorbis => {
                 let f = lofty::ogg::VorbisFile::read_from(&mut file, vorbis_opts)?;
-                Tags::Vorbis(f.vorbis_comments().clone())
+                (
+                    Tags::Vorbis(f.vorbis_comments().clone()),
+                    (*f.properties()).into(),
+                )
             }
             FileType::Opus => {
                 let f = lofty::ogg::OpusFile::read_from(&mut file, vorbis_opts)?;
-                Tags::Vorbis(f.vorbis_comments().clone())
+                (
+                    Tags::Vorbis(f.vorbis_comments().clone()),
+                    (*f.properties()).into(),
+                )
             }
             FileType::Speex => {
                 let f = lofty::ogg::SpeexFile::read_from(&mut file, vorbis_opts)?;
-                Tags::Vorbis(f.vorbis_comments().clone())
+                (
+                    Tags::Vorbis(f.vorbis_comments().clone()),
+                    (*f.properties()).into(),
+                )
             }
             FileType::Ape => {
                 let f = lofty::ape::ApeFile::read_from(&mut file, opts)?;
-                Tags::Ape(f.ape().cloned().unwrap_or_default())
+                (
+                    Tags::Ape(f.ape().cloned().unwrap_or_default()),
+                    f.properties().clone().into(),
+                )
             }
             FileType::WavPack => {
                 let f = lofty::wavpack::WavPackFile::read_from(&mut file, opts)?;
-                Tags::Ape(f.ape().cloned().unwrap_or_default())
+                (
+                    Tags::Ape(f.ape().cloned().unwrap_or_default()),
+                    (*f.properties()).into(),
+                )
             }
             FileType::Mpc => {
                 let f = lofty::musepack::MpcFile::read_from(&mut file, opts)?;
-                Tags::Ape(f.ape().cloned().unwrap_or_default())
+                (
+                    Tags::Ape(f.ape().cloned().unwrap_or_default()),
+                    f.properties().clone().into(),
+                )
             }
             other => bail!("unsupported file type {other:?}: {}", path.display()),
         };
-        Ok(MediaFile {
-            path: path.to_path_buf(),
-            ft,
-            tags,
-            sylt: None,
-        })
+        Ok((
+            MediaFile {
+                path: path.to_path_buf(),
+                ft,
+                tags,
+                sylt: None,
+            },
+            properties,
+        ))
+    }
+
+    /// The file's type.
+    pub fn file_type(&self) -> FileType {
+        self.ft
     }
 
     fn id3(tag: Option<Id3v2Tag>, v1: Option<Id3v1Tag>) -> Tags {
@@ -2090,19 +2157,16 @@ impl MediaFile {
     pub fn get(&self, name: &str) -> Option<Got> {
         let (field, part) = match name {
             "year" | "month" | "day" => (
-                FIELDS.iter().find(|f| f.name == "date")?,
+                field_named("date")?,
                 ["year", "month", "day"].iter().position(|p| *p == name),
             ),
             "original_year" | "original_month" | "original_day" => (
-                FIELDS.iter().find(|f| f.name == "original_date")?,
+                field_named("original_date")?,
                 ["original_year", "original_month", "original_day"]
                     .iter()
                     .position(|p| *p == name),
             ),
-            _ => (
-                FIELDS.iter().chain(EXTRA_FIELDS).find(|f| f.name == name)?,
-                None,
-            ),
+            _ => (field_named(name)?, None),
         };
         if let Some(i) = part {
             return Some(Got::Int(self.date_tuple(field)[i]));
@@ -2133,7 +2197,7 @@ impl MediaFile {
     /// `str(datetime.date(year, month or 1, day or 1))`, None without a
     /// year or for an impossible date.
     pub fn date(&self, name: &str) -> Option<String> {
-        let field = FIELDS.iter().find(|f| f.name == name)?;
+        let field = field_named(name)?;
         if !matches!(field.ty, Date(_)) {
             return None;
         }
@@ -2181,7 +2245,7 @@ impl MediaFile {
         }
         for (list, single) in [("catalognums", "catalognum"), ("languages", "language")] {
             if nulls.contains(list)
-                && let Some(field) = FIELDS.iter().find(|f| f.name == single)
+                && let Some(field) = field_named(single)
             {
                 self.update_field(field, item, true);
             }
@@ -2612,6 +2676,7 @@ fn update_v1(v1: &mut Id3v1Tag, tag: &Id3v2Tag) {
 mod tests {
     use super::*;
     use crate::model::{Item, normalize_key};
+    use lofty::file::TaggedFileExt;
 
     /// A 0.3 s file made by ffmpeg (None when ffmpeg is missing).
     fn make(dir: &Path, name: &str, args: &[&str]) -> Option<PathBuf> {
@@ -2668,6 +2733,25 @@ mod tests {
         }
         it.set_str("initial_key", "Ebm");
         it
+    }
+
+    /// Tags and audio properties come from one read of the file (the
+    /// import path reads thousands of files), with the same values a
+    /// properties-only read gives.
+    #[test]
+    fn open_with_properties_matches_separate_reads() {
+        let d = tempfile::tempdir().unwrap();
+        for ext in ["mp3", "flac", "m4a", "ogg"] {
+            let Some(p) = make(d.path(), &format!("p.{ext}"), &[]) else {
+                return;
+            };
+            let file = lofty::read_from_path(&p).unwrap();
+            let want = file.properties().clone();
+            let (mf, props) = MediaFile::open_with_properties(&p).unwrap();
+            assert_eq!(props, want, "{ext}");
+            assert_eq!(mf.get("title"), MediaFile::open(&p).unwrap().get("title"));
+            assert_eq!(mf.file_type(), file.file_type());
+        }
     }
 
     /// Fields a format can't hold (MediaFile has no style for them there).

@@ -2,8 +2,10 @@
 
 use crate::mediafile::{Got, MediaFile};
 use crate::model::{Item, Value};
-use anyhow::{Context, Result};
-use lofty::file::{AudioFile, FileType, TaggedFileExt};
+use anyhow::Result;
+use lofty::file::FileType;
+#[cfg(test)]
+use lofty::file::TaggedFileExt;
 #[cfg(test)]
 use lofty::picture::MimeType;
 use lofty::picture::{Picture, PictureType};
@@ -139,14 +141,13 @@ fn mp4_sample_size(path: &Path) -> Option<i64> {
 
 /// Read an audio file into a new (unsaved) item.
 pub fn read(path: &Path) -> Result<Item> {
-    let file = lofty::read_from_path(path)
-        .with_context(|| format!("reading tags from {}", path.display()))?;
+    // One read of the file gives both its tags and its properties.
+    let (mf, props) = MediaFile::open_with_properties(path)?;
     let mut item = Item::new_item();
     item.set_path(path);
-    let props = file.properties();
     // beets' exact values (mutagen's, per format); lofty's (rounded to ms
     // and kbps) for formats `props` doesn't cover.
-    let (length, bitrate, enc) = crate::props::read(path, file.file_type()).unwrap_or_else(|| {
+    let (length, bitrate, enc) = crate::props::read(path, mf.file_type()).unwrap_or_else(|| {
         (
             props.duration().as_secs_f64(),
             props
@@ -166,13 +167,13 @@ pub fn read(path: &Path) -> Result<Item> {
     let bitdepth = props
         .bit_depth()
         .map(|b| b as i64)
-        .or_else(|| match file.file_type() {
+        .or_else(|| match mf.file_type() {
             FileType::Mp4 => mp4_sample_size(path),
             _ => None,
         });
     item.set_int("bitdepth", bitdepth.unwrap_or(0));
     item.set_int("channels", props.channels().unwrap_or(0) as i64);
-    let format = match (file.file_type(), path.extension().and_then(|e| e.to_str())) {
+    let format = match (mf.file_type(), path.extension().and_then(|e| e.to_str())) {
         (FileType::Mp4, Some(e))
             if e.eq_ignore_ascii_case("m4a") && props.bit_depth().is_some() =>
         {
@@ -181,7 +182,6 @@ pub fn read(path: &Path) -> Result<Item> {
         (ft, _) => format_name(ft),
     };
     item.set_str("format", format);
-    let mf = MediaFile::open(path)?;
     for f in TAG_FIELDS {
         let v = match mf.get(f) {
             Some(Got::Str(Some(s))) => Value::Str(s),
@@ -192,7 +192,9 @@ pub fn read(path: &Path) -> Result<Item> {
                 item.set_list(f, &v);
                 continue;
             }
-            _ => Value::Null,
+            // The item starts with the type's null value; setting None
+            // again would only cost a schema lookup.
+            _ => continue,
         };
         item.set(f, v);
     }
