@@ -83,6 +83,7 @@ impl PathFormatter {
             rec: item,
             album,
             album_dir: None,
+            album_counts: None,
         };
         self.formats
             .iter()

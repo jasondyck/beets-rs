@@ -37,6 +37,7 @@ config`, plugins fetchart / lyrics / embedart, release preferences.
 - [x] **2.5 config**: `config -e/--edit` (`$VISUAL`/`$EDITOR`), `--clear`; `include:` files; `config -p` with `$BEETSRSDIR`; `-c/--config` should layer on top of the user config (repeatable) as in beets, not replace it
 - [x] **2.6 ui**: `ui.color`, `ui.colors`, change-display highlighting as in beets, `terminal_width`, `ui.length_diff_thresh`
 - [ ] **2.7 config dump format**: `beet config` / `config -d` output as confuse prints it (4-space indent, inline lists, empty values instead of `null`, comments copied from the defaults)
+- [ ] **2.8 modify display when deleting a field the album also has** (found in 5.17): `modify field!` on an item whose album has an attribute of the same name: beets shows `field: 2 -> 1` (the album's value shows through) or "No changes to make."; we show `field: 2` / list changes
 
 ## 3. Core: queries, templates, library
 
@@ -45,7 +46,7 @@ config`, plugins fetchart / lyrics / embedart, release preferences.
 - [x] **3.3 Tag field coverage**: APEv2 keys under MediaFile's alternative names (only date and album artist handled so far); every MediaFile field beets reads/writes (composer, lyricist, arranger, work, mb_workid, artist_sort/credit, albumartists multi-valued, genres, R128 gains, barcode, isrc, asin, script, language, etc.); `id3v23`; multi-valued fields
 - [x] **3.4 library.db compatibility**: schema identical to beets' (column names, types, path as BLOB relative to the library directory as beets stores it (ours are absolute), singleton album_id NULL (ours 0), `added`/`mtime` floats, flex tables), so beets' own `library.db` format is readable and writable; plus a migration command (decided by the maintainer) that opens a beets `library.db` at a path the user passes **read-only** (SQLite `mode=ro`/`immutable=1`, never written) and copies items, albums and flex attributes into the beets-rs DB. Tests use synthetic beets-format DBs only; never point it at `~/.config/beets/library.db`
 - [x] **3.5 Performance**: query filtering/sorting in SQL done in 3.1 (50k items: 0.03–0.6s); import pipeline threading (`threaded`) done in 3.5: reads and MusicBrainz lookups run up to 4 units ahead of the prompt; file copying/tag writing don't overlap yet
-- [ ] **3.6 Queries on computed album fields**: beets can query album getters (`albumtotal`, plugin template fields like `missing` with their declared types: `ls -a missing:1..`); our query engine can't evaluate album computed fields yet
+- [x] **3.6 Queries on computed album fields**: beets can query album getters (`albumtotal`, plugin template fields like `missing` with their declared types: `ls -a missing:1..`); our query engine can't evaluate album computed fields yet
 - [ ] **3.7 %aunique across albums imported in one run** (found in 5.7): `import -A src/a src/b` with two same-named albums puts reference beets' first album under `Alb [1]/`, ours under `Alb/`; probably beets' threaded pipeline adding the second album before the first's files are placed. Low priority; decide whether to match
 
 ## 4. Core: autotagger
@@ -75,7 +76,7 @@ Done: fetchart (filesystem + CAA), lyrics (LRCLIB), embedart.
 - [ ] **5.14 inline**: inline fields (`item_fields`, `album_fields`) via a small built-in expression language covering common inline uses (field access, string ops, conditionals, arithmetic), as decided by the maintainer; no embedded Python (no pyo3). Python `pluginpath` plugins are out of scope
 - [ ] **5.15 smartplaylist**: m3u generation from queries, `playlist_dir`, `relative_to`, `prefix`, `auto` on db change, `beet splupdate`
 - [ ] **5.16 web**: HTTP JSON API compatible with beets' web plugin (`/item/`, `/album/`, queries, `/item/<id>/file`), plus a minimal browser UI
-- [ ] **5.17 types**: declare flex attribute types (int/float/bool/date) for queries and sorting; also a framework for plugins' own `item_types`/`album_types` (e.g. lyrics_instrumental should format as True/False)
+- [x] **5.17 types**: declare flex attribute types (int/float/bool/date) for queries and sorting; also a framework for plugins' own `item_types`/`album_types` (e.g. lyrics_instrumental should format as True/False)
 - [ ] **5.18 Smaller common plugins**: fromfilename, importadded, badfiles, random, permissions, hook, export, playlist, mbcollection, rewrite, substitute, bucket, ihate, filefilter, unimported, parentwork, albumtypes, advancedrewrite, mpdupdate, plexupdate, kodiupdate, subsonicupdate, listenbrainz/lastimport
 - [ ] **5.19 Metadata source plugins**: discogs, spotify, deezer, beatport (as extra candidate sources)
 - [ ] **5.20 Rarely used**: bpd, aura, play, keyfinder, autobpm, bpm, absubmit, mbsubmit, metasync, thumbnails, importfeeds, fish, loadext, fuzzy, bareasc, limit, titlecase

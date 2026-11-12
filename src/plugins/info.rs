@@ -201,7 +201,12 @@ fn library_entry(lib: &Library, model: Record, keys: Option<&[String]>) -> Entry
     let data = keys
         .into_iter()
         .map(|k| {
-            let v = f.get(&k).unwrap_or_default();
+            // A missing key formats as its type's null (`_type(key).format`).
+            let v = f.get(&k).unwrap_or_else(|| {
+                crate::model::any_type(model.kind, &k)
+                    .map(|ty| ty.default_value().format(Some(ty)))
+                    .unwrap_or_default()
+            });
             (k, Some(PyVal::Str(v)))
         })
         .collect();

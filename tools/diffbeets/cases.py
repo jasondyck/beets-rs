@@ -890,6 +890,8 @@ def cases():
         out.append((f"missing:{' '.join(args)}", [*_NOMB, "-p", "missing", *args]))
     for args in DUP_ARGS:
         out.append((f"dup:{' '.join(args)}", ["-p", "duplicates", *args]))
+    for args in TYPES_ARGS:
+        out.append((f"types:{' '.join(args)}", args))
     return out
 
 
@@ -1529,4 +1531,73 @@ ART_CASES += [
      "{{plugins: [duplicates], import: {{duplicate_action: keep}}, "
      "duplicates: {{tiebreak: {{items: [id]}}}}}}",
      [*_DUP_IMP, ["dup", "-k", "title", "-F", "-f", "$id $title"]]),
+]
+
+
+# ---------------------------------------------------------------------------
+# types plugin (flexible attribute types) and queries on album getters
+# (`albumtotal`, the missing plugin's `$missing`). Read-only on the shared
+# corpus; `modify` cases run in the art phase on fresh libraries.
+
+EXTRA_CONFIGS["types.yaml"] = (
+    "types: {{rating: int, Flex_Attr: bool, albummood: int, mood: float}}\n")
+EXTRA_CONFIGS["typesf.yaml"] = "types: {{rating: float}}\n"
+EXTRA_CONFIGS["typesd.yaml"] = "time_format: '%Y-%m-%d'\ntypes: {{releasedate: date}}\n"
+_TY = ["-c", f"{ROOT}/types.yaml", "-p", "types"]
+_TYF = ["-c", f"{ROOT}/typesf.yaml", "-p", "types"]
+_TYD = ["-c", f"{ROOT}/typesd.yaml", "-p", "types"]
+_MISS = ["-p", "missing"]
+TYPES_ARGS = [
+    [*_TY, "ls", "-f", "$title|$rating|$Flex_Attr|$mood|%ifdef{rating,Y,N}", "rating:1.."],
+    [*_TY, "ls", "-f", "$title $rating", "rating+", "title+"],
+    [*_TY, "ls", "-f", "$title $rating", "rating-", "title+"],
+    [*_TY, "ls", "-f", "$title", "rating:5..7"],
+    [*_TY, "ls", "-f", "$title", "rating:10"],
+    [*_TY, "ls", "-f", "$title", "rating:=5"],
+    [*_TY, "ls", "-f", "$title", "rating::^1"],
+    [*_TY, "ls", "-f", "$title", "rating:1"],
+    [*_TY, "ls", "-f", "$title", "rating:abc"],
+    [*_TY, "ls", "-f", "$title", "Flex_Attr:false"],
+    [*_TY, "ls", "-f", "$title", "mood:..1"],
+    [*_TY, "ls", "-a", "-f", "$album $albummood", "albummood:0"],
+    [*_TY, "ls", "-a", "-f", "$album", "albummood+", "album+"],
+    [*_TY, "ls", "-f", "$title $albummood", "albummood:0"],
+    ["-c", f"{ROOT}/types.yaml", "-p", "types,info", "info", "-l", "-i",
+     "rating,Flex_Attr,nope", "rating:1.."],
+    [*_TYF, "ls", "-f", "$title $rating", "rating:3..7.5"],
+    [*_TYF, "ls", "-f", "$title $rating", "rating+", "title+"],
+    [*_TYD, "ls", "-f", "$title $releasedate", "releasedate:2001"],
+    [*_TYD, "ls", "-f", "$title $releasedate", "releasedate:..2002-01"],
+    [*_MISS, "ls", "-a", "-f", "$album $missing", "missing:1.."],
+    [*_MISS, "ls", "-a", "-f", "$album", "missing:0"],
+    [*_MISS, "ls", "-a", "-f", "$album", "missing:=-1"],
+    [*_MISS, "ls", "-a", "-f", "$album $missing", "missing+", "album+"],
+    [*_MISS, "ls", "-f", "$title", "missing:-1"],
+    ["ls", "-a", "-f", "$album $albumtotal", "albumtotal:3"],
+    ["ls", "-a", "-f", "$album", "albumtotal:2..3"],
+    ["ls", "-a", "-f", "$album $albumtotal", "albumtotal-", "album+"],
+    ["ls", "-f", "$title", "albumtotal:5"],
+    ["ls", "-a", "-f", "$album", "missing:1"],
+]
+
+_TY_CFG = "{{plugins: [types], types: {{myint: int, myfloat: float, mybool: bool, mydate: date}}}}"
+_TY_LS = ["ls", "-f", "$title|$myint|$myfloat|$mybool|$mydate|%ifdef{{myint,Y,N}}"]
+ART_CASES += [
+    ("types-modify", "tracks", {}, _TY_CFG,
+     [_IMP, ["modify", "-y", "title:One", "myint=2", "myfloat=3.14159", "mybool=yes",
+             "mydate=2020-01-02 10:11:12"],
+      ["modify", "-y", "title:Two", "myint=abc", "myfloat=-9.1", "mybool=xyz",
+       "mydate=garbage"],
+      _TY_LS, ["ls", "-f", "$title", "myint:1..3"], ["ls", "-f", "$title", "mybool:false"],
+      ["ls", "-f", "$title", "mydate:2020"], ["ls", "-f", "$title", "myfloat+"],
+      ["modify", "-y", "title:One", "myint=3", "mybool=no"],
+      ["modify", "-y", "title:One", "myint!"], _TY_LS]),
+    ("types-album", "tracks", {}, _TY_CFG,
+     [_IMP, ["modify", "-y", "-a", "album:Art", "myint=5", "mybool=1"],
+      ["ls", "-a", "-f", "$album $myint $mybool", "myint:4..6"],
+      ["ls", "-f", "$title $myint", "myint:5"]]),
+    ("types-time-format", "tracks", {},
+     "{{plugins: [types], time_format: '%Y-%m-%d', types: {{mydate: date}}}}",
+     [_IMP, ["modify", "-y", "title:One", "mydate=1999-01-01"],
+      ["ls", "-f", "$title $mydate", "mydate:..1999-07"]]),
 ]

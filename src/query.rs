@@ -301,7 +301,8 @@ fn field_class(kind: Kind, key: &str) -> Class {
     if kind == Kind::Album && key == "path" {
         return Class::Path;
     }
-    match own_type(kind, key) {
+    // The model's own fields and declared types (not its relation's).
+    match own_type(kind, key).or_else(|| crate::model::flex_type(kind, key)) {
         Some(FieldType::Duration) => Class::Duration,
         Some(FieldType::Date) => Class::Date,
         Some(FieldType::Bool) => Class::Boolean,
@@ -314,13 +315,23 @@ fn field_class(kind: Kind, key: &str) -> Class {
 // ------------------------------------------------------------ the objects
 
 /// A record being matched, with what beets' models would reach through it:
-/// an item's album (for album fields and flexible attributes) and an
-/// album's directory (its computed `path`).
+/// an item's album (for album fields and flexible attributes), an album's
+/// directory (its computed `path`) and the album's computed counts.
 #[derive(Clone, Copy)]
 pub struct Obj<'a> {
     pub rec: &'a Record,
     pub album: Option<&'a Record>,
     pub album_dir: Option<&'a Path>,
+    /// The album's (an album's own, an item's album's) [`AlbumCounts`].
+    pub album_counts: Option<AlbumCounts>,
+}
+
+/// What an album's computed fields need: its `albumtotal` and how many
+/// items it has (the missing plugin's `$missing` is the difference).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub struct AlbumCounts {
+    pub albumtotal: i64,
+    pub items: i64,
 }
 
 impl<'a> Obj<'a> {
@@ -329,6 +340,7 @@ impl<'a> Obj<'a> {
             rec,
             album: None,
             album_dir: None,
+            album_counts: None,
         }
     }
 
@@ -360,7 +372,18 @@ impl<'a> Obj<'a> {
                             .unwrap_or_default(),
                     ));
                 }
-                "albumtotal" => return None,
+                // beets' album getters, ahead of any attribute of the name.
+                "albumtotal" => return self.album_counts.map(|c| PyVal::Int(c.albumtotal)),
+                // The missing plugin's template field (a string).
+                "missing"
+                    if crate::formatted::env()
+                        .album_template_fields
+                        .contains(&"missing") =>
+                {
+                    return self
+                        .album_counts
+                        .map(|c| PyVal::Str((c.albumtotal - c.items).to_string()));
+                }
                 _ => {}
             },
         }
@@ -370,18 +393,25 @@ impl<'a> Obj<'a> {
             }
             return rec.get(key).map(PyVal::from_value);
         }
-        if let Some(v) = rec.flex.get(key) {
-            return Some(PyVal::Str(v.clone()));
+        // A typed attribute reads back as its type (`from_sql`).
+        if rec.flex.contains_key(key) {
+            return rec.get(key).map(PyVal::from_value);
         }
         // Query keys are lowercased; flexible attributes keep their case.
         let lk = lower(key);
-        if let Some((_, v)) = rec.flex.iter().find(|(k, _)| lower(k) == lk) {
-            return Some(PyVal::Str(v.clone()));
+        if let Some((k, _)) = rec.flex.iter().find(|(k, _)| lower(k) == lk) {
+            return rec.get(k).map(PyVal::from_value);
         }
         if rec.kind == Kind::Item
             && let Some(a) = self.album
         {
-            return Obj::new(a).get(key);
+            return Obj {
+                rec: a,
+                album: None,
+                album_dir: None,
+                album_counts: self.album_counts,
+            }
+            .get(key);
         }
         None
     }
@@ -1263,6 +1293,9 @@ impl FieldSort {
                 None | Some(PyVal::None) => {
                     if obj.rec.kind == Kind::Album && self.field == "path" {
                         PyVal::Bytes(vec![])
+                    } else if let Some(ty) = crate::model::flex_type(obj.rec.kind, &self.field) {
+                        // A typed attribute's null.
+                        PyVal::from_value(ty.default_value())
                     } else {
                         PyVal::Str(String::new())
                     }
@@ -1434,6 +1467,24 @@ impl Query {
             Kind::Album => ctx.sort_album,
         };
         sort_from_strings(self.kind, &parts, true)
+    }
+
+    /// Whether matching or sorting reads any of `fields`.
+    pub fn uses_any(&self, fields: &[&str]) -> bool {
+        fn walk(p: &Pred, fields: &[&str]) -> bool {
+            match p {
+                Pred::Field(f) => fields.contains(&f.field.as_str()),
+                Pred::Not(p) => walk(p, fields),
+                Pred::And(ps) | Pred::Or(ps) => ps.iter().any(|p| walk(p, fields)),
+                Pred::True | Pred::False => false,
+            }
+        }
+        walk(&self.pred, fields)
+            || self
+                .effective_sort()
+                .0
+                .iter()
+                .any(|s| fields.contains(&s.field.as_str()))
     }
 
     pub fn matches_obj(&self, obj: &Obj) -> bool {

@@ -37,6 +37,7 @@ pub fn run(cli: Cli) -> Result<()> {
         std::process::exit(1);
     }
     crate::query::configure(&cfg);
+    crate::model::set_time_format(&cfg.str("time_format"));
     crate::media::set_id3v23(cfg.bool("id3v23"));
     debug!("configuration sources (highest → lowest priority):");
     for s in &cfg.sources {
@@ -106,6 +107,14 @@ pub fn run(cli: Cli) -> Result<()> {
         cfg.directory().display()
     );
     let plugins = plugins::load(&cfg)?;
+    // The plugins' flexible attribute types (the types plugin's settings).
+    if let Err(e) = plugins::types::configure(&cfg) {
+        if e.to_string().starts_with("configuration error") {
+            eprintln!("{e}");
+            std::process::exit(1);
+        }
+        return Err(e);
+    }
     match cmd {
         Cmd::Import {
             copy,
