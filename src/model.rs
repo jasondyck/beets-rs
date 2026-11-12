@@ -3,7 +3,7 @@
 
 use anyhow::{Result, bail};
 use chrono::{Local, NaiveDateTime, TimeZone};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -492,14 +492,24 @@ pub fn schema(kind: Kind) -> &'static [(&'static str, FieldType)] {
     }
 }
 
+/// The fixed fields by name, for the lookups that every tag read and
+/// every database write does.
+fn field_map(kind: Kind) -> &'static HashMap<&'static str, FieldType> {
+    static ITEM: std::sync::OnceLock<HashMap<&'static str, FieldType>> = std::sync::OnceLock::new();
+    static ALBUM: std::sync::OnceLock<HashMap<&'static str, FieldType>> =
+        std::sync::OnceLock::new();
+    let cell = match kind {
+        Kind::Item => &ITEM,
+        Kind::Album => &ALBUM,
+    };
+    cell.get_or_init(|| schema(kind).iter().copied().collect())
+}
+
 pub fn field_type(kind: Kind, name: &str) -> Option<FieldType> {
     if name == "id" {
         return Some(FieldType::Int);
     }
-    schema(kind)
-        .iter()
-        .find(|(n, _)| *n == name)
-        .map(|(_, t)| *t)
+    field_map(kind).get(name).copied()
 }
 
 // ------------------------------------------------- typed flexible attributes
@@ -656,13 +666,14 @@ impl Record {
     }
 
     pub fn set(&mut self, name: &str, value: Value) {
-        if let Some((key, ty)) = schema(self.kind).iter().find(|(n, _)| *n == name) {
-            let coerced = coerce(value, *ty);
+        if let Some((key, &ty)) = field_map(self.kind).get_key_value(name) {
+            let key: &'static str = key;
+            let coerced = coerce(value, ty);
             let old = self.values.insert(key, coerced);
             // beets' `Item.__setitem__`: changing a tag field marks the
             // file as out of date ("Reset mtime on dirty").
             if self.kind == Kind::Item
-                && crate::media::TAG_FIELDS.contains(key)
+                && crate::media::TAG_FIELDS.contains(&key)
                 && old.as_ref() != self.values.get(key)
             {
                 self.values.insert("mtime", Value::Float(0.0));

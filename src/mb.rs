@@ -1175,6 +1175,13 @@ impl MusicBrainz {
         }
     }
 
+    /// beets' `MusicBrainzAPI.get_work`: a work lookup with its includes
+    /// (the JSON keeps MusicBrainz' hyphenated keys).
+    pub fn get_work(&self, id: &str, includes: &[&str]) -> Result<J> {
+        let inc = includes.join("+");
+        self.get(&format!("work/{id}"), &[("inc", &inc)])
+    }
+
     /// beets' `MusicBrainzAPI.search`: each filter as `field:(term)`, the
     /// term lower-cased, stripped and escaped (empty ones left out),
     /// joined by spaces. Returns the results' ids.

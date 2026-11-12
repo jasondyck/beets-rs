@@ -796,6 +796,74 @@ pub fn run(cli: Cli) -> Result<()> {
                 },
             )
         }
+        Cmd::Parentwork {
+            force,
+            limit,
+            query,
+        } => {
+            require_plugin(&cfg, "parentwork")?;
+            plugins::parentwork::command(
+                &cfg,
+                &lib,
+                plugins::parentwork::CmdOpts {
+                    force: force.then_some(true),
+                    limit,
+                    query,
+                },
+            )
+        }
+        Cmd::Export {
+            album,
+            library,
+            append,
+            included_keys,
+            output,
+            format,
+            limit,
+            query,
+        } => {
+            require_plugin(&cfg, "export")?;
+            plugins::export::command(
+                &cfg,
+                &lib,
+                plugins::export::CmdOpts {
+                    album,
+                    library,
+                    append,
+                    included_keys,
+                    limit,
+                    output,
+                    format,
+                    query,
+                },
+            )
+        }
+        Cmd::Random {
+            album,
+            equal_chance,
+            field,
+            number,
+            time,
+            path: _,
+            format: _,
+            limit,
+            query,
+        } => {
+            require_plugin(&cfg, "random")?;
+            plugins::random::command(
+                &cfg,
+                &lib,
+                plugins::random::CmdOpts {
+                    album,
+                    equal_chance,
+                    field,
+                    limit,
+                    number,
+                    time,
+                    query,
+                },
+            )
+        }
         Cmd::Fields => fields(&lib),
         Cmd::MigrateBeets {
             beets_config,
@@ -812,7 +880,8 @@ pub fn run(cli: Cli) -> Result<()> {
         ),
         Cmd::Config { .. } | Cmd::Version | Cmd::Help { .. } => unreachable!(),
     };
-    // beets' `cli_exit`, after a command that didn't fail.
+    // beets' `cli_exit`, after a command that didn't fail (the playlist
+    // plugin updates its playlists from it).
     if result.is_ok() {
         crate::events::send("cli_exit", &[("lib", crate::events::Arg::Lib(&lib))]);
     }
@@ -2442,7 +2511,14 @@ mod tests {
 
     #[test]
     fn help_for_unknown_commands_is_an_error() {
-        let e = help(Some("frob")).unwrap_err();
+        // Parsing the full command line (clap builds every subcommand) needs
+        // a deeper stack than a test thread's 2 MiB in debug builds.
+        let e = std::thread::Builder::new()
+            .stack_size(8 << 20)
+            .spawn(|| help(Some("frob")).unwrap_err())
+            .unwrap()
+            .join()
+            .unwrap();
         assert_eq!(e.to_string(), "unknown command 'frob'");
     }
 

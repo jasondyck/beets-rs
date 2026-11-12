@@ -35,6 +35,11 @@ pub mod the;
 pub mod types;
 pub mod unimported;
 pub mod web;
+// 5.18c: export and media-server plugins.
+pub mod export;
+pub mod parentwork;
+pub mod playlist;
+pub mod random;
 pub mod zero;
 
 use crate::config::Config;
@@ -210,6 +215,10 @@ pub const AVAILABLE: &[&str] = &[
     "albumtypes",
     "fromfilename",
     "unimported",
+    "random",
+    "export",
+    "playlist",
+    "parentwork",
 ];
 
 /// The plugins to load: `plugins` (or `-p`) minus `disabled_plugins` (`-P`),
@@ -259,6 +268,13 @@ pub fn load(cfg: &Config) -> Result<Vec<Box<dyn Plugin>>> {
             },
             "albumtypes" => out.push(Box::new(albumtypes::AlbumTypesPlugin)),
             "fromfilename" => out.push(Box::new(fromfilename::FromFilenamePlugin)),
+            "random" => out.push(Box::new(random::RandomPlugin)),
+            "playlist" => out.push(Box::new(playlist::load(cfg))),
+            "parentwork" => out.push(Box::new(parentwork::ParentWorkPlugin::new(cfg))),
+            "export" => match export::ExportPlugin::new(cfg) {
+                Ok(p) => out.push(Box::new(p)),
+                Err(e) => crate::logging::emit(format!("** error loading plugin {name}\n{e:#}")),
+            },
             // Its rules are read on `pluginload`, where an error ends the
             // command.
             "advancedrewrite" => {

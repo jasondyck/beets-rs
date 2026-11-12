@@ -445,6 +445,36 @@ albumtypes:
     ignore_va: [compilation]
     bracket: '[]'
 
+parentwork:
+    auto: no
+    force: no
+
+playlist:
+    auto: no
+    playlist_dir: .
+    relative_to: library
+    forward_slash: no
+
+export:
+    default_format: json
+    json:
+        formatting:
+            ensure_ascii: no
+            indent: 4
+            separators: [',', ': ']
+            sort_keys: yes
+    jsonlines:
+        formatting:
+            ensure_ascii: no
+            separators: [',', ': ']
+            sort_keys: yes
+    csv:
+        formatting:
+            delimiter: ','
+            dialect: excel
+    xml:
+        formatting: {}
+
 musicbrainz:
     host: musicbrainz.org
     https: no
@@ -536,6 +566,9 @@ const PLUGIN_SECTIONS: &[&str] = &[
     "convert",
     "edit",
     "web",
+    "export",
+    "playlist",
+    "parentwork",
 ];
 
 /// Plugins whose defaults are top-level keys (beets' `config.add`).
