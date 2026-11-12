@@ -42,8 +42,14 @@ fn obj_of<'a>(
     r: &'a Record,
     albums: &'a HashMap<i64, Album>,
     dirs: &'a HashMap<i64, PathBuf>,
+    counts: &HashMap<i64, crate::query::AlbumCounts>,
 ) -> crate::query::Obj<'a> {
+    let album_id = match kind {
+        Kind::Item => r.int("album_id"),
+        Kind::Album => r.id.unwrap_or(0),
+    };
     crate::query::Obj {
+        album_counts: counts.get(&album_id).copied(),
         rec: r,
         album: match kind {
             Kind::Item => albums.get(&r.int("album_id")),
@@ -1021,13 +1027,20 @@ impl Library {
             Kind::Album => self.album_dirs()?,
             Kind::Item => HashMap::new(),
         };
+        // Album getters (`albumtotal`, `$missing`): for album queries, and
+        // item queries that reach them through the album.
+        let counts = if kind == Kind::Album || q.uses_any(&["albumtotal", "missing"]) {
+            self.album_counts()?
+        } else {
+            HashMap::new()
+        };
         if clause.is_none() {
-            recs.retain(|r| q.matches_obj(&obj_of(kind, r, &albums, &dirs)));
+            recs.retain(|r| q.matches_obj(&obj_of(kind, r, &albums, &dirs, &counts)));
         }
         if sort.is_slow() {
             let objs: Vec<_> = recs
                 .iter()
-                .map(|r| obj_of(kind, r, &albums, &dirs))
+                .map(|r| obj_of(kind, r, &albums, &dirs, &counts))
                 .collect();
             let order = sort.sort_slow(&objs);
             drop(objs);
@@ -1038,6 +1051,42 @@ impl Library {
                 .collect();
         }
         Ok(recs)
+    }
+
+    /// Each album's `albumtotal` (as `Formatted` computes it: the first
+    /// item's `tracktotal`, or with `per_disc_numbering` on a multi-disc
+    /// album the sum over its discs) and item count.
+    fn album_counts(&self) -> Result<HashMap<i64, crate::query::AlbumCounts>> {
+        let per_disc = crate::formatted::env().per_disc_numbering;
+        let mut stmt = self.conn.prepare(
+            "SELECT items.album_id, items.disc, items.tracktotal, albums.disctotal \
+             FROM items JOIN albums ON items.album_id = albums.id \
+             ORDER BY items.album_id, items.disc, items.track, items.id",
+        )?;
+        let rows = stmt.query_map([], |r| {
+            Ok((
+                r.get::<_, i64>(0)?,
+                r.get::<_, Option<i64>>(1)?.unwrap_or(0),
+                r.get::<_, Option<i64>>(2)?.unwrap_or(0),
+                r.get::<_, Option<i64>>(3)?.unwrap_or(0),
+            ))
+        })?;
+        // Per album: (counts, discs counted so far).
+        let mut out: HashMap<i64, (crate::query::AlbumCounts, Vec<i64>)> = HashMap::new();
+        for row in rows {
+            let (id, disc, tracktotal, disctotal) = row?;
+            let (c, discs) = out.entry(id).or_default();
+            c.items += 1;
+            if disctotal == 1 || !per_disc {
+                if c.items == 1 {
+                    c.albumtotal = tracktotal;
+                }
+            } else if !discs.contains(&disc) && (discs.len() as i64) < disctotal {
+                c.albumtotal += tracktotal;
+                discs.push(disc);
+            }
+        }
+        Ok(out.into_iter().map(|(k, (c, _))| (k, c)).collect())
     }
 
     /// Each album's directory (beets' `Album.item_dir`): that of its first

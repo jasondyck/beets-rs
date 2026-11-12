@@ -225,6 +225,15 @@ const INFO: u8 = 20;
 const WARNING: u8 = 30;
 const ERROR: u8 = 40;
 
+/// The plugin's `item_types` (beets' `LyricsPlugin.item_types`).
+pub const ITEM_TYPES: &[(&str, crate::model::FieldType)] = &[
+    ("lyrics_url", crate::model::FieldType::Str),
+    ("lyrics_instrumental", crate::model::FieldType::Bool),
+    ("lyrics_backend", crate::model::FieldType::Str),
+    ("lyrics_language", crate::model::FieldType::Str),
+    ("lyrics_translation_language", crate::model::FieldType::Str),
+];
+
 pub struct LyricsPlugin {
     pub conf: Conf,
     pub urls: Urls,

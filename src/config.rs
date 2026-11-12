@@ -78,6 +78,7 @@ original_date: no
 va_name: Various Artists
 format_item: $artist - $album - $title
 format_album: $albumartist - $album
+time_format: '%Y-%m-%d %H:%M:%S'
 sort_item: artist+ album+ disc+ track+
 sort_album: albumartist+ album+
 sort_case_insensitive: yes

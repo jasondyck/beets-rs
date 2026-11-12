@@ -7,7 +7,6 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-#[allow(dead_code)] // Float: reserved for flexible typed fields
 pub enum FieldType {
     Str,
     Int,
@@ -103,8 +102,7 @@ impl FieldType {
             }),
             // `time_format`, else a timestamp.
             FieldType::Date => Value::Float(
-                NaiveDateTime::parse_from_str(s, TIME_FORMAT)
-                    .ok()
+                strptime(s)
                     .and_then(|d| Local.from_local_datetime(&d).earliest())
                     .map(|d| d.timestamp() as f64)
                     .unwrap_or_else(float),
@@ -130,6 +128,34 @@ pub fn format_duration(secs: f64) -> String {
 
 pub const TIME_FORMAT: &str = "%Y-%m-%d %H:%M:%S";
 
+thread_local! {
+    /// The `time_format` setting for this run.
+    static TIME_FMT: std::cell::RefCell<String> = RefCell::new(TIME_FORMAT.to_string());
+}
+
+use std::cell::RefCell;
+
+/// Use the `time_format` setting (beets' default: [`TIME_FORMAT`]).
+pub fn set_time_format(fmt: &str) {
+    TIME_FMT.with(|f| *f.borrow_mut() = fmt.to_string());
+}
+
+/// The `time_format` setting.
+pub fn time_format() -> String {
+    TIME_FMT.with(|f| f.borrow().clone())
+}
+
+/// Python's `datetime.strptime(s, time_format)`: a format without a time
+/// gives midnight.
+pub fn strptime(s: &str) -> Option<NaiveDateTime> {
+    let fmt = time_format();
+    NaiveDateTime::parse_from_str(s, &fmt).ok().or_else(|| {
+        chrono::NaiveDate::parse_from_str(s, &fmt)
+            .ok()
+            .and_then(|d| d.and_hms_opt(0, 0, 0))
+    })
+}
+
 #[cfg(test)]
 pub fn parse_datetime(s: &str) -> Option<f64> {
     if s.is_empty() {
@@ -150,7 +176,7 @@ pub fn parse_datetime(s: &str) -> Option<f64> {
 
 pub fn format_datetime(ts: f64) -> String {
     match Local.timestamp_opt(ts as i64, 0).earliest() {
-        Some(d) => d.format(TIME_FORMAT).to_string(),
+        Some(d) => d.format(&time_format()).to_string(),
         None => String::new(),
     }
 }
@@ -476,6 +502,63 @@ pub fn field_type(kind: Kind, name: &str) -> Option<FieldType> {
         .map(|(_, t)| *t)
 }
 
+// ------------------------------------------------- typed flexible attributes
+
+thread_local! {
+    /// The flexible attribute types declared by the enabled plugins
+    /// (beets' `item_types` / `album_types`, the types plugin's config).
+    static FLEX_TYPES: std::cell::RefCell<[BTreeMap<String, FieldType>; 2]> =
+        Default::default();
+}
+
+fn kind_index(kind: Kind) -> usize {
+    match kind {
+        Kind::Item => 0,
+        Kind::Album => 1,
+    }
+}
+
+/// Declare the flexible attribute types for this run.
+pub fn set_flex_types(items: BTreeMap<String, FieldType>, albums: BTreeMap<String, FieldType>) {
+    FLEX_TYPES.with(|t| *t.borrow_mut() = [items, albums]);
+}
+
+/// A flexible attribute's declared type for this model (beets'
+/// `Model._types`).
+pub fn flex_type(kind: Kind, name: &str) -> Option<FieldType> {
+    FLEX_TYPES.with(|t| t.borrow()[kind_index(kind)].get(name).copied())
+}
+
+/// beets' `Model._type(key)`: the model's fixed field or declared type,
+/// else the related model's (an item's album, an album's items); None for
+/// beets' untyped `DEFAULT`.
+pub fn any_type(kind: Kind, name: &str) -> Option<FieldType> {
+    let other = match kind {
+        Kind::Item => Kind::Album,
+        Kind::Album => Kind::Item,
+    };
+    field_type(kind, name)
+        .or_else(|| flex_type(kind, name))
+        .or_else(|| flex_type(other, name))
+}
+
+/// A typed flexible attribute's stored text as beets writes it
+/// (`to_sql`: `2`, `3.14`, `1`/`0` for booleans, timestamps as floats).
+fn flex_text(value: &Value, ty: FieldType) -> String {
+    match (ty, value) {
+        (FieldType::Bool, v) => if v.as_f64().unwrap_or(0.0) != 0.0 {
+            "1"
+        } else {
+            "0"
+        }
+        .into(),
+        (FieldType::Float | FieldType::Date | FieldType::NullFloat, Value::Float(f)) => {
+            crate::hooks::py_float(*f)
+        }
+        (_, v) => v.raw(),
+    }
+}
+
 /// One row of the `items` or `albums` table.
 #[derive(Clone, Debug)]
 pub struct Record {
@@ -521,8 +604,18 @@ impl Record {
         Self::new(Kind::Album)
     }
 
+    /// The field's type: fixed, or a declared flexible attribute type
+    /// (beets' `_type`, falling back to the related model's types).
     pub fn field_type(&self, name: &str) -> Option<FieldType> {
-        field_type(self.kind, name)
+        any_type(self.kind, name)
+    }
+
+    /// A typed flexible attribute's type (not a fixed field's).
+    fn flex_typed(&self, name: &str) -> Option<FieldType> {
+        if field_type(self.kind, name).is_some() {
+            return None;
+        }
+        any_type(self.kind, name)
     }
 
     pub fn has_field(&self, name: &str) -> bool {
@@ -540,7 +633,12 @@ impl Record {
         if self.kind == Kind::Item && name == "singleton" {
             return Some(Value::Bool(self.int("album_id") == 0));
         }
-        self.flex.get(name).map(|s| Value::Str(s.clone()))
+        let s = self.flex.get(name)?;
+        // beets' `from_sql` of the stored text, for a typed attribute.
+        Some(match self.flex_typed(name) {
+            Some(ty) => ty.parse(s),
+            None => Value::Str(s.clone()),
+        })
     }
 
     /// Formatted value for display/templates.
@@ -570,7 +668,11 @@ impl Record {
                 self.values.insert("mtime", Value::Float(0.0));
             }
         } else if name != "id" {
-            self.flex.insert(name.to_string(), value.raw());
+            let text = match self.flex_typed(name) {
+                Some(ty) => flex_text(&value, ty),
+                None => value.raw(),
+            };
+            self.flex.insert(name.to_string(), text);
         }
     }
 

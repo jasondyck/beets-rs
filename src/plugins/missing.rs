@@ -18,6 +18,10 @@ use std::io::Write;
 /// The albums whose album artist has a MusicBrainz id.
 const MB_ARTIST_QUERY: &str = r"mb_albumartistid::^\w{8}-\w{4}-\w{4}-\w{4}-\w{12}$";
 
+/// The plugin's `album_types`: `$missing` is an integer (for queries).
+pub const ALBUM_TYPES: &[(&str, crate::model::FieldType)] =
+    &[("missing", crate::model::FieldType::Int)];
+
 /// The plugin: a command and the `$missing` album field.
 pub struct MissingPlugin;
 

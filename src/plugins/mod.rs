@@ -11,6 +11,7 @@ pub mod lastgenre;
 pub mod lyrics;
 pub mod missing;
 pub mod requests;
+pub mod types;
 
 use crate::config::Config;
 use crate::fileops::FileOp;
@@ -92,6 +93,7 @@ pub const AVAILABLE: &[&str] = &[
     "lyrics",
     "missing",
     "musicbrainz",
+    "types",
 ];
 
 /// The plugins to load: `plugins` (or `-p`) minus `disabled_plugins` (`-P`),
@@ -128,6 +130,7 @@ pub fn load(cfg: &Config) -> Result<Vec<Box<dyn Plugin>>> {
             "info" => out.push(Box::new(info::InfoPlugin)),
             "duplicates" => out.push(Box::new(duplicates::DuplicatesPlugin)),
             "missing" => out.push(Box::new(missing::MissingPlugin)),
+            "types" => out.push(Box::new(types::TypesPlugin)),
             // The autotagger's metadata source, as in beets 2.14: it's
             // queried only while this plugin is enabled.
             "musicbrainz" => crate::mb::warn_deprecated_config(cfg),
