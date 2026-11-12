@@ -55,9 +55,25 @@ fn max_filename_length(cfg: &Config, directory: &Path) -> usize {
 
 impl PathFormatter {
     pub fn new(cfg: &Config) -> anyhow::Result<Self> {
+        Self::with_formats(cfg, cfg.mapping("paths"), cfg.directory())
+    }
+
+    /// A formatter with its own path formats and base directory (beets'
+    /// `Item.destination(basedir=..., path_formats=...)`); no formats
+    /// means the library's.
+    pub fn with_formats(
+        cfg: &Config,
+        path_formats: Vec<(String, String)>,
+        directory: PathBuf,
+    ) -> anyhow::Result<Self> {
+        let path_formats = if path_formats.is_empty() {
+            cfg.mapping("paths")
+        } else {
+            path_formats
+        };
         let mut formats = vec![];
         let mut default = None;
-        for (key, fmt) in cfg.mapping("paths") {
+        for (key, fmt) in path_formats {
             let tmpl = Template::parse(&fmt);
             if key == "default" {
                 default = Some(tmpl);
@@ -66,7 +82,6 @@ impl PathFormatter {
                 formats.push((Query::parse(Kind::Item, &args)?, tmpl));
             }
         }
-        let directory = cfg.directory();
         Ok(PathFormatter {
             formats,
             default,
@@ -101,6 +116,18 @@ impl PathFormatter {
         album: Option<&Album>,
         lib: Option<&Library>,
     ) -> PathBuf {
+        self.destination_ext(item, album, lib, None)
+    }
+
+    /// `destination` with the file's extension replaced by `extension`
+    /// (beets' `extension` argument, without the dot).
+    pub fn destination_ext(
+        &self,
+        item: &Item,
+        album: Option<&Album>,
+        lib: Option<&Library>,
+        extension: Option<&str>,
+    ) -> PathBuf {
         let view = Formatted::with_env(item, lib, self.env.clone()).for_path();
         // Without the album given, the view loads it from the library.
         let view = match album {
@@ -116,11 +143,14 @@ impl PathFormatter {
         if self.env.asciify_paths {
             subpath = asciify_path(&subpath, &self.env.path_sep_replace);
         }
-        let ext = item
-            .path()
-            .extension()
-            .map(|e| format!(".{}", e.to_string_lossy()))
-            .unwrap_or_default();
+        let ext = match extension {
+            Some(e) => format!(".{e}"),
+            None => item
+                .path()
+                .extension()
+                .map(|e| format!(".{}", e.to_string_lossy()))
+                .unwrap_or_default(),
+        };
         let (legal, fallback) = self.legalize_path(&subpath, &ext);
         if fallback {
             eprintln!(

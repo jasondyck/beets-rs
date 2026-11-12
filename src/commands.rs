@@ -454,6 +454,53 @@ pub fn run(cli: Cli) -> Result<()> {
             require_plugin(&cfg, "ftintitle")?;
             plugins::ftintitle::command(&cfg, &lib, drop, limit, &query)
         }
+        Cmd::Convert {
+            pretend,
+            threads,
+            refresh,
+            keep_new,
+            dest,
+            format,
+            yes,
+            link,
+            hardlink,
+            playlist,
+            force,
+            album,
+            limit,
+            query,
+        } => {
+            require_plugin(&cfg, "convert")?;
+            plugins::convert::command(
+                &cfg,
+                &lib,
+                plugins::convert::CmdOpts {
+                    pretend,
+                    threads,
+                    refresh,
+                    keep_new,
+                    dest,
+                    format,
+                    yes,
+                    link,
+                    hardlink,
+                    playlist,
+                    force,
+                    album,
+                    limit,
+                    query,
+                },
+            )
+        }
+        Cmd::Edit {
+            field,
+            all,
+            album,
+            query,
+        } => {
+            require_plugin(&cfg, "edit")?;
+            plugins::edit::command(&cfg, &lib, album, &field, all, &query)
+        }
         Cmd::Scrub {
             nowrite,
             limit,
@@ -1125,6 +1172,21 @@ fn modify(cfg: &Config, lib: &Library, opts: ModifyOpts, args: &[String]) -> Res
         })
     };
 
+    apply_changes(cfg, lib, album, selected, write, mv, opts.inherit)
+}
+
+/// beets' `try_sync` for each changed object (`(old, new)`): write tags,
+/// move files inside the library, store; an album's changes go to its
+/// items first with `inherit` (`Album.store(inherit=True)`).
+pub(crate) fn apply_changes(
+    cfg: &Config,
+    lib: &Library,
+    album: bool,
+    selected: Vec<(Record, Record)>,
+    write: bool,
+    mv: bool,
+    inherit: bool,
+) -> Result<()> {
     let fmt = PathFormatter::new(cfg)?;
     let mut albums_touched: HashSet<i64> = HashSet::new();
     // beets' `Item.try_sync`: write tags, move files inside the library,
@@ -1150,7 +1212,7 @@ fn modify(cfg: &Config, lib: &Library, opts: ModifyOpts, args: &[String]) -> Res
             }
             lib.store(&new)?;
             let mut items = lib.album_items(new.id.unwrap())?;
-            if opts.inherit {
+            if inherit {
                 // beets' `Album.store(inherit=True)`: changed fixed fields
                 // (but `artpath`/`id`) and flexible attributes, set or
                 // deleted, go to the items too.
@@ -1739,7 +1801,8 @@ fn file_mtime(path: &Path) -> f64 {
         .and_then(|m| m.modified())
         .ok()
         .and_then(|m| m.duration_since(std::time::UNIX_EPOCH).ok())
-        .map_or(0.0, |d| d.as_secs_f64())
+        // beets' `current_mtime`: whole seconds.
+        .map_or(0.0, |d| d.as_secs() as f64)
 }
 
 /// Store `fields` of `new` over the item's stored row (beets'
@@ -2046,7 +2109,7 @@ fn config_edit(configs: &[PathBuf]) -> Result<()> {
 
 /// beets' `util.editor_command`: the `editor` option, `$VISUAL`, `$EDITOR`,
 /// then the platform's opener.
-fn editor_command(configured: Option<String>) -> String {
+pub(crate) fn editor_command(configured: Option<String>) -> String {
     editor_command_with(configured, |k| std::env::var(k).ok())
 }
 
@@ -2911,7 +2974,12 @@ mod tests {
             return;
         };
         let its = items(&lib);
-        let mtimes = || -> Vec<f64> { its.iter().map(|i| file_mtime(i.path())).collect() };
+        // Precise mtimes (the stored ones are whole seconds, as beets').
+        let mtimes = || -> Vec<std::time::SystemTime> {
+            its.iter()
+                .map(|i| std::fs::metadata(i.path()).unwrap().modified().unwrap())
+                .collect()
+        };
         let before = mtimes();
         std::thread::sleep(std::time::Duration::from_millis(20));
         write(&cfg, &lib, false, false, None, &[]).unwrap();

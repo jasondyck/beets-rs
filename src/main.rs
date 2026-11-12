@@ -21,6 +21,7 @@ mod paths;
 mod pipeline;
 mod plugins;
 mod props;
+mod pyyaml;
 mod query;
 mod state;
 mod template;
@@ -637,6 +638,71 @@ pub enum Cmd {
         /// Limit query results
         #[arg(short = 'l', long)]
         limit: Option<usize>,
+        #[arg(allow_hyphen_values = true)]
+        query: Vec<String>,
+    },
+    /// Convert to external location (plugin: convert)
+    Convert {
+        /// Show actions but do nothing
+        #[arg(short = 'p', long)]
+        pretend: bool,
+        /// Change the number of threads, defaults to maximum available
+        /// processors
+        #[arg(short = 't', long)]
+        threads: Option<usize>,
+        /// Reconvert if original file is newer than converted file
+        #[arg(short = 'r', long)]
+        refresh: bool,
+        /// Keep only the converted and move the old files
+        #[arg(short = 'k', long = "keep-new")]
+        keep_new: bool,
+        /// Set the destination directory
+        #[arg(short = 'd', long)]
+        dest: Option<String>,
+        /// Set the target format of the tracks
+        #[arg(short = 'f', long)]
+        format: Option<String>,
+        /// Do not ask for confirmation
+        #[arg(short = 'y', long)]
+        yes: bool,
+        /// Symlink files that do not need transcoding.
+        #[arg(short = 'l', long)]
+        link: bool,
+        /// Hardlink files that do not need transcoding. Overrides --link.
+        #[arg(short = 'H', long)]
+        hardlink: bool,
+        /// Create an m3u8 playlist file containing the converted files. The
+        /// playlist file will be saved below the destination directory, thus
+        /// PLAYLIST could be a file name or a relative path. To ensure a
+        /// working playlist when transferred to a different computer, or
+        /// opened from an external drive, relative paths pointing to media
+        /// files will be used.
+        #[arg(short = 'm', long)]
+        playlist: Option<String>,
+        /// Force transcoding. Ignores no_convert, never_convert_lossy_files,
+        /// and max_bitrate
+        #[arg(short = 'F', long)]
+        force: bool,
+        /// Match albums instead of tracks
+        #[arg(short = 'a', long)]
+        album: bool,
+        /// Limit query results
+        #[arg(long)]
+        limit: Option<usize>,
+        #[arg(allow_hyphen_values = true)]
+        query: Vec<String>,
+    },
+    /// Interactively edit metadata (plugin: edit)
+    Edit {
+        /// Edit this field also
+        #[arg(short = 'f', long = "field", value_name = "FIELD")]
+        field: Vec<String>,
+        /// Edit all fields
+        #[arg(long)]
+        all: bool,
+        /// Match albums instead of tracks
+        #[arg(short = 'a', long)]
+        album: bool,
         #[arg(allow_hyphen_values = true)]
         query: Vec<String>,
     },

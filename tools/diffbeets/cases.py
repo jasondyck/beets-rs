@@ -4,6 +4,10 @@ Case ids are "<kind>:<args>"; EXPECTED maps a case id to the reason the two
 tools are allowed to differ there.
 """
 
+import json
+import os
+import sys
+
 # In case arguments, replaced by each tool's own config directory.
 ROOT = "<<ROOT>>"
 
@@ -1019,6 +1023,16 @@ IMPORT_CORPUS = {
     "extra": [("delta.mp3", {**_FX, "title": "Delta", "track": "4"})],
 }
 
+# The scripted editor (`editor` option) for the edit cases.
+EDITOR = f"{sys.executable} -I {os.path.join(os.path.dirname(os.path.abspath(__file__)), 'editor.py')}"
+
+
+def _import_edit(rules, extra=""):
+    """An import case's config for the edit plugin with these editor rules."""
+    return (f"plugins: [musicbrainz, edit]\neditor: {json.dumps(EDITOR)}\n"
+            f"x_editor: {json.dumps(rules)}\n{extra}")
+
+
 # (name, corpus directory, import args, extra config, answers). An answer is
 # typed at the next prompt; a tuple acts on the music first: ("remove",
 # file), ("empty",), ("copy", import-src path, new name).
@@ -1089,6 +1103,26 @@ IMPORT_CASES = [
      "    keep_in_artist: yes\n", []),
     ("ftintitle-auto-off", "sampler", ["-t"],
      "plugins: [musicbrainz, ftintitle]\nftintitle:\n    auto: no\n", ["a"]),
+    # edit: "eDit" and "edit Candidates" at the prompt (tools/diffbeets/editor.py
+    # edits the YAML, the same way for both tools; see _import_edit below).
+    *[(f"edit-{n}", music, args, _import_edit(rules, extra), answers)
+      for n, music, args, rules, extra, answers in [
+          ("d", "fx", ["-t", "-C"], [[["Alpha", "Alpha Edited"], ["Fixture Album", "Edited Album"]]],
+           "", ["d", "a"]),
+          ("d-cancel", "fx", ["-t", "-C"], [[["Alpha", "Alpha Edited"]]], "", ["d", "c", "u"]),
+          ("d-keep", "fx", ["-t", "-C"], [[["Beta", "B1"]], [["B1", "B2"]]], "", ["d", "e", "a"]),
+          ("d-noop", "fx", ["-t", "-C"], [None], "", ["d", "u"]),
+          ("d-docs", "fx", ["-t", "-C"], ["album: x\n", [["x", "y"]]], "", ["d", "n", "u"]),
+          ("c-list", "fx", ["-t", "-C"], [[["Alpha", "Alpha Edited"]]], "", ["c", "1", "a"]),
+          ("c-back", "fx", ["-t", "-C"], [[["Alpha", "Alpha Edited"]]], "", ["c", "b", "u"]),
+          ("c-shown", "fx", ["-t", "-C"], [[["Alpha", "Alpha Edited"]]], "", ["1", "c", "a"]),
+          ("header-fields", "fx", ["-t", "-C"], [[["Fixture Album", "Hdr"]]],
+           "edit:\n    albumfields: album track title\n    itemfields: title\n", ["d", "a"]),
+          ("no-header", "fx", ["-t", "-C"], [[["Gamma", "G"]]],
+           "edit:\n    albumfields: ''\n", ["d", "a"]),
+          ("s", "fx", ["-t", "-s", "-C"], [[["Alpha", "Solo"]], [["Beta", "B"]]], "",
+           ["d", "a", "c", "1", "a", "s"]),
+      ]],
     ("zero-q-asis", "fx", ["-q", "-C", "--quiet-fallback=asis"],
      "plugins: [musicbrainz, zero]\nzero:\n    fields: title\n", []),
 ]
@@ -1392,6 +1426,59 @@ ART_CASES += [
      [_IMP, ["scrub", "title:Two"], ["write", "-p"]]),
 ]
 
+# edit: the command, with the scripted editor (rules: see editor.py).
+def _edit(rules, extra=""):
+    cfg = f"plugins: [edit], editor: {json.dumps(EDITOR)}, x_editor: {json.dumps(rules)}{extra}"
+    return "{{" + cfg.replace("{", "{{").replace("}", "}}") + "}}"
+
+
+_ED_LS = ["ls", "-f", "$id|$track|$title|$artist|$album|$year|$foo|$genres"]
+_ED_WRITE = ", import: {write: yes}"
+ART_CASES += [
+    ("edit-cancel", "tracks", {}, _edit([[["One", "Uno"]]]), [_IMP, (["edit"], "c\n"), _ED_LS]),
+    ("edit-apply", "tracks", {}, _edit([[["One", "Uno"], ["Art Album", "X"]]], _ED_WRITE),
+     [_IMP, (["edit"], "a\n"), _ED_LS, ["ls", "-a", "-f", "$album"], ["write", "-p"]]),
+    ("edit-default", "tracks", {}, _edit([[["One", "Uno"]]]), [_IMP, (["edit"], "\n"), _ED_LS]),
+    ("edit-noop", "tracks", {}, _edit([None]), [_IMP, (["edit"], ""), _ED_LS]),
+    ("edit-keep-editing", "tracks", {}, _edit([[["One", "Uno"]], [["Uno", "Eins"]]]),
+     [_IMP, (["edit"], "e\na\n"), _ED_LS]),
+    ("edit-keep-cancel", "tracks", {}, _edit([[["One", "Uno"]], [["Two", "Zwei"]]]),
+     [_IMP, (["edit"], "e\nc\n"), _ED_LS]),
+    ("edit-all", "tracks", {}, _edit([None, None]),
+     [_IMP, ["modify", "-y", "genres=Rock; Pop", "comp=1", "rg_track_gain=-6.5", "foo=1",
+             "title:One"], ["modify", "-y", "-a", "data_source=X"],
+      ["edit", "--all", "title:One"], ["edit", "-a", "--all"]]),
+    ("edit-album", "tracks", {}, _edit([[["Art Album", "New Album"]]], _ED_WRITE),
+     [_IMP, (["edit", "-a"], "a\n"), ["ls", "-a", "-f", "$album|$albumartist"], _ED_LS]),
+    ("edit-fields", "tracks", {}, _edit([[["year: 2001", "year: 1999"],
+                                        ["genres: []", "genres:\n- Jazz\n- Funk"]]]),
+     [_IMP, (["edit", "-f", "year", "--field", "genres", "title:One"], "a\n"), _ED_LS]),
+    ("edit-add-flex", "tracks", {}, _edit([[["id: 1\n", "id: 1\nfoo: bar\nbaz: 7\n"]]]),
+     [_IMP, (["edit"], "a\n"), _ED_LS, ["ls", "-f", "$baz"]]),
+    ("edit-types", "tracks", {}, _edit([[["track: 1\n", "track: '7'\n"],
+                                        ["title: One", "title: yes"],
+                                        ["track: 2\n", "track: true\n"],
+                                        ["title: Two", "title: 2020-01-02"]]]),
+     [_IMP, (["edit"], "a\n"), _ED_LS]),
+    ("edit-types-2", "tracks", {}, _edit([[["album: Art Album\n", "album: [a, b]\n"],
+                                          ["artist: Art Artist\n", "artist: 0x1F\n"],
+                                          ["title: Two", "title: ~"]]]),
+     [_IMP, (["edit"], "a\n"), _ED_LS]),
+    ("edit-malformed", "tracks", {}, _edit(["!MALFORMED", "id: 1\ntitle: Fixed\n"]),
+     [_IMP, (["edit"], "n\n"), (["edit"], "y\na\n"), _ED_LS]),
+    ("edit-parse-errors", "tracks", {}, _edit(["a: [1, 2\n", "a: b: c\n", "- 5\n", "x: -\n"]),
+     [_IMP, (["edit"], "y\ny\ny\nn\n")]),
+    ("edit-invalid", "tracks", {}, _edit(["wellformed: yes, but invalid"]),
+     [_IMP, (["edit"], ""), _ED_LS]),
+    ("edit-ids", "tracks", {}, _edit([[["id: 2", "id: 1"]], [["id: 2", "id: 9"]]]),
+     [_IMP, (["edit"], ""), (["edit"], ""), _ED_LS]),
+    ("edit-path", "tracks", {}, _edit([[["path: ", "path: /x"], ["title: One", "title: P"]]]),
+     [_IMP, (["edit", "--all", "title:One"], "")]),
+    ("edit-nothing", "tracks", {}, _edit([]), [_IMP, ["edit", "nomatch"]]),
+    ("edit-no-editor", "tracks", {}, "{{plugins: [edit], editor: nonexistent-editor}}",
+     [_IMP, ["edit"]]),
+]
+
 _PLUGIN_LOAD = ("a plugin that fails to set up (bad `fetchart.sources`): beets logs \"** error "
                 "loading plugin fetchart\" with a Python traceback and runs without it; beets-rs "
                 "logs the same line with the error message (and the `fetchart` command fails "
@@ -1602,6 +1689,78 @@ ART_CASES += [
       ["ls", "-f", "$title $mydate", "mydate:..1999-07"]]),
 ]
 
+# convert: real ffmpeg on `conv` (a FLAC and an Ogg track); state: the
+# converted files' format, tags, embedded art and link targets, playlists.
+_CV_CFG = ("{{plugins: [convert], convert: {{dest: '{root}/out', threads: 1, "
+           "tmpdir: '{root}'" + "{extra}}}}}")
+_CV_LS = ["ls", "-f", "$path $format"]
+
+
+def _cv(extra=""):
+    return _CV_CFG.replace("{extra}", (", " + extra) if extra else "")
+
+
+_CV_IMP = ["import", "-A", "-q", "{music}"]
+# One file per import: beets' import pipeline prints every task's path
+# before the stages' messages.
+_CV_SINGLES = [["import", "-A", "-q", "-s", "{music}/01.flac"],
+               ["import", "-A", "-q", "-s", "{music}/02.ogg"]]
+ART_CASES += [
+    ("convert-basic", "conv", {}, _cv(),
+     [_CV_IMP, (["convert"], "n\n"), (["convert"], "y\n"), ["convert", "-y"], _CV_LS]),
+    ("convert-pretend-playlist", "conv", {}, _cv(),
+     [_CV_IMP, ["convert", "-p", "-m", "pl.m3u"], ["convert", "-y", "-m", "sub/pl.m3u8"]]),
+    ("convert-format-link", "conv", {}, _cv(),
+     [_CV_IMP, ["convert", "-y", "-f", "ogg", "-l"], ["convert", "-y", "-f", "vorbis",
+                                                      "-d", "{root}/out/v", "title:Dos"]]),
+    ("convert-hardlink", "conv", {}, _cv(),
+     [_CV_IMP, ["convert", "-y", "-f", "FLAC", "-H", "-l"]]),
+    ("convert-keep-new", "conv", {}, _cv(),
+     [_CV_IMP, ["convert", "-y", "-k", "-f", "ogg"], _CV_LS,
+      ["convert", "-y", "-k", "-p", "-f", "opus"]]),
+    ("convert-album-art", "conv", {"cover.jpg": "sq300.jpg"},
+     "{{plugins: [fetchart, convert], convert: {{dest: '{root}/out', threads: 1, "
+     "copy_album_art: yes, album_art_maxwidth: 100}}}}",
+     [_CV_IMP, ["convert", "-y", "-a", "-p"], ["convert", "-y", "-a"], ["convert", "-y", "-a"]]),
+    ("convert-album-art-copy", "conv", {"cover.jpg": "small.jpg"},
+     "{{plugins: [fetchart, convert], art_filename: 'folder', convert: {{dest: '{root}/out', "
+     "threads: 1, copy_album_art: yes, embed: no, album_art_maxwidth: 100}}}}",
+     [_CV_IMP, ["convert", "-y", "-a", "-p", "-l"], ["convert", "-y", "-a", "-l"]]),
+    ("convert-no-convert", "conv", {}, _cv("no_convert: 'format:OGG , title:Uno'"),
+     [_CV_IMP, ["convert", "-y"], ["convert", "-y", "-F", "-d", "{root}/out/f"]]),
+    ("convert-never-lossy", "conv", {}, _cv("never_convert_lossy_files: yes, format: opus"),
+     [_CV_IMP, ["convert", "-y"]]),
+    ("convert-max-bitrate", "conv", {}, _cv("max_bitrate: 1, format: ogg"),
+     [_CV_IMP, ["convert", "-y", "-m", "pl.m3u", "--limit", "1"], ["convert", "-y"]]),
+    ("convert-paths", "conv", {},
+     _cv("paths: {{default: '$album/$track-$title', 'format:OGG': 'ogg/$title'}}"),
+     [_CV_IMP, ["convert", "-y", "-m", "lists/all.m3u"]]),
+    ("convert-command-shortcut", "conv", {},
+     _cv("command: 'ffmpeg -i $source -y -vn -acodec libvorbis \"$dest\"', extension: oga"),
+     [_CV_IMP, ["convert", "-y", "-f", "flac"]]),
+    ("convert-errors", "conv", {},
+     _cv("formats: {{bad: {{extension: x}}, fail: {{command: 'false $source $dest', "
+         "extension: fl}}, gone: 'no-such-encoder-xyz $source $dest'}}"),
+     [_CV_IMP, ["convert", "-y", "-f", "xyz"], ["convert", "-y", "-f", "bad"],
+      ["convert", "-y", "-f", "fail"], ["convert", "-y", "-f", "gone", "title:Uno"],
+      ["convert", "-y", "nomatch"], ["convert", "-y", "-t", "0"]]),
+    ("convert-no-dest", "conv", {}, "{{plugins: [convert]}}",
+     [_CV_IMP, ["convert", "-y"], ["convert", "-p", "nomatch"]]),
+    ("convert-write-metadata-off", "conv", {}, _cv("write_metadata: no, id3v23: yes"),
+     [_CV_IMP, ["modify", "-y", "title=Changed"], ["convert", "-y"]]),
+    ("convert-id3v23", "conv", {}, _cv("id3v23: yes"),
+     [_CV_IMP, ["modify", "-y", "title:Dos", "title=Changed"], ["convert", "-y"]]),
+    # On import (singletons: beets converts an album's items in parallel,
+    # so their messages come in any order).
+    ("convert-auto", "conv", {}, _cv("auto: yes"), [*_CV_SINGLES, _CV_LS]),
+    ("convert-auto-delete", "conv", {}, _cv("auto: yes, delete_originals: yes, format: ogg"),
+     [*_CV_SINGLES, _CV_LS]),
+    ("convert-auto-move", "conv", {},
+     "{{plugins: [convert], import: {{copy: no, move: yes}}, convert: {{dest: '{root}/out', "
+     "threads: 1, auto: yes, quiet: yes, tmpdir: '{root}'}}}}", [*_CV_SINGLES, _CV_LS]),
+    ("convert-auto-fail", "conv", {}, _cv("auto: yes, command: 'false'"), [*_CV_SINGLES, _CV_LS]),
+    ("convert-auto-keep", "conv", {}, _cv("auto_keep: yes"), [*_CV_SINGLES, _CV_LS]),
+]
 
 # ---------------------------------------------------------------------------
 # mbsync, in the import phase (against its fake MusicBrainz): a library

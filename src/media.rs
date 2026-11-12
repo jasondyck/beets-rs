@@ -439,7 +439,8 @@ pub fn refresh_mtime(item: &mut Item) {
     if let Ok(m) = std::fs::metadata(item.path()).and_then(|m| m.modified()) {
         let ts = m
             .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_secs_f64())
+            // beets' `current_mtime`: whole seconds.
+            .map(|d| d.as_secs() as f64)
             .unwrap_or(0.0);
         item.set("mtime", Value::Float(ts));
     }
@@ -504,6 +505,25 @@ pub fn write_with_images(item: &Item, image: Option<&[u8]>) -> Result<()> {
     Ok(())
 }
 
+/// `write_with_images` into another file (beets' `item.try_write(path=...,
+/// tags={"images": ...}, id3v23=...)`).
+pub fn write_with_images_at(
+    item: &Item,
+    path: &Path,
+    id3v23: bool,
+    image: Option<&[u8]>,
+) -> Result<()> {
+    let pic = match image {
+        Some(data) => Some(
+            Picture::from_reader(&mut &data[..])
+                .map_err(|e| anyhow::anyhow!("not a usable image: {e}"))?,
+        ),
+        None => None,
+    };
+    write_event(item, path, id3v23, Extra::Images(pic), &BTreeSet::new())?;
+    Ok(())
+}
+
 /// The embedded pictures' data (MediaFile's `art`: the front cover, else
 /// the first picture), or `None` if there are none.
 pub fn get_art(path: &Path) -> Result<Option<Vec<u8>>> {
@@ -540,7 +560,6 @@ pub fn write_to(item: &Item, path: &Path) -> Result<()> {
 
 /// beets' `Item.write`: every media field into the file's tags, MP3s'
 /// ID3 tags as ID3v2.3 with `id3v23`.
-#[cfg(test)]
 pub fn write_with(item: &Item, path: &Path, id3v23: bool) -> Result<()> {
     write_event(item, path, id3v23, Extra::None, &BTreeSet::new())?;
     Ok(())

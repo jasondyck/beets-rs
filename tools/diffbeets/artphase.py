@@ -92,6 +92,10 @@ def build_art_corpus(src, ffmpeg_audio):
             check=True,
         )
     build_rg_corpus(src)
+    # convert (`conv/`): a FLAC and an Ogg Vorbis track of one album.
+    for i, (title, fmt) in enumerate([("Uno", "flac"), ("Dos", "ogg")], 1):
+        tags = dict(common, title=title, track=str(i), album="Conv Album", _d="0.5")
+        ffmpeg_audio(os.path.join(src, "conv", f"{i:02d}.{fmt}"), fmt, tags)
 
 
 # replaygain (`rg/`): an MP3 album over two discs whose tracks differ in
@@ -188,6 +192,31 @@ def describe_embedded(path):
         return f"{len(images)} image(s), cover {describe_image(f.name)}"
 
 
+AUDIO_EXTS = (".mp3", ".flac", ".ogg", ".opus", ".m4a", ".ops")
+
+
+def describe_converted(path, normalise):
+    """A converted file (convert's `out/`): link target, format and tags."""
+    import mediafile
+
+    link = ""
+    if os.path.islink(path):
+        link = f" -> {normalise(os.readlink(path))}"
+    try:
+        mf = mediafile.MediaFile(path)
+    except Exception as exc:  # noqa: BLE001
+        return f"unreadable: {type(exc).__name__}{link}"
+    images = mf.images or []
+    art = f"{len(images)} image(s)"
+    if images:
+        with tempfile.NamedTemporaryFile() as f:
+            f.write(mf.art)
+            f.flush()
+            art += f", cover {describe_image(f.name)}"
+    return (f"{mf.format} {mf.title!r} {mf.artist!r} {mf.album!r} {mf.track} "
+            f"{art}{link}")
+
+
 def snapshot(root, tool, normalise):
     lines = []
     p = subprocess.run([tool.beet, "ls", "-a", "-f", "$album|$artpath|$art_source"],
@@ -202,16 +231,19 @@ def snapshot(root, tool, normalise):
                 full = os.path.join(dirpath, f)
                 rel = os.path.relpath(full, root)
                 low = f.lower()
-                if low.endswith(".mp3"):
+                if top == "out" and low.endswith(AUDIO_EXTS):
+                    lines.append(f"{rel}: {describe_converted(full, normalise)}")
+                elif low.endswith((".m3u", ".m3u8")):
+                    # Playlists (convert's, smartplaylist's) byte for byte, as
+                    # text with only the case's root replaced (normalise would
+                    # drop line endings and the final newline).
+                    with open(full, "rb") as fh:
+                        body = fh.read().decode("utf-8", "backslashreplace")
+                    lines.append(f"{rel}: {body.replace(root, '<ROOT>')!r}")
+                elif low.endswith(".mp3"):
                     lines.append(f"{rel}: {describe_embedded(full)}")
                 elif low.endswith((".jpg", ".jpeg", ".png", ".webp", ".gif")):
                     lines.append(f"{rel}: {describe_image(full)}")
-                elif low.endswith((".m3u", ".m3u8")):
-                    # Playlists, byte for byte (as text, paths normalised).
-                    with open(full, "rb") as fh:
-                        body = fh.read().decode("utf-8", "backslashreplace")
-                    lines.append(f"{rel}:")
-                    lines += [f"  | {line}" for line in normalise(body).split("\n")]
                 else:
                     lines.append(rel)
     return "\n".join(lines)
