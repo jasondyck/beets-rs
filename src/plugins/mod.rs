@@ -8,6 +8,7 @@ pub mod fetchart;
 pub mod info;
 pub mod lastgenre;
 pub mod lyrics;
+pub mod missing;
 pub mod requests;
 
 use crate::config::Config;
@@ -87,6 +88,7 @@ pub const AVAILABLE: &[&str] = &[
     "info",
     "lastgenre",
     "lyrics",
+    "missing",
     "musicbrainz",
 ];
 
@@ -122,6 +124,7 @@ pub fn load(cfg: &Config) -> Result<Vec<Box<dyn Plugin>>> {
             "lyrics" => out.push(Box::new(lyrics::LyricsPlugin::new(cfg))),
             "embedart" => out.push(Box::new(embedart::EmbedArt::new(cfg))),
             "info" => out.push(Box::new(info::InfoPlugin)),
+            "missing" => out.push(Box::new(missing::MissingPlugin)),
             // The autotagger's metadata source, as in beets 2.14: it's
             // queried only while this plugin is enabled.
             "musicbrainz" => crate::mb::warn_deprecated_config(cfg),

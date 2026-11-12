@@ -500,6 +500,30 @@ pub fn run(cli: Cli) -> Result<()> {
                 },
             )
         }
+        Cmd::Missing {
+            count,
+            total,
+            album,
+            release_types,
+            format,
+            limit,
+            query,
+        } => {
+            require_plugin(&cfg, "missing")?;
+            plugins::missing::command(
+                &cfg,
+                &lib,
+                plugins::missing::CmdOpts {
+                    count,
+                    total,
+                    album,
+                    release_types,
+                    format,
+                    limit,
+                    query,
+                },
+            )
+        }
         Cmd::Fields => fields(&lib),
         Cmd::MigrateBeets {
             beets_config,
@@ -1947,7 +1971,8 @@ fn fields(lib: &Library) -> Result<()> {
 
 /// beets' `fields_func`: each model's fixed and computed fields (sorted),
 /// then the flexible attributes the library holds (in the order SQLite's
-/// `SELECT DISTINCT` gives them). No loaded plugin adds template fields.
+/// `SELECT DISTINCT` gives them). Plugins' album template fields count as
+/// computed album fields.
 fn fields_lines(lib: &Library) -> Result<Vec<String>> {
     let names = |fields: &[(&str, FieldType)], computed: &[&'static str]| {
         let mut v: Vec<&str> = fields
@@ -1965,7 +1990,14 @@ fn fields_lines(lib: &Library) -> Result<Vec<String>> {
         &["singleton", "filesize", "has_cover_art"],
     ));
     out.push("Album fields:".into());
-    out.extend(names(ALBUM_FIELDS, &["path", "albumtotal"]));
+    let mut album_computed = vec!["path", "albumtotal"];
+    album_computed.extend(
+        crate::formatted::env()
+            .album_template_fields
+            .iter()
+            .copied(),
+    );
+    out.extend(names(ALBUM_FIELDS, &album_computed));
     for (title, kind) in [("Item", Kind::Item), ("Album", Kind::Album)] {
         out.push(format!("{title} flexible attributes:"));
         out.extend(lib.flex_keys(kind)?.into_iter().map(|k| format!("  {k}")));

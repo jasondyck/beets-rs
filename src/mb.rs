@@ -1327,6 +1327,14 @@ impl MusicBrainz {
         Ok(out)
     }
 
+    /// beets' `MusicBrainzAPI.browse_release_groups(artist=..., type=...)`:
+    /// the artist's release groups of those types (`|`-separated; empty
+    /// sends an empty `type`), as MusicBrainz returns them (one page).
+    pub fn browse_release_groups(&self, artist: &str, types: &str) -> Result<Vec<J>> {
+        let res = self.get("release-group", &[("artist", artist), ("type", types)])?;
+        Ok(arr(&res, "release-groups").to_vec())
+    }
+
     /// beets' `track_for_id`: the recording, None if not found.
     pub fn track_for_id(&self, track_id: &str) -> Result<Option<TrackInfo>> {
         let Some(id) = extract_id(track_id) else {
