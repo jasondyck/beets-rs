@@ -496,6 +496,17 @@ pub enum Cmd {
         #[arg(allow_hyphen_values = true)]
         query: Vec<String>,
     },
+    /// Move featured artists to the title field (plugin: ftintitle)
+    Ftintitle {
+        /// Drop featuring from artists and ignore title update
+        #[arg(short = 'd', long)]
+        drop: bool,
+        /// Limit query results
+        #[arg(short = 'l', long)]
+        limit: Option<usize>,
+        #[arg(allow_hyphen_values = true)]
+        query: Vec<String>,
+    },
     /// Set fields to null (plugin: zero)
     Zero {
         /// Limit query results

@@ -268,6 +268,35 @@ chroma:
     data_source_mismatch_penalty: 0.5
     auto: yes
 
+ftintitle:
+    auto: yes
+    drop: no
+    format: feat. {}
+    keep_in_artist: no
+    preserve_album_artist: yes
+    custom_words: []
+    bracket_keywords:
+    - abridged
+    - acapella
+    - club
+    - demo
+    - edit
+    - edition
+    - extended
+    - instrumental
+    - live
+    - mix
+    - radio
+    - release
+    - remaster
+    - remastered
+    - remix
+    - rmx
+    - unabridged
+    - unreleased
+    - version
+    - vip
+
 musicbrainz:
     host: musicbrainz.org
     https: no
@@ -341,6 +370,7 @@ const PLUGIN_SECTIONS: &[&str] = &[
     "the",
     "zero",
     "chroma",
+    "ftintitle",
 ];
 
 /// confuse's `ConfigReadError`: "PATH could not be read: REASON".

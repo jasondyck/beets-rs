@@ -1239,6 +1239,16 @@ impl MusicBrainz {
     /// MusicBrainz or the id isn't an MBID; a pseudo-release gets the
     /// release facts of the release it translates.
     pub fn album_for_id(&self, album_id: &str) -> Result<Option<AlbumInfo>> {
+        let mut info = self.album_for_id_raw(album_id)?;
+        if let Some(info) = info.as_mut() {
+            for l in info_listeners() {
+                l.album_info(info);
+            }
+        }
+        Ok(info)
+    }
+
+    fn album_for_id_raw(&self, album_id: &str) -> Result<Option<AlbumInfo>> {
         crate::logging::debug!("musicbrainz: Requesting MusicBrainz release {album_id}");
         let Some(id) = extract_id(album_id) else {
             crate::logging::debug!("musicbrainz: Invalid MBID ({album_id}).");
@@ -1337,6 +1347,16 @@ impl MusicBrainz {
 
     /// beets' `track_for_id`: the recording, None if not found.
     pub fn track_for_id(&self, track_id: &str) -> Result<Option<TrackInfo>> {
+        let mut info = self.track_for_id_raw(track_id)?;
+        if let Some(info) = info.as_mut() {
+            for l in info_listeners() {
+                l.track_info(info);
+            }
+        }
+        Ok(info)
+    }
+
+    fn track_for_id_raw(&self, track_id: &str) -> Result<Option<TrackInfo>> {
         let Some(id) = extract_id(track_id) else {
             crate::logging::debug!("musicbrainz: Invalid MBID ({track_id}).");
             return Ok(None);
@@ -1348,6 +1368,53 @@ impl MusicBrainz {
             Err(e) => Err(e),
         }
     }
+}
+
+// ------------------------------------------------- info received events
+
+/// A listener for beets' `albuminfo_received` and `trackinfo_received`
+/// events: each release or recording fetched from MusicBrainz (for a
+/// search, an id lookup or the `missing` plugin), before it's matched.
+pub trait InfoListener: Send + Sync {
+    fn album_info(&self, _info: &mut AlbumInfo) {}
+    fn track_info(&self, _info: &mut TrackInfo) {}
+}
+
+type InfoListeners = Vec<std::sync::Arc<dyn InfoListener>>;
+
+#[cfg(not(test))]
+static INFO_LISTENERS: std::sync::RwLock<InfoListeners> = std::sync::RwLock::new(Vec::new());
+
+// Tests run in parallel: each test thread has its own listeners.
+#[cfg(test)]
+thread_local! {
+    static INFO_LISTENERS: std::cell::RefCell<InfoListeners> =
+        const { std::cell::RefCell::new(Vec::new()) };
+}
+
+/// Register an info listener (a plugin, when it loads).
+pub fn add_info_listener(l: std::sync::Arc<dyn InfoListener>) {
+    #[cfg(not(test))]
+    INFO_LISTENERS.write().unwrap().push(l);
+    #[cfg(test)]
+    INFO_LISTENERS.with(|v| v.borrow_mut().push(l));
+}
+
+fn info_listeners() -> InfoListeners {
+    #[cfg(not(test))]
+    return INFO_LISTENERS.read().unwrap().clone();
+    #[cfg(test)]
+    INFO_LISTENERS.with(|v| v.borrow().clone())
+}
+
+#[cfg(test)]
+pub fn clear_info_listeners() {
+    INFO_LISTENERS.with(|v| v.borrow_mut().clear());
+}
+
+#[cfg(test)]
+pub fn info_listener_count() -> usize {
+    INFO_LISTENERS.with(|v| v.borrow().len())
 }
 
 #[cfg(test)]

@@ -39,6 +39,8 @@ pub struct FormatEnv {
     /// Album template fields of the enabled plugins (beets'
     /// `album_template_fields`, computed fields of every album).
     pub album_template_fields: Vec<&'static str>,
+    /// `ftintitle.custom_words`, for `album_artist_no_feat`.
+    pub ftintitle_custom_words: Vec<String>,
     /// The `the` plugin's `%the{}`, when it's enabled.
     pub the: Option<Rc<crate::plugins::the::The>>,
 }
@@ -129,11 +131,17 @@ impl FormatEnv {
             aunique: unique("aunique"),
             sunique: unique("sunique"),
             tunique: unique("tunique"),
-            album_template_fields: if crate::plugins::enabled(cfg, "missing") {
-                vec!["missing"]
-            } else {
-                vec![]
+            album_template_fields: {
+                let mut v = vec![];
+                if crate::plugins::enabled(cfg, "missing") {
+                    v.push("missing");
+                }
+                if crate::plugins::enabled(cfg, "ftintitle") {
+                    v.push("album_artist_no_feat");
+                }
+                v
             },
+            ftintitle_custom_words: cfg.list("ftintitle.custom_words"),
             the: crate::plugins::enabled(cfg, "the")
                 .then(|| Rc::new(crate::plugins::the::The::new(cfg))),
         })
@@ -431,6 +439,13 @@ impl<'a> Formatted<'a> {
             // The missing plugin's `_missing_count`.
             (Kind::Album, "missing") if self.is_self(rec) && self.template_field(rec, key) => {
                 (self.albumtotal(rec) - self.album_items().len() as i64).to_string()
+            }
+            // ftintitle's `_album_artist_no_feat`.
+            (Kind::Album, "album_artist_no_feat") if self.template_field(rec, key) => {
+                crate::plugins::ftintitle::album_artist_no_feat(
+                    rec.str("albumartist"),
+                    &self.env.ftintitle_custom_words,
+                )
             }
             // An item's album's computed fields, through a view of it.
             (Kind::Album, k)

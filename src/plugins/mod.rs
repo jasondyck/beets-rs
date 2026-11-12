@@ -6,6 +6,7 @@ pub mod art;
 pub mod chroma;
 pub mod embedart;
 pub mod fetchart;
+pub mod ftintitle;
 pub mod info;
 pub mod lastgenre;
 pub mod lyrics;
@@ -99,6 +100,7 @@ pub const AVAILABLE: &[&str] = &[
     "chroma",
     "embedart",
     "fetchart",
+    "ftintitle",
     "info",
     "lastgenre",
     "lyrics",
@@ -140,6 +142,7 @@ pub fn load(cfg: &Config) -> Result<Vec<Box<dyn Plugin>>> {
             "lyrics" => out.push(Box::new(lyrics::LyricsPlugin::new(cfg))),
             "embedart" => out.push(Box::new(embedart::EmbedArt::new(cfg))),
             "info" => out.push(Box::new(info::InfoPlugin)),
+            "ftintitle" => out.push(Box::new(ftintitle::FtInTitle::new(cfg))),
             "missing" => out.push(Box::new(missing::MissingPlugin)),
             // Also a metadata source: its lookups and candidates are wired
             // into `MbSource` and `autotag` (see the module docs).
@@ -247,4 +250,23 @@ impl PluginLog {
     pub fn error(&self, msg: &str) {
         self.log(ERROR, msg);
     }
+}
+
+/// beets' `plugins.feat_tokens`: a pattern matching "feat."-like words
+/// that separate a main artist (or a title) from secondary artists; with
+/// `for_artist`, also "with", "vs", "and", "con" and "&".
+pub fn feat_tokens(for_artist: bool, custom_words: &[String]) -> String {
+    let mut words: Vec<&str> = vec!["ft", "featuring", "feat", "feat.", "ft."];
+    words.extend(custom_words.iter().map(String::as_str));
+    if for_artist {
+        words.extend(["with", "vs", "and", "con", "&"]);
+    }
+    let tokens: Vec<String> = words
+        .iter()
+        .map(|w| fancy_regex::escape(w).into_owned())
+        .collect();
+    let tokens = tokens.join("|");
+    let bracketed = format!(r"(?:(?<=\s)|^)(?:\(|\[)(?:{tokens})(?=\s)");
+    let plain = format!(r"(?<=[\s(\[])(?:{tokens})(?=\s)");
+    format!("(?:{bracketed}|{plain})")
 }

@@ -441,6 +441,10 @@ pub fn run(cli: Cli) -> Result<()> {
                 },
             )
         }
+        Cmd::Ftintitle { drop, limit, query } => {
+            require_plugin(&cfg, "ftintitle")?;
+            plugins::ftintitle::command(&cfg, &lib, drop, limit, &query)
+        }
         Cmd::Zero { limit, query } => {
             require_plugin(&cfg, "zero")?;
             plugins::zero::command(&cfg, &lib, &plugins, limit, &query)
