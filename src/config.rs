@@ -261,6 +261,21 @@ duplicates:
     tag: ''
     remove: no
 
+smartplaylist:
+    dest_regen: no
+    relative_to:
+    playlist_dir: .
+    auto: yes
+    playlists: []
+    uri_format:
+    fields: []
+    forward_slash: no
+    prefix: ''
+    urlencode: no
+    format: $artist - $title
+    output: m3u
+    pretend: no
+
 missing:
     count: no
     total: no
@@ -388,6 +403,7 @@ pub const REDACTED_KEYS: &[(&str, &str)] = &[
     ("lyrics", "lyrics.google_API_key"),
     ("lyrics", "lyrics.google_engine_ID"),
     ("lyrics", "lyrics.genius_api_key"),
+    ("smartplaylist", "smartplaylist.prefix"),
     ("chroma", "acoustid.apikey"),
 ];
 
@@ -407,6 +423,7 @@ const PLUGIN_SECTIONS: &[&str] = &[
     "replaygain",
     "duplicates",
     "scrub",
+    "smartplaylist",
 ];
 
 /// `DEFAULT_CONFIG` parsed, with the defaults computed at run time

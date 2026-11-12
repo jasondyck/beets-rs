@@ -567,6 +567,40 @@ pub enum Cmd {
         #[arg(allow_hyphen_values = true)]
         query: Vec<String>,
     },
+    /// Update the smart playlists. Playlist names may be passed as arguments. (plugin: smartplaylist)
+    Splupdate {
+        /// Display query results but don't write playlist files.
+        #[arg(short = 'p', long)]
+        pretend: bool,
+        /// Print per-track log lines with custom format
+        #[arg(short = 'f', long)]
+        format: Option<String>,
+        /// Directory to write the generated playlist files to.
+        #[arg(short = 'd', long = "playlist-dir", value_name = "PATH")]
+        playlist_dir: Option<String>,
+        /// Regenerate the destination path as 'move' or 'convert' commands would do.
+        #[arg(long = "dest-regen")]
+        dest_regen: bool,
+        /// Generate playlist item paths relative to this path.
+        #[arg(long = "relative-to", value_name = "PATH")]
+        relative_to: Option<String>,
+        /// Prepend string to every path in the playlist file.
+        #[arg(long)]
+        prefix: Option<String>,
+        /// Force forward slash in paths within playlists.
+        #[arg(long = "forward-slash")]
+        forward_slash: bool,
+        /// URL-encode all paths.
+        #[arg(long)]
+        urlencode: bool,
+        /// Playlist item URI template, e.g. http://beets:8337/item/$id/file.
+        #[arg(long = "uri-format")]
+        uri_format: Option<String>,
+        /// Specify the playlist format: m3u|extm3u.
+        #[arg(long, value_parser = ["m3u", "extm3u"])]
+        output: Option<String>,
+        names: Vec<String>,
+    },
     /// List missing tracks (plugin: missing)
     #[command(visible_alias = "miss")]
     Missing {

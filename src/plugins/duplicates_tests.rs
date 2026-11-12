@@ -284,8 +284,8 @@ fn shlex_and_format_as_python() {
         ["sh", "-c", r#"cksum < "$0""#, "{file}"]
     );
     assert_eq!(
-        shlex_split(r#"a\ b "c \"d\" \x" # comment"#).unwrap(),
-        ["a b", r#"c "d" \x"#]
+        shlex_split(r#"a\ b "c \"d\" \x" # not-a-comment"#).unwrap(),
+        ["a b", r#"c "d" \x"#, "#", "not-a-comment"]
     );
     assert_eq!(shlex_split("x ''").unwrap(), ["x", ""]);
     assert!(shlex_split("'open").is_err());
