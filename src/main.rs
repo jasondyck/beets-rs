@@ -468,6 +468,57 @@ pub enum Cmd {
         #[arg(allow_hyphen_values = true)]
         args: Vec<String>,
     },
+    /// List duplicate tracks or albums (plugin: duplicates)
+    #[command(visible_alias = "dup")]
+    Duplicates {
+        /// Show duplicate counts
+        #[arg(short = 'c', long)]
+        count: bool,
+        /// Report duplicates based on arbitrary command
+        #[arg(short = 'C', long, value_name = "PROG", allow_hyphen_values = true)]
+        checksum: Option<String>,
+        /// Delete items from library and disk
+        #[arg(short = 'd', long)]
+        delete: bool,
+        /// Show all versions of duplicate tracks or albums
+        #[arg(short = 'F', long)]
+        full: bool,
+        /// Report duplicates only if all attributes are set
+        #[arg(short = 's', long)]
+        strict: bool,
+        /// Report duplicates based on keys (use multiple times)
+        #[arg(short = 'k', long = "key", value_name = "KEY")]
+        keys: Vec<String>,
+        /// Merge duplicate items
+        #[arg(short = 'M', long)]
+        merge: bool,
+        /// Move items to dest
+        #[arg(short = 'm', long = "move", value_name = "DEST")]
+        move_to: Option<String>,
+        /// Copy items to dest
+        #[arg(short = 'o', long = "copy", value_name = "DEST")]
+        copy_to: Option<String>,
+        /// Tag matched items with 'k=v' attribute
+        #[arg(short = 't', long)]
+        tag: Option<String>,
+        /// Remove items from library
+        #[arg(short = 'r', long)]
+        remove: bool,
+        /// Match albums instead of tracks
+        #[arg(short = 'a', long)]
+        album: bool,
+        /// Print paths for matched items or albums
+        #[arg(short = 'p', long)]
+        path: bool,
+        /// Print with custom format
+        #[arg(short = 'f', long)]
+        format: Option<String>,
+        /// Limit query results
+        #[arg(short = 'l', long)]
+        limit: Option<usize>,
+        #[arg(allow_hyphen_values = true)]
+        query: Vec<String>,
+    },
     /// List missing tracks (plugin: missing)
     #[command(visible_alias = "miss")]
     Missing {

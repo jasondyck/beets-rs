@@ -866,6 +866,8 @@ def cases():
         out.append((f"info:{' '.join(args)}", ["-p", "info", "info", *args]))
     for args in MISSING_ARGS:
         out.append((f"missing:{' '.join(args)}", [*_NOMB, "-p", "missing", *args]))
+    for args in DUP_ARGS:
+        out.append((f"dup:{' '.join(args)}", ["-p", "duplicates", *args]))
     return out
 
 
@@ -1254,3 +1256,68 @@ EXPECTED.update({
     "art:cmd-not-enabled:1": _NOT_ENABLED,
     "art:extractart:2": _EXTRACT_CRASH,
 })
+
+
+# ---------------------------------------------------------------------------
+# duplicates plugin. Read-only listings on the shared corpus (main phase);
+# the cases that change the library run in the art phase, each on a fresh
+# library with the same two tracks imported twice.
+
+DUP_ARGS = [
+    ["dup"],
+    ["dup", "-a"],
+    ["dup", "-k", "album", "-F", "-c"],
+    ["duplicates", "-a", "-k", "album", "-F", "-c"],
+    ["dup", "-k", "artist", "-k", "album", "-s"],
+    ["dup", "-k", "album", "-k", "nonexistent", "-F", "-c"],
+    ["dup", "-k", "album", "-k", "nonexistent", "-s"],
+    ["dup", "-k", "album", "-p"],
+    ["dup", "-a", "-k", "albumartist", "-F", "-f", "$albumartist|$album|$id"],
+    ["dup", "-k", "album", "-l", "5", "-F"],
+    ["dup", "-k", "album", "-F", "Hit"],
+    ["dup", "-k", "year", "-F", "-c"],
+    ["dup", "-k", "length", "-F"],
+    ["dup", "-k", "comp", "-k", "singleton", "-F", "-c"],
+    ["dup", "-a", "-k", "albumtype", "-k", "year", "-p", "-c"],
+]
+
+
+_DUP_CFG = "{{plugins: [duplicates], import: {{duplicate_action: keep}}}}"
+_DUP_IMP = [_IMP, _IMP]
+_DUP_LS = ["ls", "-f", "$id $album_id $title $grouping $mb_trackid $dupe"]
+_DUP_LSA = ["ls", "-a", "-f", "$id $album $dupe"]
+_CKSUM = "sh -c 'cksum < \"$0\"' {{file}}"
+ART_CASES += [
+    ("dup-list", "tracks", {}, _DUP_CFG,
+     [*_DUP_IMP, ["dup", "-k", "title", "-F", "-c"], ["dup", "-a", "-k", "album", "-c"],
+      ["dup", "-k", "title", "-p"], ["dup", "-a", "-k", "album", "-F", "-p"]]),
+    ("dup-tag", "tracks", {}, _DUP_CFG,
+     [*_DUP_IMP, ["dup", "-k", "title", "-t", "dupe=1"], _DUP_LS]),
+    ("dup-tag-album", "tracks", {}, _DUP_CFG,
+     [*_DUP_IMP, ["dup", "-a", "-k", "album", "-t", "dupe=1"], _DUP_LS, _DUP_LSA]),
+    ("dup-tag-bad", "tracks", {}, _DUP_CFG,
+     [*_DUP_IMP, ["dup", "-k", "title", "-t", "a=b=c"], _DUP_LS]),
+    ("dup-remove", "tracks", {}, _DUP_CFG,
+     [*_DUP_IMP, ["dup", "-k", "title", "-r"], _DUP_LS, _DUP_LSA]),
+    ("dup-delete", "tracks", {}, _DUP_CFG,
+     [*_DUP_IMP, ["dup", "-k", "title", "-d"], _DUP_LS, _DUP_LSA]),
+    ("dup-delete-album", "tracks", {}, _DUP_CFG,
+     [*_DUP_IMP, ["dup", "-a", "-k", "album", "-d"], _DUP_LS, _DUP_LSA]),
+    ("dup-copy", "tracks", {}, _DUP_CFG,
+     [*_DUP_IMP, ["dup", "-k", "title", "-o", "{root}/out"], ["ls", "-p"]]),
+    ("dup-move-album", "tracks", {}, _DUP_CFG,
+     [*_DUP_IMP, ["dup", "-a", "-k", "album", "-m", "{root}/out"], ["ls", "-p"]]),
+    ("dup-merge-items", "tracks", {}, _DUP_CFG,
+     [*_DUP_IMP, ["modify", "-y", "-M", "id:3", "grouping=G"],
+      ["dup", "-k", "title", "-M", "-F", "-f", "$id $grouping"], _DUP_LS]),
+    ("dup-merge-albums", "tracks", {}, _DUP_CFG,
+     [*_DUP_IMP, ["modify", "-y", "-M", "id:3", "mb_trackid=x3"],
+      ["dup", "-a", "-k", "album", "-M", "-F"], _DUP_LS, ["ls", "-f", "$id $album_id $path"]]),
+    ("dup-checksum", "tracks", {}, _DUP_CFG,
+     [*_DUP_IMP, ["dup", "-C", _CKSUM, "-F"], ["dup", "-C", _CKSUM, "-c"],
+      ["ls", "-f", "$id $sh"], ["dup", "-C", "false {{file}}", "-F"]]),
+    ("dup-tiebreak", "tracks", {},
+     "{{plugins: [duplicates], import: {{duplicate_action: keep}}, "
+     "duplicates: {{tiebreak: {{items: [id]}}}}}}",
+     [*_DUP_IMP, ["dup", "-k", "title", "-F", "-f", "$id $title"]]),
+]

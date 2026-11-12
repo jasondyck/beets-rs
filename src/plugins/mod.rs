@@ -3,6 +3,7 @@
 //! their own subcommands (wired up in `main.rs`/`commands.rs`).
 
 pub mod art;
+pub mod duplicates;
 pub mod embedart;
 pub mod fetchart;
 pub mod info;
@@ -83,6 +84,7 @@ pub trait Plugin {
 }
 
 pub const AVAILABLE: &[&str] = &[
+    "duplicates",
     "embedart",
     "fetchart",
     "info",
@@ -124,6 +126,7 @@ pub fn load(cfg: &Config) -> Result<Vec<Box<dyn Plugin>>> {
             "lyrics" => out.push(Box::new(lyrics::LyricsPlugin::new(cfg))),
             "embedart" => out.push(Box::new(embedart::EmbedArt::new(cfg))),
             "info" => out.push(Box::new(info::InfoPlugin)),
+            "duplicates" => out.push(Box::new(duplicates::DuplicatesPlugin)),
             "missing" => out.push(Box::new(missing::MissingPlugin)),
             // The autotagger's metadata source, as in beets 2.14: it's
             // queried only while this plugin is enabled.

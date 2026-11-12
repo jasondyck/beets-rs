@@ -243,6 +243,23 @@ lastgenre:
     ignorelist: {}
     aliases: yes
 
+duplicates:
+    album: no
+    checksum: ''
+    copy: ''
+    count: no
+    delete: no
+    format: ''
+    full: no
+    keys: []
+    merge: no
+    move: ''
+    path: no
+    tiebreak: {}
+    strict: no
+    tag: ''
+    remove: no
+
 missing:
     count: no
     total: no
@@ -312,7 +329,14 @@ pub const REDACTED_KEYS: &[(&str, &str)] = &[
 /// Plugins whose default settings are in `DEFAULT_CONFIG`: beets adds a
 /// plugin's defaults when it loads, so `beet config` shows them for the
 /// enabled ones.
-const PLUGIN_SECTIONS: &[&str] = &["fetchart", "embedart", "lyrics", "lastgenre", "missing"];
+const PLUGIN_SECTIONS: &[&str] = &[
+    "fetchart",
+    "embedart",
+    "lyrics",
+    "lastgenre",
+    "missing",
+    "duplicates",
+];
 
 /// confuse's `ConfigReadError`: "PATH could not be read: REASON".
 fn read_yaml(file: &Path) -> Result<Y> {

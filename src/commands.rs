@@ -500,6 +500,48 @@ pub fn run(cli: Cli) -> Result<()> {
                 },
             )
         }
+        Cmd::Duplicates {
+            count,
+            checksum,
+            delete,
+            full,
+            strict,
+            keys,
+            merge,
+            move_to,
+            copy_to,
+            tag,
+            remove,
+            album,
+            path,
+            format,
+            limit,
+            query,
+        } => {
+            require_plugin(&cfg, "duplicates")?;
+            plugins::duplicates::command(
+                &cfg,
+                &lib,
+                plugins::duplicates::CmdOpts {
+                    count,
+                    checksum,
+                    delete,
+                    full,
+                    strict,
+                    keys,
+                    merge,
+                    move_to,
+                    copy_to,
+                    tag,
+                    remove,
+                    album,
+                    path,
+                    format,
+                    limit,
+                    query,
+                },
+            )
+        }
         Cmd::Missing {
             count,
             total,
@@ -982,6 +1024,80 @@ fn modify(cfg: &Config, lib: &Library, opts: ModifyOpts, args: &[String]) -> Res
     Ok(())
 }
 
+/// beets' `Album.store(inherit=True)` after changing `old` into `new`: the
+/// album, then its items with the changed fields (fixed and flexible).
+pub(crate) fn store_album_inherit(lib: &Library, old: &Album, new: &Album) -> Result<()> {
+    lib.store(new)?;
+    let fields = model_changes_fields(old, new);
+    if fields.is_empty() {
+        return Ok(());
+    }
+    for mut item in lib.album_items(new.id.unwrap())? {
+        for f in &fields {
+            match new.get(f) {
+                Some(v) => item.set(f, v),
+                None => {
+                    item.remove_flex(f);
+                }
+            }
+        }
+        lib.store(&item)?;
+    }
+    Ok(())
+}
+
+/// beets' `Item.move` / `Album.move` of one stored model with `op`, under
+/// `basedir` (None: the library directory), stored afterwards; album art
+/// follows as in `beet move`.
+pub(crate) fn move_model(
+    cfg: &Config,
+    lib: &Library,
+    rec: &Record,
+    op: FileOp,
+    basedir: Option<&Path>,
+) -> Result<()> {
+    let mut dcfg = cfg.clone();
+    if let Some(d) = basedir {
+        let d = crate::query::normpath(d);
+        dcfg.set("directory", Y::String(d.to_string_lossy().into()));
+    }
+    let fmt = PathFormatter::new(&dcfg)?;
+    let obj = match rec.kind {
+        Kind::Album => {
+            let items = lib.album_items(rec.id.unwrap())?;
+            // Made unique when moved (`move_item_file`), as beets.
+            let dests = items
+                .iter()
+                .map(|i| fmt.destination(i, Some(rec), Some(lib)))
+                .collect();
+            MoveObj {
+                album: Some(rec.clone()),
+                items,
+                dests,
+            }
+        }
+        Kind::Item => {
+            let album = lib.get_album(rec.int("album_id"))?;
+            let dest = fmt.destination(rec, album.as_ref(), Some(lib));
+            MoveObj {
+                album,
+                items: vec![rec.clone()],
+                dests: vec![dest],
+            }
+        }
+    };
+    move_obj(cfg, lib, obj, op, true, rec.kind == Kind::Album)
+}
+
+/// beets' `Item.remove(delete, with_album=True)` /
+/// `Album.remove(delete, with_items=True)`.
+pub(crate) fn remove_model(cfg: &Config, lib: &Library, rec: &Record, delete: bool) -> Result<()> {
+    match rec.kind {
+        Kind::Item => remove_item(cfg, lib, rec, delete, true),
+        Kind::Album => remove_album(cfg, lib, rec, delete, true),
+    }
+}
+
 /// The album fields an inheriting store passes to the items: every changed
 /// field except `artpath` and `id`.
 fn model_changes_fields(old: &Album, new: &Album) -> Vec<String> {
@@ -1420,7 +1536,16 @@ fn move_item_file(cfg: &Config, item: &mut Item, dest: &Path, op: FileOp) -> Res
         eprintln!("{what}: file not found at {}, skipping", src.display());
         return Ok(false);
     }
-    let dest = fileops::unique_path_for(dest, Some(&src));
+    // beets' `move_file`: a unique path unless `dest` is the file itself.
+    // A move may keep the file's own `.N` name (see `unique_path_for`); a
+    // copy leaves the source in place, so it's never free.
+    let dest = if dest == src {
+        src.clone()
+    } else if op == FileOp::Move {
+        fileops::unique_path_for(dest, Some(&src))
+    } else {
+        fileops::unique_path(dest)
+    };
     if src == dest {
         return Ok(true);
     }
