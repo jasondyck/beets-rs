@@ -36,6 +36,7 @@ config`, plugins fetchart / lyrics / embedart, release preferences.
 - [x] **2.4 update / write / remove**: `update -F/--field`, `-a`; `write -f/--force`; `remove` confirmation listing as in beets
 - [x] **2.5 config**: `config -e/--edit` (`$VISUAL`/`$EDITOR`), `--clear`; `include:` files; `config -p` with `$BEETSRSDIR`; `-c/--config` should layer on top of the user config (repeatable) as in beets, not replace it
 - [x] **2.6 ui**: `ui.color`, `ui.colors`, change-display highlighting as in beets, `terminal_width`, `ui.length_diff_thresh`
+- [ ] **2.7 config dump format**: `beet config` / `config -d` output as confuse prints it (4-space indent, inline lists, empty values instead of `null`, comments copied from the defaults)
 
 ## 3. Core: queries, templates, library
 
@@ -55,7 +56,7 @@ config`, plugins fetchart / lyrics / embedart, release preferences.
 Done: fetchart (filesystem + CAA), lyrics (LRCLIB), embedart.
 
 - [x] **5.0 lyrics plugin parity with beets 2.14**: all backends 2.14 ships (lrclib, genius, tekstowo, musixmatch, google if present), `sources`, `synced`, `translate`, `keep_synced`, `dist_thresh`, `force`, `print`, `-l/-r` options; instrumental tracks as `lyrics=''` + `lyrics_instrumental=1`, `lyrics_backend`/`lyrics_url` flex fields (we still store `[Instrumental]` text, and new DBs mark the instrumental migration as done); back up before every unrecorded migration as beets does, not only data-changing ones
-- [ ] **5.1 fetchart/embedart completion**: image resizing (`maxwidth`, `quality`, `max_filesize`), `minwidth`, `enforce_ratio`, `cautious`, `cover_format`, `store_source`; more sources (itunes, amazon, albumart, wikipedia, fanarttv, lastfm); embedart `maxwidth`, `compare_threshold`
+- [x] **5.1 fetchart/embedart completion**: image resizing (`maxwidth`, `quality`, `max_filesize`), `minwidth`, `enforce_ratio`, `cautious`, `cover_format`, `store_source`; more sources (itunes, amazon, albumart, wikipedia, fanarttv, lastfm); embedart `maxwidth`, `compare_threshold`
 - [ ] **5.2 lastgenre**: Last.fm genre lookup with whitelist/canonicalization tree, `count`, `source`, `fallback`, `force`, `-a/-s`
 - [ ] **5.3 chroma**: AcoustID fingerprinting via `fpcalc` (shell out), as an extra candidate source in import; `beet fingerprint`, `beet submit`
 - [ ] **5.4 replaygain**: ffmpeg backend (track + album gain, R128 for Opus), `beet replaygain [-a] [-f]`, `auto`, `targetlevel`, `overwrite`

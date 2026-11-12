@@ -2,6 +2,7 @@
 //! beets-style `plugins:` config list. They hook into import and can add
 //! their own subcommands (wired up in `main.rs`/`commands.rs`).
 
+pub mod art;
 pub mod embedart;
 pub mod fetchart;
 pub mod lyrics;
@@ -12,21 +13,14 @@ use crate::fileops::FileOp;
 use crate::library::Library;
 use crate::model::{Album, Item};
 use anyhow::{Result, bail};
+use std::cell::Cell;
 use std::path::Path;
-use std::time::Duration;
 
 pub const USER_AGENT: &str = concat!(
     "beets-rs/",
     env!("CARGO_PKG_VERSION"),
     " ( https://github.com/beetbox/beets )"
 );
-
-pub fn http_agent() -> ureq::Agent {
-    ureq::AgentBuilder::new()
-        .user_agent(USER_AGENT)
-        .timeout(Duration::from_secs(30))
-        .build()
-}
 
 /// What a plugin gets to work with.
 #[allow(dead_code)] // `cfg` is for plugins that need their own settings at hook time
@@ -41,7 +35,8 @@ pub trait Plugin {
     fn name(&self) -> &'static str;
 
     /// Called after an album and its items are stored in the library.
-    /// `source_dir` is where the files came from; `op` is how they got here.
+    /// `source_dir` is where the files came from; `op` is how they got here;
+    /// `asis` says the album was imported as-is (not autotagged).
     fn album_imported(
         &self,
         _ctx: &PluginCtx,
@@ -49,6 +44,7 @@ pub trait Plugin {
         _items: &mut [Item],
         _source_dir: &Path,
         _op: FileOp,
+        _asis: bool,
     ) -> Result<()> {
         Ok(())
     }
@@ -79,7 +75,13 @@ pub fn load(cfg: &Config) -> Result<Vec<Box<dyn Plugin>>> {
     crate::logging::debug!("Loading plugins: {}", sorted.join(", "));
     for name in names {
         match name.as_str() {
-            "fetchart" => out.push(Box::new(fetchart::FetchArt::new(cfg))),
+            // beets' `_get_plugin`: a plugin that fails to set up is logged
+            // ("** error loading plugin", with the traceback in beets) and
+            // left out.
+            "fetchart" => match fetchart::FetchArt::new(cfg) {
+                Ok(p) => out.push(Box::new(p)),
+                Err(e) => crate::logging::emit(format!("** error loading plugin {name}\n{e:#}")),
+            },
             "lyrics" => out.push(Box::new(lyrics::LyricsPlugin::new(cfg))),
             "embedart" => out.push(Box::new(embedart::EmbedArt::new(cfg))),
             // The autotagger's metadata source, as in beets 2.14: it's
@@ -91,9 +93,9 @@ pub fn load(cfg: &Config) -> Result<Vec<Box<dyn Plugin>>> {
             ),
         }
     }
-    // embedart embeds whatever fetchart found, so it must run after it
-    // regardless of the order they're listed in.
-    out.sort_by_key(|p| p.name() == "embedart");
+    // Hooks run in the order the plugins are listed, as beets' listeners.
+    // (embedart embeds fetchart's art through the `art_set` event, not
+    // through its own import hook, so the two can come in either order.)
     Ok(out)
 }
 
@@ -107,5 +109,75 @@ pub fn each(plugins: &[Box<dyn Plugin>], mut f: impl FnMut(&dyn Plugin) -> Resul
         if let Err(e) = f(p.as_ref()) {
             eprintln!("warning: {}: {e:#}", p.name());
         }
+    }
+}
+
+/// beets' `art_set` event, sent when an album's art file is set: embedart
+/// (if enabled) embeds the new art into the album's files.
+pub fn send_art_set(ctx: &PluginCtx, album: &mut Album) {
+    if enabled(ctx.cfg, "embedart") {
+        let ea = embedart::EmbedArt::new(ctx.cfg);
+        if let Err(e) = ea.process_album(ctx, album) {
+            eprintln!("warning: embedart: {e:#}");
+        }
+    }
+}
+
+/// Python's logging levels.
+pub const DEBUG: u8 = 10;
+pub const INFO: u8 = 20;
+pub const WARNING: u8 = 30;
+pub const ERROR: u8 = 40;
+
+/// A plugin's logger, as beets' (`"name: message"` on stderr). Its base
+/// level is INFO while the plugin's own command runs and WARNING in import
+/// hooks and event listeners; each `-v` lowers it a level.
+pub struct PluginLog {
+    name: &'static str,
+    base_level: Cell<u8>,
+}
+
+impl PluginLog {
+    pub fn new(name: &'static str) -> Self {
+        PluginLog {
+            name,
+            base_level: Cell::new(INFO),
+        }
+    }
+
+    pub fn set_base_level(&self, level: u8) {
+        self.base_level.set(level);
+    }
+
+    /// Run `f` with the base level at `level`, restoring it afterwards.
+    pub fn at_level<R>(&self, level: u8, f: impl FnOnce() -> R) -> R {
+        let old = self.base_level.replace(level);
+        let r = f();
+        self.base_level.set(old);
+        r
+    }
+
+    pub fn log(&self, level: u8, msg: &str) {
+        let v = crate::logging::verbosity();
+        let threshold = self.base_level.get().saturating_sub(10 * v).max(DEBUG);
+        if level >= threshold {
+            crate::logging::emit(format!("{}: {msg}", self.name));
+        }
+    }
+
+    pub fn debug(&self, msg: &str) {
+        self.log(DEBUG, msg);
+    }
+
+    pub fn info(&self, msg: &str) {
+        self.log(INFO, msg);
+    }
+
+    pub fn warning(&self, msg: &str) {
+        self.log(WARNING, msg);
+    }
+
+    pub fn error(&self, msg: &str) {
+        self.log(ERROR, msg);
     }
 }

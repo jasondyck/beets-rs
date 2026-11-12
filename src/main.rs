@@ -1,3 +1,4 @@
+mod artresizer;
 mod autotag;
 mod commands;
 mod config;
@@ -327,44 +328,62 @@ pub enum Cmd {
         /// The beets library database (library.db)
         database: PathBuf,
     },
-    /// Fetch album art (plugin: fetchart)
+    /// Download album art (plugin: fetchart)
     Fetchart {
-        /// Re-fetch even if the album already has art
+        /// Re-download art when already present
         #[arg(short = 'f', long)]
         force: bool,
+        /// Quiet mode: do not output albums that already have artwork
+        #[arg(short = 'q', long)]
+        quiet: bool,
+        /// Limit query results
+        #[arg(short = 'l', long)]
+        limit: Option<usize>,
         #[arg(allow_hyphen_values = true)]
         query: Vec<String>,
     },
-    /// Embed album art into files (plugin: embedart)
+    /// Embed image files into file metadata (plugin: embedart)
     Embedart {
-        /// Embed this image instead of each album's art file
-        #[arg(short = 'f', long = "file")]
+        /// The image file to embed
+        #[arg(short = 'f', long = "file", value_name = "PATH")]
         file: Option<PathBuf>,
         /// Skip confirmation
         #[arg(short = 'y', long)]
         yes: bool,
+        /// The URL of the image file to embed
+        #[arg(short = 'u', long, value_name = "URL")]
+        url: Option<String>,
+        /// Limit query results
+        #[arg(short = 'l', long)]
+        limit: Option<usize>,
         #[arg(allow_hyphen_values = true)]
         query: Vec<String>,
     },
-    /// Extract embedded art to a file (plugin: embedart)
+    /// Extract an image from file metadata (plugin: embedart)
     Extractart {
-        /// Output path without extension (default: ./cover)
-        #[arg(short = 'o', long)]
-        output: Option<PathBuf>,
-        /// Base name for files written next to albums with -a (default: art_filename)
-        #[arg(short = 'n', long)]
-        name: Option<String>,
-        /// Extract each matching album's art into its folder and set it as the album art
-        #[arg(short = 'a', long)]
+        /// Image output file
+        #[arg(short = 'o', value_name = "OUTPATH")]
+        outpath: Option<PathBuf>,
+        /// Image filename to create for all matched albums
+        #[arg(short = 'n', value_name = "FILENAME")]
+        filename: Option<String>,
+        /// Associate the extracted images with the album
+        #[arg(short = 'a')]
         associate: bool,
+        /// Limit query results
+        #[arg(short = 'l', long)]
+        limit: Option<usize>,
         #[arg(allow_hyphen_values = true)]
         query: Vec<String>,
     },
-    /// Remove embedded art from files (plugin: embedart)
+    /// Remove images from file metadata (plugin: embedart)
     Clearart {
         /// Skip confirmation
         #[arg(short = 'y', long)]
         yes: bool,
+        /// Limit query results
+        #[arg(short = 'l', long)]
+        limit: Option<usize>,
         #[arg(allow_hyphen_values = true)]
         query: Vec<String>,
     },

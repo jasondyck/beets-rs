@@ -109,10 +109,16 @@ impl std::error::Error for HttpError {}
 #[derive(Debug)]
 pub struct Response {
     content_type: String,
+    pub status: u16,
     pub body: Vec<u8>,
 }
 
 impl Response {
+    /// The `Content-Type` header, if the server sent one.
+    pub fn content_type(&self) -> Option<&str> {
+        (!self.content_type.is_empty()).then_some(self.content_type.as_str())
+    }
+
     /// The body as text: requests' `r.text`, decoded with the charset the
     /// response declares, else (`force_utf8: false`, requests guessing)
     /// UTF-8 with Latin-1 as the fallback for invalid UTF-8.
@@ -148,6 +154,8 @@ pub struct Session {
     agent: ureq::Agent,
     /// For `allow_redirects=False`.
     no_redirects: ureq::Agent,
+    /// Retries and the shared rate limit (off for [`Session::plain`]).
+    retries: bool,
 }
 
 impl Default for Session {
@@ -166,9 +174,20 @@ pub struct Request<'a> {
 
 impl Session {
     pub fn new() -> Self {
+        Self::build(USER_AGENT, true)
+    }
+
+    /// A plain `requests.Session` as fetchart's `_logged_get` uses it: the
+    /// given User-Agent, a 10 s timeout, no retries, no rate limit, and no
+    /// `raise_for_status` (error responses come back as responses).
+    pub fn plain(user_agent: &str) -> Self {
+        Self::build(user_agent, false)
+    }
+
+    fn build(user_agent: &str, retries: bool) -> Self {
         let build = |redirects| {
             ureq::AgentBuilder::new()
-                .user_agent(USER_AGENT)
+                .user_agent(user_agent)
                 .timeout(TIMEOUT)
                 .redirects(redirects)
                 .build()
@@ -176,6 +195,22 @@ impl Session {
         Session {
             agent: build(5),
             no_redirects: build(0),
+            retries,
+        }
+    }
+
+    /// GET without `raise_for_status`: any response the server sends is
+    /// returned (see `Response::status`); only transport failures (and
+    /// exhausted retries) are errors.
+    pub fn get_any(&self, url: &str, req: Request) -> Result<Response, HttpError> {
+        match self.request("GET", url, req) {
+            Ok(r) => Ok(r),
+            Err(HttpError::Status { code, body, .. }) => Ok(Response {
+                content_type: String::new(),
+                status: code,
+                body,
+            }),
+            Err(e) => Err(e),
         }
     }
 
@@ -200,7 +235,9 @@ impl Session {
         };
         let mut errors = 0u32;
         loop {
-            Self::wait_for_rate_limit();
+            if self.retries {
+                Self::wait_for_rate_limit();
+            }
             let mut r = agent.request(method, url);
             for (k, v) in req.headers {
                 r = r.set(k, v);
@@ -211,6 +248,8 @@ impl Session {
             };
             let retry_cause = match result {
                 Ok(resp) => return Ok(read(resp)),
+                // A plain session hands every response back, as `requests`.
+                Err(ureq::Error::Status(_, resp)) if !self.retries => return Ok(read(resp)),
                 Err(ureq::Error::Status(code, resp)) => {
                     if !RETRY_STATUSES.contains(&code) {
                         let resp = read(resp);
@@ -221,6 +260,9 @@ impl Session {
                         });
                     }
                     format!("ResponseError('too many {code} error responses')")
+                }
+                Err(ureq::Error::Transport(t)) if !self.retries => {
+                    return Err(HttpError::Request(t.to_string()));
                 }
                 Err(ureq::Error::Transport(t)) => format!("{t}"),
             };
@@ -244,9 +286,14 @@ impl Session {
 fn read(resp: ureq::Response) -> Response {
     use std::io::Read;
     let content_type = resp.header("content-type").unwrap_or_default().to_string();
+    let status = resp.status();
     let mut body = vec![];
     let _ = resp.into_reader().take(64 << 20).read_to_end(&mut body);
-    Response { content_type, body }
+    Response {
+        content_type,
+        status,
+        body,
+    }
 }
 
 /// urllib3's `MaxRetryError` message, as requests reports it.

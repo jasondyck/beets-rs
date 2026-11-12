@@ -542,6 +542,17 @@ pub fn select_objects_all<T: Clone>(
     }
 }
 
+/// beets' `input_yn`: "y" or "n", defaulting to yes unless `require`.
+/// False at end of input.
+pub fn input_yn(prompt: &str, require: bool) -> bool {
+    let fallback = format!(
+        "{}{}",
+        colorize("action", "\u{279c} "),
+        colorize("action_description", "Enter Y or N:")
+    );
+    input_options(&['y', 'n'], require, prompt, &fallback) == Some('y')
+}
+
 pub fn yes_no(prompt: &str) -> bool {
     loop {
         match read_line(&format!("{prompt} (yes/no)? "))

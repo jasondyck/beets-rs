@@ -554,6 +554,7 @@ impl Plugin for LyricsPlugin {
         items: &mut [Item],
         _source_dir: &Path,
         _op: FileOp,
+        _asis: bool,
     ) -> Result<()> {
         if self.conf.auto {
             self.imported(ctx, items)?;

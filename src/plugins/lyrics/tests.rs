@@ -403,6 +403,7 @@ fn imported_skips_auto_ignored_items() {
         &mut items,
         Path::new("/"),
         FileOp::Copy,
+        false,
     )
     .unwrap();
     assert_eq!(items[0].str("lyrics"), "");

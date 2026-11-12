@@ -4,7 +4,9 @@ use crate::mediafile::{Got, MediaFile};
 use crate::model::{Item, Value};
 use anyhow::{Context, Result};
 use lofty::file::{AudioFile, FileType, TaggedFileExt};
-use lofty::picture::{MimeType, Picture, PictureType};
+#[cfg(test)]
+use lofty::picture::MimeType;
+use lofty::picture::{Picture, PictureType};
 use std::path::Path;
 
 pub const AUDIO_EXTENSIONS: &[&str] = &[
@@ -219,6 +221,7 @@ pub fn refresh_mtime(item: &mut Item) {
 
 /// Embed an image as the front cover, replacing any existing front cover
 /// (in the tag MediaFile uses, keeping every other tag as it is).
+#[cfg(test)]
 pub fn embed_art(path: &Path, image: &[u8]) -> Result<()> {
     let pic = Picture::from_reader(&mut &image[..])
         .map_err(|e| anyhow::anyhow!("not a usable image: {e}"))?;
@@ -234,6 +237,7 @@ pub fn has_art(path: &Path) -> Result<bool> {
 }
 
 /// The embedded front cover (or else the first picture) and a file extension for it.
+#[cfg(test)]
 pub fn extract_art(path: &Path) -> Result<Option<(Vec<u8>, &'static str)>> {
     let pics = MediaFile::open(path)?.pictures();
     let Some(pic) = pics
@@ -253,8 +257,40 @@ pub fn extract_art(path: &Path) -> Result<Option<(Vec<u8>, &'static str)>> {
     Ok(Some((pic.data().to_vec(), ext)))
 }
 
+/// beets' `item.try_write(tags={"images": ...})`: the item's tags, with the
+/// file's pictures replaced by `image` as the only (front cover) picture,
+/// or removed for `None`.
+pub fn write_with_images(item: &Item, image: Option<&[u8]>) -> Result<()> {
+    let pic = match image {
+        Some(data) => Some(
+            Picture::from_reader(&mut &data[..])
+                .map_err(|e| anyhow::anyhow!("not a usable image: {e}"))?,
+        ),
+        None => None,
+    };
+    let mut mf = MediaFile::open(item.path())?;
+    mf.update(item);
+    mf.clear_pictures();
+    if let Some(pic) = pic {
+        mf.set_front_cover(pic);
+    }
+    mf.save(id3v23())
+}
+
+/// The embedded pictures' data (MediaFile's `art`: the front cover, else
+/// the first picture), or `None` if there are none.
+pub fn get_art(path: &Path) -> Result<Option<Vec<u8>>> {
+    let pics = MediaFile::open(path)?.pictures();
+    Ok(pics
+        .iter()
+        .find(|p| p.pic_type() == PictureType::CoverFront)
+        .or(pics.first())
+        .map(|p| p.data().to_vec()))
+}
+
 /// Remove every embedded picture (from the tag MediaFile uses). Returns
 /// whether anything was removed.
+#[cfg(test)]
 pub fn clear_art(path: &Path) -> Result<bool> {
     let mut mf = MediaFile::open(path)?;
     let removed = mf.clear_pictures();

@@ -173,14 +173,33 @@ plugins: [musicbrainz]
 
 fetchart:
     auto: yes
-    sources: filesystem coverart
-    cover_names: cover front art album folder
+    fetch_for_asis: no
+    minwidth: 0
     maxwidth: 0
+    quality: 0
+    max_filesize: 0
+    enforce_ratio: no
+    cautious: no
+    cover_names: [cover, front, art, album, folder]
+    fallback: null
+    sources: [filesystem, coverart, itunes, amazon, albumart, cover_art_url]
+    store_source: no
+    high_resolution: no
+    deinterlace: no
+    cover_format: null
+    google_key: null
+    google_engine: '001442825323518660753:hrh5ch1gjzm'
+    lastfm_key: null
+    fanarttv_key: null
 
 embedart:
+    maxwidth: 0
     auto: yes
+    compare_threshold: 0
     ifempty: no
     remove_art_file: no
+    quality: 0
+    clearart_on_import: no
 
 lyrics:
     auto: yes
@@ -642,7 +661,17 @@ mod tests {
         assert_eq!(c.library_path(), dir.path().join("library.db"));
         assert_eq!(c.f64("match.strong_rec_thresh"), 0.04);
         assert_eq!(c.list("plugins"), ["musicbrainz"]);
-        assert_eq!(c.list("fetchart.sources"), vec!["filesystem", "coverart"]);
+        assert_eq!(
+            c.list("fetchart.sources"),
+            vec![
+                "filesystem",
+                "coverart",
+                "itunes",
+                "amazon",
+                "albumart",
+                "cover_art_url"
+            ]
+        );
     }
 
     fn write(p: &Path, text: &str) {
@@ -747,7 +776,7 @@ mod tests {
         assert_eq!(y["fetchart"]["fanarttv_key"], Y::from("REDACTED"));
         assert_eq!(
             y["fetchart"]["cover_names"],
-            Y::from("cover front art album folder"),
+            serde_yaml::from_str::<Y>("[cover, front, art, album, folder]").unwrap(),
             "an enabled plugin's defaults show"
         );
         // lyrics isn't enabled, so its keys aren't marked for redaction.

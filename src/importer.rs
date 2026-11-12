@@ -1891,7 +1891,7 @@ impl<'a> Importer<'a> {
         let ctx = self.plugin_ctx();
         let op = self.opts.op;
         plugins::each(self.plugins, |p| {
-            p.album_imported(&ctx, &mut album, &mut items, source_dir, op)
+            p.album_imported(&ctx, &mut album, &mut items, source_dir, op, !tagged)
         });
         self.delete_originals(&copied);
         if op == FileOp::Move

@@ -39,6 +39,7 @@ RS_BEET = os.path.join(REPO, "target", "release", "beet")
 sys.dont_write_bytecode = True  # no __pycache__ in the repo
 sys.path.insert(0, HERE)
 from cases import (  # noqa: E402
+    ART_CASES,
     CONFIG,
     ROOT,
     CORPUS,
@@ -54,6 +55,7 @@ from cases import (  # noqa: E402
     cases,
 )
 import importphase  # noqa: E402
+import artphase  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Corpus generation
@@ -299,6 +301,28 @@ def import_cases(work, ref, rs, opts):
 
 
 # ---------------------------------------------------------------------------
+# fetchart and embedart
+
+
+def art_cases(work, ref, rs, opts):
+    """Results of the art phase (see artphase.py)."""
+    src = os.path.join(work, "art-src")
+    artphase.build_art_corpus(src, ffmpeg)
+
+    def norm(tool, text, root):
+        return normalise(tool, text.replace(root, "<ROOT>"))
+
+    todo = [c for c in ART_CASES
+            if not opts.only or any(o in f"art:{c[0]}" or o.startswith("art:" + c[0])
+                                    for o in opts.only)]
+    with artphase.ArtServer(src) as server:
+        with concurrent.futures.ThreadPoolExecutor(opts.jobs) as pool:
+            batches = pool.map(
+                lambda c: artphase.run_art_case(work, c, (ref, rs), norm, server.url), todo)
+            return [r for batch in batches for r in batch]
+
+
+# ---------------------------------------------------------------------------
 # Migration from a beets library
 
 
@@ -452,6 +476,15 @@ def main():
             ]
             seen.update(r[0] for r in import_results)
             results += import_results
+
+        if not opts.only or any(o.startswith("art") or o in "art:" for o in opts.only):
+            print("art phase...", flush=True)
+            art_results = [
+                r for r in art_cases(work, ref, rs, opts)
+                if not opts.only or any(o in r[0] for o in opts.only)
+            ]
+            seen.update(r[0] for r in art_results)
+            results += art_results
 
         counts = {"PASS": 0, "DIFF": 0, "EXPECTED": 0, "FIXED?": 0}
         for cid, args, r, s in results:
