@@ -12,6 +12,7 @@ pub mod ftintitle;
 pub mod info;
 pub mod lastgenre;
 pub mod lyrics;
+pub mod mbsync;
 pub mod missing;
 pub mod replaygain;
 pub mod requests;
@@ -110,6 +111,7 @@ pub const AVAILABLE: &[&str] = &[
     "info",
     "lastgenre",
     "lyrics",
+    "mbsync",
     "missing",
     "musicbrainz",
     "replaygain",
@@ -157,6 +159,7 @@ pub fn load(cfg: &Config) -> Result<Vec<Box<dyn Plugin>>> {
             "scrub" => out.push(Box::new(scrub::Scrub::new(cfg))),
             "convert" => out.push(Box::new(convert::ConvertPlugin::new())),
             "missing" => out.push(Box::new(missing::MissingPlugin)),
+            "mbsync" => out.push(Box::new(mbsync::MbsyncPlugin)),
             "replaygain" => match replaygain::ReplayGain::new(cfg) {
                 Ok(p) => out.push(Box::new(p)),
                 Err(e) => crate::logging::emit(format!("** error loading plugin {name}\n{e:#}")),

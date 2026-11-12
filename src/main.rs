@@ -544,6 +544,29 @@ pub enum Cmd {
         #[arg(allow_hyphen_values = true)]
         query: Vec<String>,
     },
+    /// Update metadata from musicbrainz (plugin: mbsync)
+    Mbsync {
+        /// Show all changes but do nothing
+        #[arg(short = 'p', long)]
+        pretend: bool,
+        /// Move files in the library directory
+        #[arg(short = 'm', long = "move", overrides_with = "nomove")]
+        mv: bool,
+        /// Don't move files in library
+        #[arg(short = 'M', long = "nomove", overrides_with = "mv")]
+        nomove: bool,
+        /// Don't write updated metadata to files
+        #[arg(short = 'W', long = "nowrite")]
+        nowrite: bool,
+        /// Print with custom format
+        #[arg(short = 'f', long)]
+        format: Option<String>,
+        /// Limit query results
+        #[arg(short = 'l', long)]
+        limit: Option<usize>,
+        #[arg(allow_hyphen_values = true)]
+        query: Vec<String>,
+    },
     /// List missing tracks (plugin: missing)
     #[command(visible_alias = "miss")]
     Missing {

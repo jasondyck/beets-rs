@@ -260,24 +260,31 @@ musicbrainz:
 
 
 def run_import_case(work, case, tools, normalise):
-    """Results [(cid, args, ref outcome, rs outcome)] for one case."""
-    name, music, args, extra, answers = case
+    """Results [(cid, args, ref outcome, rs outcome)] for one case. A case
+    may have a sixth element: `beet` commands run after the import (e.g.
+    mbsync), each compared as `import:<case>:<n>`; the ls, db and requests
+    outcomes are then taken after them."""
+    name, music, args, extra, answers, *rest = case
+    after = rest[0] if rest else []
     outcomes = {}
     for tool in tools:
         with FakeMusicBrainz() as mb:
             outcomes[tool.name] = run_one(work, name, music, args, extra, answers,
-                                          tool, mb, normalise)
+                                          tool, mb, normalise, after)
     shown = ["import", *args, f"<{music}>"]
-    (r, rls, rdb, rreq), (s, sls, sdb, sreq) = outcomes["ref"], outcomes["rs"]
+    (r, rls, rdb, rreq, rafter) = outcomes["ref"]
+    (s, sls, sdb, sreq, safter) = outcomes["rs"]
     return [
         (f"import:{name}", shown, r, s),
+        *[(f"import:{name}:{n}", step, ra, sa)
+          for n, (step, ra, sa) in enumerate(zip(after, rafter, safter), 1)],
         (f"import:{name}:ls", ["ls", "(items, albums)"], rls, sls),
         (f"import:{name}:db", ["(library.db)"], rdb, sdb),
         (f"import:{name}:requests", ["(MusicBrainz requests)"], rreq, sreq),
     ]
 
 
-def run_one(work, name, music, args, extra, answers, tool, mb, normalise):
+def run_one(work, name, music, args, extra, answers, tool, mb, normalise, after=()):
     """One tool's import for a case: (import, ls, db, requests) outcomes."""
     root = os.path.join(work, "import", name, tool.name)
     os.makedirs(root)
@@ -307,6 +314,14 @@ def run_one(work, name, music, args, extra, answers, tool, mb, normalise):
     res = {"code": 0 if code == 0 else 1,
            "out": normalise(tool, out, root),
            "err": normalise(tool, err, root)}
+    after_res = []
+    for step in after:
+        p = subprocess.run([tool.beet, *[a.format(root=root) for a in step]], env=env,
+                           cwd=root, capture_output=True, text=True, timeout=60,
+                           stdin=subprocess.DEVNULL)
+        after_res.append({"code": 0 if p.returncode == 0 else 1,
+                          "out": normalise(tool, p.stdout, root),
+                          "err": normalise(tool, p.stderr, root)})
     ls = []
     for ls_args in (
         ["ls", "-f", "$albumartist|$album|$track|$title|$mb_trackid|$data_source|$path"],
@@ -319,4 +334,5 @@ def run_one(work, name, music, args, extra, answers, tool, mb, normalise):
                  lambda t: normalise(tool, t, root))
     reqs = "\n".join(mb.requests)
     return (res, {"code": 0, "out": "\n".join(ls), "err": ""},
-            {"code": 0, "out": db, "err": ""}, {"code": 0, "out": reqs, "err": ""})
+            {"code": 0, "out": db, "err": ""}, {"code": 0, "out": reqs, "err": ""},
+            after_res)
