@@ -454,6 +454,44 @@ pub fn run(cli: Cli) -> Result<()> {
             require_plugin(&cfg, "ftintitle")?;
             plugins::ftintitle::command(&cfg, &lib, drop, limit, &query)
         }
+        Cmd::Convert {
+            pretend,
+            threads,
+            refresh,
+            keep_new,
+            dest,
+            format,
+            yes,
+            link,
+            hardlink,
+            playlist,
+            force,
+            album,
+            limit,
+            query,
+        } => {
+            require_plugin(&cfg, "convert")?;
+            plugins::convert::command(
+                &cfg,
+                &lib,
+                plugins::convert::CmdOpts {
+                    pretend,
+                    threads,
+                    refresh,
+                    keep_new,
+                    dest,
+                    format,
+                    yes,
+                    link,
+                    hardlink,
+                    playlist,
+                    force,
+                    album,
+                    limit,
+                    query,
+                },
+            )
+        }
         Cmd::Scrub {
             nowrite,
             limit,

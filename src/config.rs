@@ -330,6 +330,44 @@ ftintitle:
 scrub:
     auto: yes
 
+convert:
+    dest:
+    pretend: no
+    link: no
+    hardlink: no
+    threads: CPU_COUNT
+    format: mp3
+    id3v23: inherit
+    write_metadata: yes
+    formats:
+        aac:
+            command: ffmpeg -i $source -y -vn -acodec aac -aq 1 $dest
+            extension: m4a
+        alac:
+            command: ffmpeg -i $source -y -vn -acodec alac $dest
+            extension: m4a
+        flac: ffmpeg -i $source -y -vn -acodec flac $dest
+        mp3: ffmpeg -i $source -y -vn -aq 2 $dest
+        opus: ffmpeg -i $source -y -vn -acodec libopus -ab 96k $dest
+        ogg: ffmpeg -i $source -y -vn -acodec libvorbis -aq 3 $dest
+        wma: ffmpeg -i $source -y -vn -acodec wmav2 -vn $dest
+    max_bitrate:
+    auto: no
+    auto_keep: no
+    tmpdir:
+    quiet: no
+    embed: yes
+    paths: {}
+    no_convert: ''
+    never_convert_lossy_files: no
+    copy_album_art: no
+    album_art_maxwidth: 0
+    delete_originals: no
+    playlist:
+    force: no
+    refresh: no
+    keep_new: no
+
 musicbrainz:
     host: musicbrainz.org
     https: no
@@ -407,6 +445,7 @@ const PLUGIN_SECTIONS: &[&str] = &[
     "replaygain",
     "duplicates",
     "scrub",
+    "convert",
 ];
 
 /// `DEFAULT_CONFIG` parsed, with the defaults computed at run time

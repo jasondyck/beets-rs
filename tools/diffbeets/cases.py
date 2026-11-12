@@ -1601,3 +1601,76 @@ ART_CASES += [
      [_IMP, ["modify", "-y", "title:One", "mydate=1999-01-01"],
       ["ls", "-f", "$title $mydate", "mydate:..1999-07"]]),
 ]
+
+# convert: real ffmpeg on `conv` (a FLAC and an Ogg track); state: the
+# converted files' format, tags, embedded art and link targets, playlists.
+_CV_CFG = ("{{plugins: [convert], convert: {{dest: '{root}/out', threads: 1, "
+           "tmpdir: '{root}'" + "{extra}}}}}")
+_CV_LS = ["ls", "-f", "$path $format"]
+
+
+def _cv(extra=""):
+    return _CV_CFG.replace("{extra}", (", " + extra) if extra else "")
+
+
+_CV_IMP = ["import", "-A", "-q", "{music}"]
+# One file per import: beets' import pipeline prints every task's path
+# before the stages' messages.
+_CV_SINGLES = [["import", "-A", "-q", "-s", "{music}/01.flac"],
+               ["import", "-A", "-q", "-s", "{music}/02.ogg"]]
+ART_CASES += [
+    ("convert-basic", "conv", {}, _cv(),
+     [_CV_IMP, (["convert"], "n\n"), (["convert"], "y\n"), ["convert", "-y"], _CV_LS]),
+    ("convert-pretend-playlist", "conv", {}, _cv(),
+     [_CV_IMP, ["convert", "-p", "-m", "pl.m3u"], ["convert", "-y", "-m", "sub/pl.m3u8"]]),
+    ("convert-format-link", "conv", {}, _cv(),
+     [_CV_IMP, ["convert", "-y", "-f", "ogg", "-l"], ["convert", "-y", "-f", "vorbis",
+                                                      "-d", "{root}/out/v", "title:Dos"]]),
+    ("convert-hardlink", "conv", {}, _cv(),
+     [_CV_IMP, ["convert", "-y", "-f", "FLAC", "-H", "-l"]]),
+    ("convert-keep-new", "conv", {}, _cv(),
+     [_CV_IMP, ["convert", "-y", "-k", "-f", "ogg"], _CV_LS,
+      ["convert", "-y", "-k", "-p", "-f", "opus"]]),
+    ("convert-album-art", "conv", {"cover.jpg": "sq300.jpg"},
+     "{{plugins: [fetchart, convert], convert: {{dest: '{root}/out', threads: 1, "
+     "copy_album_art: yes, album_art_maxwidth: 100}}}}",
+     [_CV_IMP, ["convert", "-y", "-a", "-p"], ["convert", "-y", "-a"], ["convert", "-y", "-a"]]),
+    ("convert-album-art-copy", "conv", {"cover.jpg": "small.jpg"},
+     "{{plugins: [fetchart, convert], art_filename: 'folder', convert: {{dest: '{root}/out', "
+     "threads: 1, copy_album_art: yes, embed: no, album_art_maxwidth: 100}}}}",
+     [_CV_IMP, ["convert", "-y", "-a", "-p", "-l"], ["convert", "-y", "-a", "-l"]]),
+    ("convert-no-convert", "conv", {}, _cv("no_convert: 'format:OGG , title:Uno'"),
+     [_CV_IMP, ["convert", "-y"], ["convert", "-y", "-F", "-d", "{root}/out/f"]]),
+    ("convert-never-lossy", "conv", {}, _cv("never_convert_lossy_files: yes, format: opus"),
+     [_CV_IMP, ["convert", "-y"]]),
+    ("convert-max-bitrate", "conv", {}, _cv("max_bitrate: 1, format: ogg"),
+     [_CV_IMP, ["convert", "-y", "-m", "pl.m3u", "--limit", "1"], ["convert", "-y"]]),
+    ("convert-paths", "conv", {},
+     _cv("paths: {{default: '$album/$track-$title', 'format:OGG': 'ogg/$title'}}"),
+     [_CV_IMP, ["convert", "-y", "-m", "lists/all.m3u"]]),
+    ("convert-command-shortcut", "conv", {},
+     _cv("command: 'ffmpeg -i $source -y -vn -acodec libvorbis \"$dest\"', extension: oga"),
+     [_CV_IMP, ["convert", "-y", "-f", "flac"]]),
+    ("convert-errors", "conv", {},
+     _cv("formats: {{bad: {{extension: x}}, fail: {{command: 'false $source $dest', "
+         "extension: fl}}, gone: 'no-such-encoder-xyz $source $dest'}}"),
+     [_CV_IMP, ["convert", "-y", "-f", "xyz"], ["convert", "-y", "-f", "bad"],
+      ["convert", "-y", "-f", "fail"], ["convert", "-y", "-f", "gone", "title:Uno"],
+      ["convert", "-y", "nomatch"], ["convert", "-y", "-t", "0"]]),
+    ("convert-no-dest", "conv", {}, "{{plugins: [convert]}}",
+     [_CV_IMP, ["convert", "-y"], ["convert", "-p", "nomatch"]]),
+    ("convert-write-metadata-off", "conv", {}, _cv("write_metadata: no, id3v23: yes"),
+     [_CV_IMP, ["modify", "-y", "title=Changed"], ["convert", "-y"]]),
+    ("convert-id3v23", "conv", {}, _cv("id3v23: yes"),
+     [_CV_IMP, ["modify", "-y", "title:Dos", "title=Changed"], ["convert", "-y"]]),
+    # On import (singletons: beets converts an album's items in parallel,
+    # so their messages come in any order).
+    ("convert-auto", "conv", {}, _cv("auto: yes"), [*_CV_SINGLES, _CV_LS]),
+    ("convert-auto-delete", "conv", {}, _cv("auto: yes, delete_originals: yes, format: ogg"),
+     [*_CV_SINGLES, _CV_LS]),
+    ("convert-auto-move", "conv", {},
+     "{{plugins: [convert], import: {{copy: no, move: yes}}, convert: {{dest: '{root}/out', "
+     "threads: 1, auto: yes, quiet: yes, tmpdir: '{root}'}}}}", [*_CV_SINGLES, _CV_LS]),
+    ("convert-auto-fail", "conv", {}, _cv("auto: yes, command: 'false'"), [*_CV_SINGLES, _CV_LS]),
+    ("convert-auto-keep", "conv", {}, _cv("auto_keep: yes"), [*_CV_SINGLES, _CV_LS]),
+]

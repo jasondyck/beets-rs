@@ -4,6 +4,7 @@
 
 pub mod art;
 pub mod chroma;
+pub mod convert;
 pub mod duplicates;
 pub mod embedart;
 pub mod fetchart;
@@ -112,6 +113,7 @@ pub const AVAILABLE: &[&str] = &[
     "missing",
     "musicbrainz",
     "replaygain",
+    "convert",
     "scrub",
     "the",
     "zero",
@@ -153,6 +155,7 @@ pub fn load(cfg: &Config) -> Result<Vec<Box<dyn Plugin>>> {
             "ftintitle" => out.push(Box::new(ftintitle::FtInTitle::new(cfg))),
             "duplicates" => out.push(Box::new(duplicates::DuplicatesPlugin)),
             "scrub" => out.push(Box::new(scrub::Scrub::new(cfg))),
+            "convert" => out.push(Box::new(convert::ConvertPlugin::new())),
             "missing" => out.push(Box::new(missing::MissingPlugin)),
             "replaygain" => match replaygain::ReplayGain::new(cfg) {
                 Ok(p) => out.push(Box::new(p)),

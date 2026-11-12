@@ -223,7 +223,7 @@ pub fn scaled_size(w: u32, h: u32, maxwidth: u32) -> (u32, u32) {
     (maxwidth, nh)
 }
 
-fn resize_to(
+pub fn resize_to(
     maxwidth: u32,
     path_in: &Path,
     path_out: &Path,
