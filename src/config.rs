@@ -189,12 +189,22 @@ lyrics:
 
 musicbrainz:
     host: musicbrainz.org
-    https: yes
+    https: no
     ratelimit: 1
-    ratelimit_interval: 1.0
-    searchlimit: 5
-    aliases_as_credits: no
+    ratelimit_interval: 1
+    search_limit: 5
     data_source_mismatch_penalty: 0.5
+    search_query_ascii: no
+    genres: no
+    genres_tag: genre
+    external_ids:
+        discogs: no
+        bandcamp: no
+        spotify: no
+        deezer: no
+        tidal: no
+    extra_tags: []
+    aliases_as_credits: no
 "#;
 
 #[derive(Debug, Clone)]

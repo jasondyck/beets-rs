@@ -6,6 +6,7 @@ mod display;
 mod duplicates;
 mod fileops;
 mod formatted;
+mod hooks;
 mod importer;
 mod layout;
 mod library;

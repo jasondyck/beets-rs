@@ -1406,7 +1406,7 @@ impl<'a> Importer<'a> {
                 graft = album_id;
             }
         }
-        self.finalize_album(applied, m.is_some(), dir, graft)?;
+        self.finalize_album(applied, m.as_ref().map(|m| &m.info), dir, graft)?;
         Ok(Outcome::Done)
     }
 
@@ -1830,10 +1830,11 @@ impl<'a> Importer<'a> {
     fn finalize_album(
         &mut self,
         mut items: Vec<Item>,
-        tagged: bool,
+        matched: Option<&crate::mb::AlbumInfo>,
         source_dir: &Path,
         graft: Option<i64>,
     ) -> Result<()> {
+        let tagged = matched.is_some();
         let n = items.len();
         let lib = self.lib;
         let mut moved_in_library = false;
@@ -1854,7 +1855,16 @@ impl<'a> Importer<'a> {
                     }
                     album
                 }
-                None => lib.add_album(&mut items)?,
+                None => {
+                    let mut album = lib.add_album(&mut items)?;
+                    // beets' `apply_album_metadata`: the album's own
+                    // fields (and flexible ones such as `media`).
+                    if let Some(info) = matched {
+                        autotag::apply_album_metadata(self.cfg, &mut album, &mut items, info);
+                        lib.store(&album)?;
+                    }
+                    album
+                }
             };
             self.reimport_metadata(Some(&mut album), &mut items, &replaced);
             if graft.is_some() {

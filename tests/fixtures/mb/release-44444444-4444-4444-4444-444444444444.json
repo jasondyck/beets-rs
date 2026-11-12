@@ -1,0 +1,517 @@
+{
+ "id": "44444444-4444-4444-4444-444444444444",
+ "title": "Duets Collection",
+ "status": "Promotion",
+ "status-id": "s",
+ "disambiguation": "promo",
+ "date": "2010-05",
+ "country": "XW",
+ "barcode": null,
+ "asin": null,
+ "quality": "normal",
+ "packaging": null,
+ "packaging-id": null,
+ "text-representation": {
+  "script": "Latn",
+  "language": "eng"
+ },
+ "artist-credit": [
+  {
+   "name": "A.",
+   "joinphrase": " & ",
+   "artist": {
+    "id": "aaaaaaaa-0000-0000-0000-000000000101",
+    "name": "Artist A",
+    "sort-name": "A, Artist",
+    "disambiguation": "",
+    "type": "Person",
+    "type-id": null,
+    "country": null,
+    "aliases": [
+     {
+      "name": "Künstler A",
+      "sort-name": "A, Künstler",
+      "locale": "de",
+      "primary": true,
+      "type": "Artist name",
+      "type-id": null,
+      "begin": null,
+      "end": null,
+      "ended": false
+     }
+    ]
+   }
+  },
+  {
+   "name": "Artist B",
+   "joinphrase": " vs. ",
+   "artist": {
+    "id": "aaaaaaaa-0000-0000-0000-000000000102",
+    "name": "Artist B",
+    "sort-name": "B, Artist",
+    "disambiguation": "",
+    "type": "Person",
+    "type-id": null,
+    "country": null,
+    "aliases": []
+   }
+  },
+  {
+   "name": "C",
+   "joinphrase": "",
+   "artist": {
+    "id": "aaaaaaaa-0000-0000-0000-000000000103",
+    "name": "Artist C",
+    "sort-name": "C, Artist",
+    "disambiguation": "",
+    "type": "Person",
+    "type-id": null,
+    "country": null,
+    "aliases": []
+   }
+  }
+ ],
+ "aliases": [],
+ "genres": [],
+ "tags": [],
+ "release-group": {
+  "id": "99999999-0000-0000-0000-000000000104",
+  "title": "Duets Collection",
+  "primary-type": "EP",
+  "primary-type-id": "p",
+  "secondary-types": [
+   "Remix"
+  ],
+  "secondary-type-ids": [
+   "s"
+  ],
+  "first-release-date": "2010-05",
+  "disambiguation": "",
+  "aliases": [],
+  "genres": [],
+  "tags": [],
+  "artist-credit": [
+   {
+    "name": "A.",
+    "joinphrase": " & ",
+    "artist": {
+     "id": "aaaaaaaa-0000-0000-0000-000000000101",
+     "name": "Artist A",
+     "sort-name": "A, Artist",
+     "disambiguation": "",
+     "type": "Person",
+     "type-id": null,
+     "country": null,
+     "aliases": [
+      {
+       "name": "Künstler A",
+       "sort-name": "A, Künstler",
+       "locale": "de",
+       "primary": true,
+       "type": "Artist name",
+       "type-id": null,
+       "begin": null,
+       "end": null,
+       "ended": false
+      }
+     ]
+    }
+   },
+   {
+    "name": "Artist B",
+    "joinphrase": " vs. ",
+    "artist": {
+     "id": "aaaaaaaa-0000-0000-0000-000000000102",
+     "name": "Artist B",
+     "sort-name": "B, Artist",
+     "disambiguation": "",
+     "type": "Person",
+     "type-id": null,
+     "country": null,
+     "aliases": []
+    }
+   },
+   {
+    "name": "C",
+    "joinphrase": "",
+    "artist": {
+     "id": "aaaaaaaa-0000-0000-0000-000000000103",
+     "name": "Artist C",
+     "sort-name": "C, Artist",
+     "disambiguation": "",
+     "type": "Person",
+     "type-id": null,
+     "country": null,
+     "aliases": []
+    }
+   }
+  ]
+ },
+ "label-info": [
+  {
+   "catalog-number": null,
+   "label": {
+    "id": "l4",
+    "name": "[no label]",
+    "sort-name": "[no label]",
+    "aliases": [],
+    "disambiguation": "",
+    "label-code": null,
+    "type": null,
+    "type-id": null,
+    "genres": [],
+    "tags": []
+   }
+  }
+ ],
+ "release-events": [],
+ "cover-art-archive": {
+  "artwork": false,
+  "count": 0,
+  "front": false,
+  "back": false,
+  "darkened": false
+ },
+ "media": [
+  {
+   "position": 1,
+   "format": "Digital Media",
+   "format-id": "f",
+   "title": "",
+   "track-count": 3,
+   "track-offset": 0,
+   "tracks": [
+    {
+     "id": "00000000-0000-0000-0004-000000000005",
+     "position": 1,
+     "number": "A1",
+     "title": "First Duet",
+     "length": 150000,
+     "artist-credit": [
+      {
+       "name": "A.",
+       "joinphrase": " & ",
+       "artist": {
+        "id": "aaaaaaaa-0000-0000-0000-000000000101",
+        "name": "Artist A",
+        "sort-name": "A, Artist",
+        "disambiguation": "",
+        "type": "Person",
+        "type-id": null,
+        "country": null,
+        "aliases": [
+         {
+          "name": "Künstler A",
+          "sort-name": "A, Künstler",
+          "locale": "de",
+          "primary": true,
+          "type": "Artist name",
+          "type-id": null,
+          "begin": null,
+          "end": null,
+          "ended": false
+         }
+        ]
+       }
+      },
+      {
+       "name": "Artist B",
+       "joinphrase": " vs. ",
+       "artist": {
+        "id": "aaaaaaaa-0000-0000-0000-000000000102",
+        "name": "Artist B",
+        "sort-name": "B, Artist",
+        "disambiguation": "",
+        "type": "Person",
+        "type-id": null,
+        "country": null,
+        "aliases": []
+       }
+      },
+      {
+       "name": "C",
+       "joinphrase": "",
+       "artist": {
+        "id": "aaaaaaaa-0000-0000-0000-000000000103",
+        "name": "Artist C",
+        "sort-name": "C, Artist",
+        "disambiguation": "",
+        "type": "Person",
+        "type-id": null,
+        "country": null,
+        "aliases": []
+       }
+      }
+     ],
+     "recording": {
+      "id": "00000000-0000-0000-0003-000000000005",
+      "title": "First Duet",
+      "length": 150000,
+      "video": false,
+      "disambiguation": "",
+      "artist-credit": [
+       {
+        "name": "A.",
+        "joinphrase": " & ",
+        "artist": {
+         "id": "aaaaaaaa-0000-0000-0000-000000000101",
+         "name": "Artist A",
+         "sort-name": "A, Artist",
+         "disambiguation": "",
+         "type": "Person",
+         "type-id": null,
+         "country": null,
+         "aliases": [
+          {
+           "name": "Künstler A",
+           "sort-name": "A, Künstler",
+           "locale": "de",
+           "primary": true,
+           "type": "Artist name",
+           "type-id": null,
+           "begin": null,
+           "end": null,
+           "ended": false
+          }
+         ]
+        }
+       },
+       {
+        "name": "Artist B",
+        "joinphrase": " vs. ",
+        "artist": {
+         "id": "aaaaaaaa-0000-0000-0000-000000000102",
+         "name": "Artist B",
+         "sort-name": "B, Artist",
+         "disambiguation": "",
+         "type": "Person",
+         "type-id": null,
+         "country": null,
+         "aliases": []
+        }
+       },
+       {
+        "name": "C",
+        "joinphrase": "",
+        "artist": {
+         "id": "aaaaaaaa-0000-0000-0000-000000000103",
+         "name": "Artist C",
+         "sort-name": "C, Artist",
+         "disambiguation": "",
+         "type": "Person",
+         "type-id": null,
+         "country": null,
+         "aliases": []
+        }
+       }
+      ],
+      "aliases": [],
+      "isrcs": [],
+      "first-release-date": "2009-01-01"
+     }
+    },
+    {
+     "id": "00000000-0000-0000-0004-000000000006",
+     "position": 2,
+     "number": "A2",
+     "title": "Second Duet",
+     "length": 160000,
+     "artist-credit": [
+      {
+       "name": "Artist A",
+       "joinphrase": "",
+       "artist": {
+        "id": "aaaaaaaa-0000-0000-0000-000000000101",
+        "name": "Artist A",
+        "sort-name": "A, Artist",
+        "disambiguation": "",
+        "type": "Person",
+        "type-id": null,
+        "country": null,
+        "aliases": [
+         {
+          "name": "Künstler A",
+          "sort-name": "A, Künstler",
+          "locale": "de",
+          "primary": true,
+          "type": "Artist name",
+          "type-id": null,
+          "begin": null,
+          "end": null,
+          "ended": false
+         }
+        ]
+       }
+      }
+     ],
+     "recording": {
+      "id": "00000000-0000-0000-0003-000000000006",
+      "title": "Second Duet",
+      "length": 160000,
+      "video": false,
+      "disambiguation": "",
+      "artist-credit": [
+       {
+        "name": "Artist A",
+        "joinphrase": "",
+        "artist": {
+         "id": "aaaaaaaa-0000-0000-0000-000000000101",
+         "name": "Artist A",
+         "sort-name": "A, Artist",
+         "disambiguation": "",
+         "type": "Person",
+         "type-id": null,
+         "country": null,
+         "aliases": [
+          {
+           "name": "Künstler A",
+           "sort-name": "A, Künstler",
+           "locale": "de",
+           "primary": true,
+           "type": "Artist name",
+           "type-id": null,
+           "begin": null,
+           "end": null,
+           "ended": false
+          }
+         ]
+        }
+       }
+      ],
+      "aliases": [],
+      "isrcs": [],
+      "first-release-date": "2009-01-01",
+      "relations": [
+       {
+        "direction": "forward",
+        "begin": null,
+        "end": null,
+        "ended": false,
+        "attributes": [],
+        "attribute-ids": {},
+        "attribute-values": {},
+        "source-credit": "",
+        "target-credit": "",
+        "type-id": "t",
+        "type": "remixer",
+        "target-type": "artist",
+        "artist": {
+         "id": "aaaaaaaa-0000-0000-0000-000000000109",
+         "name": "Remixer Rob",
+         "sort-name": "Rob, Remixer",
+         "disambiguation": "",
+         "type": "Person",
+         "type-id": null,
+         "country": null,
+         "aliases": []
+        }
+       },
+       {
+        "direction": "forward",
+        "begin": null,
+        "end": null,
+        "ended": false,
+        "attributes": [],
+        "attribute-ids": {},
+        "attribute-values": {},
+        "source-credit": "",
+        "target-credit": "",
+        "type-id": "t",
+        "type": "remixer",
+        "target-type": "artist",
+        "artist": {
+         "id": "aaaaaaaa-0000-0000-0000-000000000108",
+         "name": "Arranger Ann",
+         "sort-name": "Ann, Arranger",
+         "disambiguation": "",
+         "type": "Person",
+         "type-id": null,
+         "country": null,
+         "aliases": []
+        }
+       }
+      ]
+     }
+    },
+    {
+     "id": "00000000-0000-0000-0004-000000000007",
+     "position": 3,
+     "number": "B1",
+     "title": "Third Duet",
+     "length": 170000,
+     "artist-credit": [
+      {
+       "name": "C",
+       "joinphrase": " x ",
+       "artist": {
+        "id": "aaaaaaaa-0000-0000-0000-000000000103",
+        "name": "Artist C",
+        "sort-name": "C, Artist",
+        "disambiguation": "",
+        "type": "Person",
+        "type-id": null,
+        "country": null,
+        "aliases": []
+       }
+      },
+      {
+       "name": "B",
+       "joinphrase": "",
+       "artist": {
+        "id": "aaaaaaaa-0000-0000-0000-000000000102",
+        "name": "Artist B",
+        "sort-name": "B, Artist",
+        "disambiguation": "",
+        "type": "Person",
+        "type-id": null,
+        "country": null,
+        "aliases": []
+       }
+      }
+     ],
+     "recording": {
+      "id": "00000000-0000-0000-0003-000000000007",
+      "title": "Third Duet",
+      "length": 170000,
+      "video": false,
+      "disambiguation": "",
+      "artist-credit": [
+       {
+        "name": "Artist C",
+        "joinphrase": " x ",
+        "artist": {
+         "id": "aaaaaaaa-0000-0000-0000-000000000103",
+         "name": "Artist C",
+         "sort-name": "C, Artist",
+         "disambiguation": "",
+         "type": "Person",
+         "type-id": null,
+         "country": null,
+         "aliases": []
+        }
+       },
+       {
+        "name": "Artist B",
+        "joinphrase": "",
+        "artist": {
+         "id": "aaaaaaaa-0000-0000-0000-000000000102",
+         "name": "Artist B",
+         "sort-name": "B, Artist",
+         "disambiguation": "",
+         "type": "Person",
+         "type-id": null,
+         "country": null,
+         "aliases": []
+        }
+       }
+      ],
+      "aliases": [],
+      "isrcs": [],
+      "first-release-date": "2009-01-01"
+     }
+    }
+   ],
+   "id": "m1"
+  }
+ ]
+}

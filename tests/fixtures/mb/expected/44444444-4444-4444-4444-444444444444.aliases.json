@@ -1,0 +1,524 @@
+{
+ "album": {
+  "album": "Duets Collection",
+  "album_id": "44444444-4444-4444-4444-444444444444",
+  "albumdisambig": "promo",
+  "albumstatus": "Promotion",
+  "albumtype": "ep",
+  "albumtypes": [
+   "ep",
+   "remix"
+  ],
+  "artist": "Künstler A & Artist B vs. Artist C",
+  "artist_credit": "Künstler A & Artist B vs. C",
+  "artist_id": "aaaaaaaa-0000-0000-0000-000000000101",
+  "artist_sort": "A, Künstler & B, Artist vs. C, Artist",
+  "artists": [
+   "Künstler A",
+   "Artist B",
+   "Artist C"
+  ],
+  "artists_credit": [
+   "Künstler A",
+   "Artist B",
+   "C"
+  ],
+  "artists_ids": [
+   "aaaaaaaa-0000-0000-0000-000000000101",
+   "aaaaaaaa-0000-0000-0000-000000000102",
+   "aaaaaaaa-0000-0000-0000-000000000103"
+  ],
+  "artists_sort": [
+   "A, Künstler",
+   "B, Artist",
+   "C, Artist"
+  ],
+  "asin": null,
+  "barcode": null,
+  "catalognum": null,
+  "country": "XW",
+  "data_source": "MusicBrainz",
+  "data_url": "https://musicbrainz.org/release/44444444-4444-4444-4444-444444444444",
+  "day": null,
+  "discogs_albumid": null,
+  "discogs_artistid": null,
+  "discogs_labelid": null,
+  "genres": null,
+  "label": null,
+  "language": "eng",
+  "media": "Digital Media",
+  "mediums": 1,
+  "month": 5,
+  "original_day": null,
+  "original_month": 5,
+  "original_year": 2010,
+  "release_group_title": "Duets Collection",
+  "releasegroup_id": "99999999-0000-0000-0000-000000000104",
+  "releasegroupdisambig": null,
+  "script": "Latn",
+  "style": null,
+  "va": false,
+  "year": 2010
+ },
+ "album_item_data": {
+  "album": "Duets Collection",
+  "albumartist": "Künstler A & Artist B vs. Artist C",
+  "albumartist_credit": "Künstler A & Artist B vs. C",
+  "albumartist_sort": "A, Künstler & B, Artist vs. C, Artist",
+  "albumartists": [
+   "Künstler A",
+   "Artist B",
+   "Artist C"
+  ],
+  "albumartists_credit": [
+   "Künstler A",
+   "Artist B",
+   "C"
+  ],
+  "albumartists_sort": [
+   "A, Künstler",
+   "B, Artist",
+   "C, Artist"
+  ],
+  "albumdisambig": "promo",
+  "albumstatus": "Promotion",
+  "albumtype": "ep",
+  "albumtypes": [
+   "ep",
+   "remix"
+  ],
+  "comp": false,
+  "country": "XW",
+  "data_source": "MusicBrainz",
+  "day": 0,
+  "disctotal": 1,
+  "language": "eng",
+  "mb_albumartistid": "aaaaaaaa-0000-0000-0000-000000000101",
+  "mb_albumartistids": [
+   "aaaaaaaa-0000-0000-0000-000000000101",
+   "aaaaaaaa-0000-0000-0000-000000000102",
+   "aaaaaaaa-0000-0000-0000-000000000103"
+  ],
+  "mb_albumid": "44444444-4444-4444-4444-444444444444",
+  "mb_releasegroupid": "99999999-0000-0000-0000-000000000104",
+  "media": "Digital Media",
+  "month": 5,
+  "original_month": 5,
+  "original_year": 2010,
+  "release_group_title": "Duets Collection",
+  "script": "Latn",
+  "year": 2010
+ },
+ "config": "\nimport:\n    languages: [de]\nmusicbrainz:\n    aliases_as_credits: yes\n    genres: yes\n    genres_tag: tag\nmatch:\n    preferred:\n        countries: [DE]\n",
+ "merged": [
+  {
+   "album": "Duets Collection",
+   "albumartist": "Künstler A & Artist B vs. Artist C",
+   "albumartist_credit": "Künstler A & Artist B vs. C",
+   "albumartist_sort": "A, Künstler & B, Artist vs. C, Artist",
+   "albumartists": [
+    "Künstler A",
+    "Artist B",
+    "Artist C"
+   ],
+   "albumartists_credit": [
+    "Künstler A",
+    "Artist B",
+    "C"
+   ],
+   "albumartists_sort": [
+    "A, Künstler",
+    "B, Artist",
+    "C, Artist"
+   ],
+   "albumdisambig": "promo",
+   "albumstatus": "Promotion",
+   "albumtype": "ep",
+   "albumtypes": [
+    "ep",
+    "remix"
+   ],
+   "artist": "Künstler A & Artist B vs. Artist C",
+   "artist_credit": "Künstler A & Artist B vs. C",
+   "artist_sort": "A, Künstler & B, Artist vs. C, Artist",
+   "artists": [
+    "Künstler A",
+    "Artist B",
+    "Artist C"
+   ],
+   "artists_credit": [
+    "Künstler A",
+    "Artist B",
+    "C"
+   ],
+   "artists_sort": [
+    "A, Künstler",
+    "B, Artist",
+    "C, Artist"
+   ],
+   "comp": false,
+   "country": "XW",
+   "data_source": "MusicBrainz",
+   "day": 0,
+   "disc": 1,
+   "disctitle": "",
+   "disctotal": 1,
+   "language": "eng",
+   "length": 150.0,
+   "mb_albumartistid": "aaaaaaaa-0000-0000-0000-000000000101",
+   "mb_albumartistids": [
+    "aaaaaaaa-0000-0000-0000-000000000101",
+    "aaaaaaaa-0000-0000-0000-000000000102",
+    "aaaaaaaa-0000-0000-0000-000000000103"
+   ],
+   "mb_albumid": "44444444-4444-4444-4444-444444444444",
+   "mb_artistid": "aaaaaaaa-0000-0000-0000-000000000101",
+   "mb_artistids": [
+    "aaaaaaaa-0000-0000-0000-000000000101",
+    "aaaaaaaa-0000-0000-0000-000000000102",
+    "aaaaaaaa-0000-0000-0000-000000000103"
+   ],
+   "mb_releasegroupid": "99999999-0000-0000-0000-000000000104",
+   "mb_releasetrackid": "00000000-0000-0000-0004-000000000005",
+   "mb_trackid": "00000000-0000-0000-0003-000000000005",
+   "media": "Digital Media",
+   "month": 5,
+   "original_month": 5,
+   "original_year": 2010,
+   "release_group_title": "Duets Collection",
+   "script": "Latn",
+   "title": "First Duet",
+   "track": 1,
+   "track_alt": "A1",
+   "tracktotal": 3,
+   "year": 2010
+  },
+  {
+   "album": "Duets Collection",
+   "albumartist": "Künstler A & Artist B vs. Artist C",
+   "albumartist_credit": "Künstler A & Artist B vs. C",
+   "albumartist_sort": "A, Künstler & B, Artist vs. C, Artist",
+   "albumartists": [
+    "Künstler A",
+    "Artist B",
+    "Artist C"
+   ],
+   "albumartists_credit": [
+    "Künstler A",
+    "Artist B",
+    "C"
+   ],
+   "albumartists_sort": [
+    "A, Künstler",
+    "B, Artist",
+    "C, Artist"
+   ],
+   "albumdisambig": "promo",
+   "albumstatus": "Promotion",
+   "albumtype": "ep",
+   "albumtypes": [
+    "ep",
+    "remix"
+   ],
+   "artist": "Künstler A",
+   "artist_credit": "Künstler A",
+   "artist_sort": "A, Künstler",
+   "artists": [
+    "Künstler A"
+   ],
+   "artists_credit": [
+    "Künstler A"
+   ],
+   "artists_sort": [
+    "A, Künstler"
+   ],
+   "comp": false,
+   "country": "XW",
+   "data_source": "MusicBrainz",
+   "day": 0,
+   "disc": 1,
+   "disctitle": "",
+   "disctotal": 1,
+   "language": "eng",
+   "length": 160.0,
+   "mb_albumartistid": "aaaaaaaa-0000-0000-0000-000000000101",
+   "mb_albumartistids": [
+    "aaaaaaaa-0000-0000-0000-000000000101",
+    "aaaaaaaa-0000-0000-0000-000000000102",
+    "aaaaaaaa-0000-0000-0000-000000000103"
+   ],
+   "mb_albumid": "44444444-4444-4444-4444-444444444444",
+   "mb_artistid": "aaaaaaaa-0000-0000-0000-000000000101",
+   "mb_artistids": [
+    "aaaaaaaa-0000-0000-0000-000000000101"
+   ],
+   "mb_releasegroupid": "99999999-0000-0000-0000-000000000104",
+   "mb_releasetrackid": "00000000-0000-0000-0004-000000000006",
+   "mb_trackid": "00000000-0000-0000-0003-000000000006",
+   "media": "Digital Media",
+   "month": 5,
+   "original_month": 5,
+   "original_year": 2010,
+   "release_group_title": "Duets Collection",
+   "remixers": [
+    "Remixer Rob",
+    "Arranger Ann"
+   ],
+   "remixers_ids": [
+    "aaaaaaaa-0000-0000-0000-000000000109",
+    "aaaaaaaa-0000-0000-0000-000000000108"
+   ],
+   "script": "Latn",
+   "title": "Second Duet",
+   "track": 2,
+   "track_alt": "A2",
+   "tracktotal": 3,
+   "year": 2010
+  },
+  {
+   "album": "Duets Collection",
+   "albumartist": "Künstler A & Artist B vs. Artist C",
+   "albumartist_credit": "Künstler A & Artist B vs. C",
+   "albumartist_sort": "A, Künstler & B, Artist vs. C, Artist",
+   "albumartists": [
+    "Künstler A",
+    "Artist B",
+    "Artist C"
+   ],
+   "albumartists_credit": [
+    "Künstler A",
+    "Artist B",
+    "C"
+   ],
+   "albumartists_sort": [
+    "A, Künstler",
+    "B, Artist",
+    "C, Artist"
+   ],
+   "albumdisambig": "promo",
+   "albumstatus": "Promotion",
+   "albumtype": "ep",
+   "albumtypes": [
+    "ep",
+    "remix"
+   ],
+   "artist": "Artist C x Artist B",
+   "artist_credit": "C x B",
+   "artist_sort": "C, Artist x B, Artist",
+   "artists": [
+    "Artist C",
+    "Artist B"
+   ],
+   "artists_credit": [
+    "C",
+    "B"
+   ],
+   "artists_sort": [
+    "C, Artist",
+    "B, Artist"
+   ],
+   "comp": false,
+   "country": "XW",
+   "data_source": "MusicBrainz",
+   "day": 0,
+   "disc": 1,
+   "disctitle": "",
+   "disctotal": 1,
+   "language": "eng",
+   "length": 170.0,
+   "mb_albumartistid": "aaaaaaaa-0000-0000-0000-000000000101",
+   "mb_albumartistids": [
+    "aaaaaaaa-0000-0000-0000-000000000101",
+    "aaaaaaaa-0000-0000-0000-000000000102",
+    "aaaaaaaa-0000-0000-0000-000000000103"
+   ],
+   "mb_albumid": "44444444-4444-4444-4444-444444444444",
+   "mb_artistid": "aaaaaaaa-0000-0000-0000-000000000103",
+   "mb_artistids": [
+    "aaaaaaaa-0000-0000-0000-000000000103",
+    "aaaaaaaa-0000-0000-0000-000000000102"
+   ],
+   "mb_releasegroupid": "99999999-0000-0000-0000-000000000104",
+   "mb_releasetrackid": "00000000-0000-0000-0004-000000000007",
+   "mb_trackid": "00000000-0000-0000-0003-000000000007",
+   "media": "Digital Media",
+   "month": 5,
+   "original_month": 5,
+   "original_year": 2010,
+   "release_group_title": "Duets Collection",
+   "script": "Latn",
+   "title": "Third Duet",
+   "track": 3,
+   "track_alt": "B1",
+   "tracktotal": 3,
+   "year": 2010
+  }
+ ],
+ "tracks": [
+  {
+   "album": null,
+   "arrangers": null,
+   "arrangers_ids": [],
+   "artist": "Künstler A & Artist B vs. Artist C",
+   "artist_credit": "Künstler A & Artist B vs. C",
+   "artist_id": "aaaaaaaa-0000-0000-0000-000000000101",
+   "artist_sort": "A, Künstler & B, Artist vs. C, Artist",
+   "artists": [
+    "Künstler A",
+    "Artist B",
+    "Artist C"
+   ],
+   "artists_credit": [
+    "Künstler A",
+    "Artist B",
+    "C"
+   ],
+   "artists_ids": [
+    "aaaaaaaa-0000-0000-0000-000000000101",
+    "aaaaaaaa-0000-0000-0000-000000000102",
+    "aaaaaaaa-0000-0000-0000-000000000103"
+   ],
+   "artists_sort": [
+    "A, Künstler",
+    "B, Artist",
+    "C, Artist"
+   ],
+   "bpm": null,
+   "composer_sort": null,
+   "composers": null,
+   "composers_ids": [],
+   "data_source": "MusicBrainz",
+   "data_url": "https://musicbrainz.org/recording/00000000-0000-0000-0003-000000000005",
+   "disctitle": "",
+   "genres": null,
+   "index": 1,
+   "initial_key": null,
+   "isrc": null,
+   "length": 150.0,
+   "lyricists": null,
+   "lyricists_ids": [],
+   "mb_workid": null,
+   "media": "Digital Media",
+   "medium": 1,
+   "medium_index": 1,
+   "medium_total": 3,
+   "release_track_id": "00000000-0000-0000-0004-000000000005",
+   "remixers": null,
+   "remixers_ids": [],
+   "title": "First Duet",
+   "track_alt": "A1",
+   "track_id": "00000000-0000-0000-0003-000000000005",
+   "trackdisambig": null,
+   "work": null,
+   "work_disambig": null
+  },
+  {
+   "album": null,
+   "arrangers": null,
+   "arrangers_ids": [],
+   "artist": "Künstler A",
+   "artist_credit": "Künstler A",
+   "artist_id": "aaaaaaaa-0000-0000-0000-000000000101",
+   "artist_sort": "A, Künstler",
+   "artists": [
+    "Künstler A"
+   ],
+   "artists_credit": [
+    "Künstler A"
+   ],
+   "artists_ids": [
+    "aaaaaaaa-0000-0000-0000-000000000101"
+   ],
+   "artists_sort": [
+    "A, Künstler"
+   ],
+   "bpm": null,
+   "composer_sort": null,
+   "composers": null,
+   "composers_ids": [],
+   "data_source": "MusicBrainz",
+   "data_url": "https://musicbrainz.org/recording/00000000-0000-0000-0003-000000000006",
+   "disctitle": "",
+   "genres": null,
+   "index": 2,
+   "initial_key": null,
+   "isrc": null,
+   "length": 160.0,
+   "lyricists": null,
+   "lyricists_ids": [],
+   "mb_workid": null,
+   "media": "Digital Media",
+   "medium": 1,
+   "medium_index": 2,
+   "medium_total": 3,
+   "release_track_id": "00000000-0000-0000-0004-000000000006",
+   "remixers": [
+    "Remixer Rob",
+    "Arranger Ann"
+   ],
+   "remixers_ids": [
+    "aaaaaaaa-0000-0000-0000-000000000109",
+    "aaaaaaaa-0000-0000-0000-000000000108"
+   ],
+   "title": "Second Duet",
+   "track_alt": "A2",
+   "track_id": "00000000-0000-0000-0003-000000000006",
+   "trackdisambig": null,
+   "work": null,
+   "work_disambig": null
+  },
+  {
+   "album": null,
+   "arrangers": null,
+   "arrangers_ids": [],
+   "artist": "Artist C x Artist B",
+   "artist_credit": "C x B",
+   "artist_id": "aaaaaaaa-0000-0000-0000-000000000103",
+   "artist_sort": "C, Artist x B, Artist",
+   "artists": [
+    "Artist C",
+    "Artist B"
+   ],
+   "artists_credit": [
+    "C",
+    "B"
+   ],
+   "artists_ids": [
+    "aaaaaaaa-0000-0000-0000-000000000103",
+    "aaaaaaaa-0000-0000-0000-000000000102"
+   ],
+   "artists_sort": [
+    "C, Artist",
+    "B, Artist"
+   ],
+   "bpm": null,
+   "composer_sort": null,
+   "composers": null,
+   "composers_ids": [],
+   "data_source": "MusicBrainz",
+   "data_url": "https://musicbrainz.org/recording/00000000-0000-0000-0003-000000000007",
+   "disctitle": "",
+   "genres": null,
+   "index": 3,
+   "initial_key": null,
+   "isrc": null,
+   "length": 170.0,
+   "lyricists": null,
+   "lyricists_ids": [],
+   "mb_workid": null,
+   "media": "Digital Media",
+   "medium": 1,
+   "medium_index": 3,
+   "medium_total": 3,
+   "release_track_id": "00000000-0000-0000-0004-000000000007",
+   "remixers": null,
+   "remixers_ids": [],
+   "title": "Third Duet",
+   "track_alt": "B1",
+   "track_id": "00000000-0000-0000-0003-000000000007",
+   "trackdisambig": null,
+   "work": null,
+   "work_disambig": null
+  }
+ ]
+}

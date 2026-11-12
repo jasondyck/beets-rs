@@ -923,6 +923,20 @@ IMPORT_CORPUS = {
                              "track": str(n), "disc": "1", "date": "2004",
                              "MusicBrainz Album Id": _FX_ID})
                for n, t in enumerate(["Hidden Intro", "Alpha", "Beta", "Gamma"])],
+    # The VA compilation on two titled discs (release 3333...).
+    "sampler": [(f"{n}.mp3", {"album": "Sampler of Sounds", "album_artist": "Various Artists",
+                             "artist": a, "title": t, "track": str(tr), "disc": str(d),
+                             "date": "2010", "publisher": "Sampler Records",
+                             "CATALOGNUMBER": "SMP 001", "BARCODE": "0042"})
+                for n, (d, tr, a, t) in enumerate([
+                    (1, 1, "Artist A feat. Artist B", "Ocean Song"),
+                    (1, 2, "The Band", "Night Drive"),
+                    (2, 1, "Artist A & Artist C", "Ocean Song (Live)"),
+                    (2, 2, "Artist B", "Final Call (edit)")], 1)],
+    # The multi-artist EP (release 4444...).
+    "duets": [(f"{n}.mp3", {"album": "Duets Collection", "artist": "Artist A & Artist B vs. C",
+                           "title": t, "track": str(n)})
+              for n, t in enumerate(["First Duet", "Second Duet", "Third Duet"], 1)],
     # Spare files the rescan cases put into a directory at the prompt.
     "extra": [("delta.mp3", {**_FX, "title": "Delta", "track": "4"})],
 }
@@ -961,4 +975,21 @@ IMPORT_CASES = [
     ("rescan-remove", "tagged", ["-t", "-C"], "", [("remove", "0.mp3"), "r", "a"]),
     ("rescan-empty", "fx", ["-t", "-C"], "", [("empty",), "r"]),
     ("rescan-group", "fx", ["-t", "-C"], "", ["g", "u"]),
+    # Metadata fidelity: multi-artist credits, VA, titled discs, secondary
+    # types, works and relations, and the options shaping applied metadata.
+    ("t-va", "sampler", ["-t", "-C"], "", ["a"]),
+    ("t-va-options", "sampler", ["-t", "-C"],
+     "per_disc_numbering: yes\nartist_credit: yes\noriginal_date: yes\nva_name: VA\n"
+     "musicbrainz:\n    genres: yes\n    search_limit: 3\n"
+     "    external_ids:\n        discogs: yes\n        bandcamp: yes\n"
+     "    extra_tags: [year, catalognum, country, media, label, barcode, tracks, alias]\n",
+     ["a"]),
+    ("t-va-tags", "sampler", ["-t", "-C"],
+     "musicbrainz:\n    genres: yes\n    genres_tag: tag\n"
+     "overwrite_null:\n    album: [asin, label]\n    track: [arrangers, work, bpm]\n",
+     ["a"]),
+    ("t-duets", "duets", ["-t", "-C"], "", ["a"]),
+    ("t-duets-credit", "duets", ["-t", "-C"],
+     "artist_credit: yes\nimport:\n    languages: [de]\n", ["a"]),
+    ("s-va", "sampler", ["-t", "-s", "-C"], "", ["a", "a", "a", "a"]),
 ]

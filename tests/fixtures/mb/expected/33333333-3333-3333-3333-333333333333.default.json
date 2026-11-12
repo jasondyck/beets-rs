@@ -1,0 +1,665 @@
+{
+ "album": {
+  "album": "Sampler of Sounds",
+  "album_id": "33333333-3333-3333-3333-333333333333",
+  "albumdisambig": null,
+  "albumstatus": "Official",
+  "albumtype": "album",
+  "albumtypes": [
+   "album",
+   "compilation",
+   "live"
+  ],
+  "artist": "Various Artists",
+  "artist_credit": "Various Artists",
+  "artist_id": "89ad4ac3-39f7-470e-963a-56509c546377",
+  "artist_sort": "Various Artists",
+  "artists": [
+   "Various Artists"
+  ],
+  "artists_credit": [
+   "Various Artists"
+  ],
+  "artists_ids": [
+   "89ad4ac3-39f7-470e-963a-56509c546377"
+  ],
+  "artists_sort": [
+   "Various Artists"
+  ],
+  "asin": "B000TEST01",
+  "barcode": "",
+  "catalognum": "SMP 001",
+  "country": "US",
+  "data_source": "MusicBrainz",
+  "data_url": "https://musicbrainz.org/release/33333333-3333-3333-3333-333333333333",
+  "day": 3,
+  "discogs_albumid": null,
+  "discogs_artistid": null,
+  "discogs_labelid": null,
+  "genres": null,
+  "label": "Sampler Records",
+  "language": "eng",
+  "media": "CD",
+  "mediums": 2,
+  "month": 2,
+  "original_day": 15,
+  "original_month": 6,
+  "original_year": 2009,
+  "release_group_title": "Sampler of Sounds",
+  "releasegroup_id": "99999999-0000-0000-0000-000000000103",
+  "releasegroupdisambig": null,
+  "script": "Latn",
+  "style": null,
+  "va": true,
+  "year": 2010
+ },
+ "album_item_data": {
+  "album": "Sampler of Sounds",
+  "albumartist": "Various Artists",
+  "albumartist_credit": "Various Artists",
+  "albumartist_sort": "Various Artists",
+  "albumartists": [
+   "Various Artists"
+  ],
+  "albumartists_credit": [
+   "Various Artists"
+  ],
+  "albumartists_sort": [
+   "Various Artists"
+  ],
+  "albumstatus": "Official",
+  "albumtype": "album",
+  "albumtypes": [
+   "album",
+   "compilation",
+   "live"
+  ],
+  "asin": "B000TEST01",
+  "barcode": "",
+  "catalognum": "SMP 001",
+  "comp": true,
+  "country": "US",
+  "data_source": "MusicBrainz",
+  "day": 3,
+  "disctotal": 2,
+  "label": "Sampler Records",
+  "language": "eng",
+  "mb_albumartistid": "89ad4ac3-39f7-470e-963a-56509c546377",
+  "mb_albumartistids": [
+   "89ad4ac3-39f7-470e-963a-56509c546377"
+  ],
+  "mb_albumid": "33333333-3333-3333-3333-333333333333",
+  "mb_releasegroupid": "99999999-0000-0000-0000-000000000103",
+  "media": "CD",
+  "month": 2,
+  "original_day": 15,
+  "original_month": 6,
+  "original_year": 2009,
+  "release_group_title": "Sampler of Sounds",
+  "script": "Latn",
+  "year": 2010
+ },
+ "config": "",
+ "merged": [
+  {
+   "album": "Sampler of Sounds",
+   "albumartist": "Various Artists",
+   "albumartist_credit": "Various Artists",
+   "albumartist_sort": "Various Artists",
+   "albumartists": [
+    "Various Artists"
+   ],
+   "albumartists_credit": [
+    "Various Artists"
+   ],
+   "albumartists_sort": [
+    "Various Artists"
+   ],
+   "albumstatus": "Official",
+   "albumtype": "album",
+   "albumtypes": [
+    "album",
+    "compilation",
+    "live"
+   ],
+   "arrangers": [
+    "Arranger Ann"
+   ],
+   "arrangers_ids": [
+    "aaaaaaaa-0000-0000-0000-000000000108"
+   ],
+   "artist": "Artist A feat. Artist B",
+   "artist_credit": "A. feat. Artist B",
+   "artist_sort": "A, Artist feat. B, Artist",
+   "artists": [
+    "Artist A",
+    "Artist B"
+   ],
+   "artists_credit": [
+    "A.",
+    "Artist B"
+   ],
+   "artists_sort": [
+    "A, Artist",
+    "B, Artist"
+   ],
+   "asin": "B000TEST01",
+   "barcode": "",
+   "catalognum": "SMP 001",
+   "comp": true,
+   "composer_sort": "One, Composer, Two, Composer",
+   "composers": [
+    "Composer One",
+    "Composer Two"
+   ],
+   "composers_ids": [
+    "aaaaaaaa-0000-0000-0000-000000000105",
+    "aaaaaaaa-0000-0000-0000-000000000106"
+   ],
+   "country": "US",
+   "data_source": "MusicBrainz",
+   "day": 3,
+   "disc": 1,
+   "disctitle": "The Early Years",
+   "disctotal": 2,
+   "isrc": "GBAAA0900001;GBAAA0900002",
+   "label": "Sampler Records",
+   "language": "eng",
+   "length": 200.0,
+   "lyricists": [
+    "Lyricist Lee"
+   ],
+   "lyricists_ids": [
+    "aaaaaaaa-0000-0000-0000-000000000107"
+   ],
+   "mb_albumartistid": "89ad4ac3-39f7-470e-963a-56509c546377",
+   "mb_albumartistids": [
+    "89ad4ac3-39f7-470e-963a-56509c546377"
+   ],
+   "mb_albumid": "33333333-3333-3333-3333-333333333333",
+   "mb_artistid": "aaaaaaaa-0000-0000-0000-000000000101",
+   "mb_artistids": [
+    "aaaaaaaa-0000-0000-0000-000000000101",
+    "aaaaaaaa-0000-0000-0000-000000000102"
+   ],
+   "mb_releasegroupid": "99999999-0000-0000-0000-000000000103",
+   "mb_releasetrackid": "00000000-0000-0000-0004-000000000001",
+   "mb_trackid": "00000000-0000-0000-0003-000000000001",
+   "mb_workid": "wwwwwwww-0000-0000-0000-000000000001",
+   "media": "CD",
+   "month": 2,
+   "original_day": 15,
+   "original_month": 6,
+   "original_year": 2009,
+   "release_group_title": "Sampler of Sounds",
+   "remixers": [
+    "Remixer Rob"
+   ],
+   "remixers_ids": [
+    "aaaaaaaa-0000-0000-0000-000000000109"
+   ],
+   "script": "Latn",
+   "title": "Ocean Song",
+   "track": 1,
+   "track_alt": "1",
+   "tracktotal": 4,
+   "work": "Ocean Song",
+   "year": 2010
+  },
+  {
+   "album": "Sampler of Sounds",
+   "albumartist": "Various Artists",
+   "albumartist_credit": "Various Artists",
+   "albumartist_sort": "Various Artists",
+   "albumartists": [
+    "Various Artists"
+   ],
+   "albumartists_credit": [
+    "Various Artists"
+   ],
+   "albumartists_sort": [
+    "Various Artists"
+   ],
+   "albumstatus": "Official",
+   "albumtype": "album",
+   "albumtypes": [
+    "album",
+    "compilation",
+    "live"
+   ],
+   "artist": "The Band",
+   "artist_credit": "Band",
+   "artist_sort": "Band, The",
+   "artists": [
+    "The Band"
+   ],
+   "artists_credit": [
+    "Band"
+   ],
+   "artists_sort": [
+    "Band, The"
+   ],
+   "asin": "B000TEST01",
+   "barcode": "",
+   "catalognum": "SMP 001",
+   "comp": true,
+   "country": "US",
+   "data_source": "MusicBrainz",
+   "day": 3,
+   "disc": 1,
+   "disctitle": "The Early Years",
+   "disctotal": 2,
+   "label": "Sampler Records",
+   "language": "eng",
+   "length": 185.0,
+   "mb_albumartistid": "89ad4ac3-39f7-470e-963a-56509c546377",
+   "mb_albumartistids": [
+    "89ad4ac3-39f7-470e-963a-56509c546377"
+   ],
+   "mb_albumid": "33333333-3333-3333-3333-333333333333",
+   "mb_artistid": "aaaaaaaa-0000-0000-0000-000000000104",
+   "mb_artistids": [
+    "aaaaaaaa-0000-0000-0000-000000000104"
+   ],
+   "mb_releasegroupid": "99999999-0000-0000-0000-000000000103",
+   "mb_releasetrackid": "00000000-0000-0000-0004-000000000002",
+   "mb_trackid": "00000000-0000-0000-0003-000000000002",
+   "media": "CD",
+   "month": 2,
+   "original_day": 15,
+   "original_month": 6,
+   "original_year": 2009,
+   "release_group_title": "Sampler of Sounds",
+   "script": "Latn",
+   "title": "Night Drive",
+   "track": 2,
+   "track_alt": "2",
+   "tracktotal": 4,
+   "year": 2010
+  },
+  {
+   "album": "Sampler of Sounds",
+   "albumartist": "Various Artists",
+   "albumartist_credit": "Various Artists",
+   "albumartist_sort": "Various Artists",
+   "albumartists": [
+    "Various Artists"
+   ],
+   "albumartists_credit": [
+    "Various Artists"
+   ],
+   "albumartists_sort": [
+    "Various Artists"
+   ],
+   "albumstatus": "Official",
+   "albumtype": "album",
+   "albumtypes": [
+    "album",
+    "compilation",
+    "live"
+   ],
+   "artist": "Artist A & Artist C",
+   "artist_credit": "Artist A & Artist C",
+   "artist_sort": "A, Artist & C, Artist",
+   "artists": [
+    "Artist A",
+    "Artist C"
+   ],
+   "artists_credit": [
+    "Artist A",
+    "Artist C"
+   ],
+   "artists_sort": [
+    "A, Artist",
+    "C, Artist"
+   ],
+   "asin": "B000TEST01",
+   "barcode": "",
+   "catalognum": "SMP 001",
+   "comp": true,
+   "composer_sort": "One, Composer",
+   "composers": [
+    "Composer One"
+   ],
+   "composers_ids": [
+    "aaaaaaaa-0000-0000-0000-000000000105"
+   ],
+   "country": "US",
+   "data_source": "MusicBrainz",
+   "day": 3,
+   "disc": 2,
+   "disctitle": "Live Cuts",
+   "disctotal": 2,
+   "label": "Sampler Records",
+   "language": "eng",
+   "length": 230.0,
+   "mb_albumartistid": "89ad4ac3-39f7-470e-963a-56509c546377",
+   "mb_albumartistids": [
+    "89ad4ac3-39f7-470e-963a-56509c546377"
+   ],
+   "mb_albumid": "33333333-3333-3333-3333-333333333333",
+   "mb_artistid": "aaaaaaaa-0000-0000-0000-000000000101",
+   "mb_artistids": [
+    "aaaaaaaa-0000-0000-0000-000000000101",
+    "aaaaaaaa-0000-0000-0000-000000000103"
+   ],
+   "mb_releasegroupid": "99999999-0000-0000-0000-000000000103",
+   "mb_releasetrackid": "00000000-0000-0000-0004-000000000003",
+   "mb_trackid": "00000000-0000-0000-0003-000000000003",
+   "mb_workid": "wwwwwwww-0000-0000-0000-000000000001",
+   "media": "CD",
+   "month": 2,
+   "original_day": 15,
+   "original_month": 6,
+   "original_year": 2009,
+   "release_group_title": "Sampler of Sounds",
+   "script": "Latn",
+   "title": "Ocean Song (Live)",
+   "track": 3,
+   "track_alt": "1",
+   "trackdisambig": "live",
+   "tracktotal": 4,
+   "work": "Ocean Song",
+   "year": 2010
+  },
+  {
+   "album": "Sampler of Sounds",
+   "albumartist": "Various Artists",
+   "albumartist_credit": "Various Artists",
+   "albumartist_sort": "Various Artists",
+   "albumartists": [
+    "Various Artists"
+   ],
+   "albumartists_credit": [
+    "Various Artists"
+   ],
+   "albumartists_sort": [
+    "Various Artists"
+   ],
+   "albumstatus": "Official",
+   "albumtype": "album",
+   "albumtypes": [
+    "album",
+    "compilation",
+    "live"
+   ],
+   "artist": "Artist B",
+   "artist_credit": "Artist B",
+   "artist_sort": "B, Artist",
+   "artists": [
+    "Artist B"
+   ],
+   "artists_credit": [
+    "Artist B"
+   ],
+   "artists_sort": [
+    "B, Artist"
+   ],
+   "asin": "B000TEST01",
+   "barcode": "",
+   "catalognum": "SMP 001",
+   "comp": true,
+   "country": "US",
+   "data_source": "MusicBrainz",
+   "day": 3,
+   "disc": 2,
+   "disctitle": "Live Cuts",
+   "disctotal": 2,
+   "label": "Sampler Records",
+   "language": "eng",
+   "length": 199.0,
+   "mb_albumartistid": "89ad4ac3-39f7-470e-963a-56509c546377",
+   "mb_albumartistids": [
+    "89ad4ac3-39f7-470e-963a-56509c546377"
+   ],
+   "mb_albumid": "33333333-3333-3333-3333-333333333333",
+   "mb_artistid": "aaaaaaaa-0000-0000-0000-000000000102",
+   "mb_artistids": [
+    "aaaaaaaa-0000-0000-0000-000000000102"
+   ],
+   "mb_releasegroupid": "99999999-0000-0000-0000-000000000103",
+   "mb_releasetrackid": "00000000-0000-0000-0004-000000000004",
+   "mb_trackid": "00000000-0000-0000-0003-000000000004",
+   "media": "CD",
+   "month": 2,
+   "original_day": 15,
+   "original_month": 6,
+   "original_year": 2009,
+   "release_group_title": "Sampler of Sounds",
+   "script": "Latn",
+   "title": "Final Call (edit)",
+   "track": 4,
+   "track_alt": "2",
+   "tracktotal": 4,
+   "year": 2010
+  }
+ ],
+ "tracks": [
+  {
+   "album": null,
+   "arrangers": [
+    "Arranger Ann"
+   ],
+   "arrangers_ids": [
+    "aaaaaaaa-0000-0000-0000-000000000108"
+   ],
+   "artist": "Artist A feat. Artist B",
+   "artist_credit": "A. feat. Artist B",
+   "artist_id": "aaaaaaaa-0000-0000-0000-000000000101",
+   "artist_sort": "A, Artist feat. B, Artist",
+   "artists": [
+    "Artist A",
+    "Artist B"
+   ],
+   "artists_credit": [
+    "A.",
+    "Artist B"
+   ],
+   "artists_ids": [
+    "aaaaaaaa-0000-0000-0000-000000000101",
+    "aaaaaaaa-0000-0000-0000-000000000102"
+   ],
+   "artists_sort": [
+    "A, Artist",
+    "B, Artist"
+   ],
+   "bpm": null,
+   "composer_sort": "One, Composer, Two, Composer",
+   "composers": [
+    "Composer One",
+    "Composer Two"
+   ],
+   "composers_ids": [
+    "aaaaaaaa-0000-0000-0000-000000000105",
+    "aaaaaaaa-0000-0000-0000-000000000106"
+   ],
+   "data_source": "MusicBrainz",
+   "data_url": "https://musicbrainz.org/recording/00000000-0000-0000-0003-000000000001",
+   "disctitle": "The Early Years",
+   "genres": null,
+   "index": 1,
+   "initial_key": null,
+   "isrc": "GBAAA0900001;GBAAA0900002",
+   "length": 200.0,
+   "lyricists": [
+    "Lyricist Lee"
+   ],
+   "lyricists_ids": [
+    "aaaaaaaa-0000-0000-0000-000000000107"
+   ],
+   "mb_workid": "wwwwwwww-0000-0000-0000-000000000001",
+   "media": "CD",
+   "medium": 1,
+   "medium_index": 1,
+   "medium_total": 2,
+   "release_track_id": "00000000-0000-0000-0004-000000000001",
+   "remixers": [
+    "Remixer Rob"
+   ],
+   "remixers_ids": [
+    "aaaaaaaa-0000-0000-0000-000000000109"
+   ],
+   "title": "Ocean Song",
+   "track_alt": "1",
+   "track_id": "00000000-0000-0000-0003-000000000001",
+   "trackdisambig": null,
+   "work": "Ocean Song",
+   "work_disambig": null
+  },
+  {
+   "album": null,
+   "arrangers": null,
+   "arrangers_ids": [],
+   "artist": "The Band",
+   "artist_credit": "Band",
+   "artist_id": "aaaaaaaa-0000-0000-0000-000000000104",
+   "artist_sort": "Band, The",
+   "artists": [
+    "The Band"
+   ],
+   "artists_credit": [
+    "Band"
+   ],
+   "artists_ids": [
+    "aaaaaaaa-0000-0000-0000-000000000104"
+   ],
+   "artists_sort": [
+    "Band, The"
+   ],
+   "bpm": null,
+   "composer_sort": null,
+   "composers": null,
+   "composers_ids": [],
+   "data_source": "MusicBrainz",
+   "data_url": "https://musicbrainz.org/recording/00000000-0000-0000-0003-000000000002",
+   "disctitle": "The Early Years",
+   "genres": null,
+   "index": 2,
+   "initial_key": null,
+   "isrc": null,
+   "length": 185.0,
+   "lyricists": null,
+   "lyricists_ids": [],
+   "mb_workid": null,
+   "media": "CD",
+   "medium": 1,
+   "medium_index": 2,
+   "medium_total": 2,
+   "release_track_id": "00000000-0000-0000-0004-000000000002",
+   "remixers": null,
+   "remixers_ids": [],
+   "title": "Night Drive",
+   "track_alt": "2",
+   "track_id": "00000000-0000-0000-0003-000000000002",
+   "trackdisambig": null,
+   "work": null,
+   "work_disambig": null
+  },
+  {
+   "album": null,
+   "arrangers": null,
+   "arrangers_ids": [],
+   "artist": "Artist A & Artist C",
+   "artist_credit": "Artist A & Artist C",
+   "artist_id": "aaaaaaaa-0000-0000-0000-000000000101",
+   "artist_sort": "A, Artist & C, Artist",
+   "artists": [
+    "Artist A",
+    "Artist C"
+   ],
+   "artists_credit": [
+    "Artist A",
+    "Artist C"
+   ],
+   "artists_ids": [
+    "aaaaaaaa-0000-0000-0000-000000000101",
+    "aaaaaaaa-0000-0000-0000-000000000103"
+   ],
+   "artists_sort": [
+    "A, Artist",
+    "C, Artist"
+   ],
+   "bpm": null,
+   "composer_sort": "One, Composer",
+   "composers": [
+    "Composer One"
+   ],
+   "composers_ids": [
+    "aaaaaaaa-0000-0000-0000-000000000105"
+   ],
+   "data_source": "MusicBrainz",
+   "data_url": "https://musicbrainz.org/recording/00000000-0000-0000-0003-000000000003",
+   "disctitle": "Live Cuts",
+   "genres": null,
+   "index": 3,
+   "initial_key": null,
+   "isrc": null,
+   "length": 230.0,
+   "lyricists": null,
+   "lyricists_ids": [],
+   "mb_workid": "wwwwwwww-0000-0000-0000-000000000001",
+   "media": "CD",
+   "medium": 2,
+   "medium_index": 1,
+   "medium_total": 2,
+   "release_track_id": "00000000-0000-0000-0004-000000000003",
+   "remixers": null,
+   "remixers_ids": [],
+   "title": "Ocean Song (Live)",
+   "track_alt": "1",
+   "track_id": "00000000-0000-0000-0003-000000000003",
+   "trackdisambig": "live",
+   "work": "Ocean Song",
+   "work_disambig": null
+  },
+  {
+   "album": null,
+   "arrangers": null,
+   "arrangers_ids": [],
+   "artist": "Artist B",
+   "artist_credit": "Artist B",
+   "artist_id": "aaaaaaaa-0000-0000-0000-000000000102",
+   "artist_sort": "B, Artist",
+   "artists": [
+    "Artist B"
+   ],
+   "artists_credit": [
+    "Artist B"
+   ],
+   "artists_ids": [
+    "aaaaaaaa-0000-0000-0000-000000000102"
+   ],
+   "artists_sort": [
+    "B, Artist"
+   ],
+   "bpm": null,
+   "composer_sort": null,
+   "composers": null,
+   "composers_ids": [],
+   "data_source": "MusicBrainz",
+   "data_url": "https://musicbrainz.org/recording/00000000-0000-0000-0003-000000000004",
+   "disctitle": "Live Cuts",
+   "genres": null,
+   "index": 4,
+   "initial_key": null,
+   "isrc": null,
+   "length": 199.0,
+   "lyricists": null,
+   "lyricists_ids": [],
+   "mb_workid": null,
+   "media": "CD",
+   "medium": 2,
+   "medium_index": 2,
+   "medium_total": 2,
+   "release_track_id": "00000000-0000-0000-0004-000000000004",
+   "remixers": null,
+   "remixers_ids": [],
+   "title": "Final Call (edit)",
+   "track_alt": "2",
+   "track_id": "00000000-0000-0000-0003-000000000004",
+   "trackdisambig": null,
+   "work": null,
+   "work_disambig": null
+  }
+ ]
+}

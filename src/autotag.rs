@@ -4,8 +4,9 @@
 //! `match.required`/`match.ignored`, the strong/medium/low recommendation).
 
 use crate::config::Config;
-use crate::mb::{AlbumInfo, MusicBrainz, TrackInfo, extract_id};
-use crate::model::{Item, Value};
+use crate::hooks;
+use crate::mb::{AlbumInfo, MusicBrainz, TrackInfo};
+use crate::model::Item;
 use anyhow::Result;
 use deunicode::deunicode;
 use pathfinding::prelude::{Matrix, kuhn_munkres_min};
@@ -686,23 +687,21 @@ pub fn album_candidates(
         recommend(&ctx, &dists)
     };
     let mut cands = vec![];
-    let explicit: Vec<String> = ids.iter().filter_map(|i| extract_id(i)).collect();
-    if !ids.is_empty() {
-        for id in explicit {
-            match mb.release(&id) {
-                Ok(info) => add_candidate(&ctx, &cur, items, &mut cands, info),
+    // beets' `albums_for_ids`: each lookup's error is logged, not fatal.
+    let add_ids = |cands: &mut Vec<AlbumMatch>, ids: &[String]| {
+        for id in ids {
+            match mb.album_for_id(id) {
+                Ok(Some(info)) => add_candidate(&ctx, &cur, items, cands, info),
+                Ok(None) => {}
                 Err(e) => crate::logging::emit(format!("warning: {e:#}")),
             }
         }
+    };
+    if !ids.is_empty() {
+        add_ids(&mut cands, ids);
     } else {
-        if !cur.mb_albumid.is_empty()
-            && cur.id_consensus
-            && let Some(id) = extract_id(&cur.mb_albumid)
-        {
-            match mb.release(&id) {
-                Ok(info) => add_candidate(&ctx, &cur, items, &mut cands, info),
-                Err(e) => crate::logging::emit(format!("warning: {e:#}")),
-            }
+        if !cur.mb_albumid.is_empty() && cur.id_consensus {
+            add_ids(&mut cands, std::slice::from_ref(&cur.mb_albumid));
         }
         if !cands.is_empty() && !ctx.timid && rec_of(&cands) == Recommendation::Strong {
             crate::logging::debug!("ID match.");
@@ -714,18 +713,8 @@ pub fn album_candidates(
             _ => (cur.artist.clone(), cur.album.clone()),
         };
         let va_likely = cur.va || VA_ARTISTS.contains(&artist.to_lowercase().as_str());
-        let artist = if va_likely { String::new() } else { artist };
-        let mut release_ids = mb.search_releases(&artist, &album, items.len())?;
-        // Retry without the track count, which often filters out the right release.
-        if release_ids.is_empty() {
-            release_ids = mb.search_releases(&artist, &album, 0)?;
-        }
-        for id in release_ids {
-            match mb.release(&id) {
-                Ok(info) => add_candidate(&ctx, &cur, items, &mut cands, info),
-                Err(e) => crate::logging::emit(format!("warning: {e:#}")),
-            }
-        }
+        let release_ids = mb.search_releases(items, &artist, &album, va_likely)?;
+        add_ids(&mut cands, &release_ids);
     }
     sort_by_distance(&mut cands, |m| m.distance.distance());
     let rec = rec_of(&cands);
@@ -784,10 +773,11 @@ pub fn item_candidates(
         ids.to_vec()
     };
     if !trackids.is_empty() {
-        for id in trackids.iter().filter_map(|i| extract_id(i)) {
-            match mb.recording(&id) {
-                Ok(t) => push(&mut cands, t),
-                Err(e) => crate::logging::debug!("{e:#}"),
+        for id in &trackids {
+            match mb.track_for_id(id) {
+                Ok(Some(t)) => push(&mut cands, t),
+                Ok(None) => {}
+                Err(e) => crate::logging::emit(format!("warning: {e:#}")),
             }
         }
         let rec = rec_of(&mut cands);
@@ -819,180 +809,53 @@ pub fn item_candidates(
 
 // ------------------------------------------------------------- applying
 
-/// beets' `overwrite_null`: which fields a match may clear. A value the
-/// match doesn't have (empty, or 0) leaves the item's value alone unless
-/// its field is listed, by the match's name for it (`album_id`, `year`)
-/// or the item's (`mb_albumid`).
-struct Setter<'a> {
-    item: &'a mut Item,
-    nullable: &'a [String],
-}
-
-impl Setter<'_> {
-    fn may_clear(&self, key: &str, field: &str) -> bool {
-        self.nullable.iter().any(|n| n == key || n == field)
-    }
-
-    fn str(&mut self, key: &str, field: &str, v: &str) {
-        if !v.is_empty() || self.may_clear(key, field) {
-            self.item.set_str(field, v);
-        }
-    }
-
-    fn int(&mut self, key: &str, field: &str, v: i64) {
-        if v != 0 || self.may_clear(key, field) {
-            self.item.set_int(field, v);
-        }
-    }
-}
-
-fn overwrite_null(cfg: &Config, kind: &str) -> Vec<String> {
-    cfg.list(&format!("overwrite_null.{kind}"))
-}
-
+/// beets' `TrackMatch.apply_metadata` (without `from_scratch`, which the
+/// importer handles): `item.update(info.item_data)`.
 pub fn apply_track(cfg: &Config, item: &mut Item, t: &TrackInfo) {
-    let nullable = overwrite_null(cfg, "track");
-    let mut s = Setter {
-        item,
-        nullable: &nullable,
-    };
-    s.str("title", "title", &t.title);
-    s.str("artist", "artist", &t.artist);
-    s.str("artist_sort", "artist_sort", &t.artist_sort);
-    s.str("artist_credit", "artist_credit", &t.artist_credit);
-    s.str("track_id", "mb_trackid", &t.track_id);
-    s.str("artist_id", "mb_artistid", &t.artist_id);
-    s.str("release_track_id", "mb_releasetrackid", &t.release_track_id);
-    s.str("isrc", "isrc", &t.isrc);
-    item.set_str("data_source", "MusicBrainz");
-    sync_list_fields(item, TRACK_LIST_FIELDS);
+    let o = hooks::ApplyOpts::from_config(cfg);
+    hooks::update(item, &hooks::track_item_data(&t.to_data(), &o));
 }
 
-/// beets' `SYNCHRONISED_LIST_FIELDS` for a track: the single value and
-/// the list it heads.
-const TRACK_LIST_FIELDS: &[(&str, &str)] = &[
-    ("artist", "artists"),
-    ("mb_artistid", "mb_artistids"),
-    ("artist_sort", "artists_sort"),
-    ("artist_credit", "artists_credit"),
-];
-
-/// The same for an album.
-const ALBUM_LIST_FIELDS: &[(&str, &str)] = &[
-    ("albumartist", "albumartists"),
-    ("mb_albumartistid", "mb_albumartistids"),
-    ("albumartist_sort", "albumartists_sort"),
-    ("albumartist_credit", "albumartists_credit"),
-    ("albumtype", "albumtypes"),
-];
-
-/// beets' `correct_list_fields`: a single value heads its list (MediaFile
-/// writes only the list, so the single value is otherwise lost). Our
-/// MusicBrainz data has no lists of its own yet, so a set value becomes
-/// the whole list.
-fn sync_list_fields(item: &mut Item, pairs: &[(&str, &str)]) {
-    for (single, list) in pairs {
-        let v = item.str(single).to_string();
-        if !v.is_empty() {
-            item.set_list(list, &[v]);
-        }
+/// beets' `AlbumMatch.apply_metadata`: each matched item updated with its
+/// track merged with the album (`merge_with_album`).
+pub fn apply_album(cfg: &Config, items: &mut [Item], m: &AlbumMatch) {
+    let o = hooks::ApplyOpts::from_config(cfg);
+    for &(i, t) in &m.mapping {
+        let data = hooks::merge_with_album(&m.info.tracks[t], &m.info, &o);
+        hooks::update(&mut items[i], &data);
     }
 }
 
-pub fn apply_album(cfg: &Config, items: &mut [Item], m: &AlbumMatch) {
-    let info = &m.info;
-    let per_disc = cfg.bool("per_disc_numbering");
-    let original_date = cfg.bool("original_date");
-    let va_name = cfg.str("va_name");
-    let album_null = overwrite_null(cfg, "album");
-    let track_null = overwrite_null(cfg, "track");
-    for &(i, t) in &m.mapping {
-        let track = &info.tracks[t];
-        let item = &mut items[i];
-        apply_track(cfg, item, track);
-        {
-            // A track without its own artist gets the album's.
-            let mut s = Setter {
-                item,
-                nullable: &track_null,
-            };
-            if track.artist.is_empty() {
-                s.str("artist", "artist", &info.artist);
-                s.str("artist_sort", "artist_sort", &info.artist_sort);
-                s.str("artist_credit", "artist_credit", &info.artist_credit);
-                s.str("artist_id", "mb_artistid", &info.artist_id);
+/// beets' `AlbumMatch.apply_album_metadata`: the new album updated with
+/// the album's item data (fields that aren't album fields, such as
+/// `media`, become flexible attributes), and what changed inherited by
+/// its items, as beets' `Album.store` does: album fields the items share,
+/// and flexible attributes (so the items get the album's `media`).
+pub fn apply_album_metadata(
+    cfg: &Config,
+    album: &mut crate::model::Album,
+    items: &mut [Item],
+    info: &AlbumInfo,
+) {
+    use crate::model::{Kind, field_type};
+    let o = hooks::ApplyOpts::from_config(cfg);
+    for key in hooks::update(album, &hooks::album_item_data(&info.to_data(), &o)) {
+        let fixed = field_type(Kind::Album, &key).is_some();
+        if fixed && (key == "artpath" || field_type(Kind::Item, &key).is_none()) {
+            continue;
+        }
+        if let Some(v) = album.get(&key) {
+            for item in items.iter_mut() {
+                item.set(&key, v.clone());
             }
-            s.str("disctitle", "disctitle", &track.disctitle);
-            s.str("media", "media", &track.media);
         }
-        let mut s = Setter {
-            item,
-            nullable: &album_null,
-        };
-        s.str("album", "album", &info.album);
-        let albumartist = if info.va && !va_name.is_empty() {
-            va_name.as_str()
-        } else {
-            info.artist.as_str()
-        };
-        s.str("artist", "albumartist", albumartist);
-        s.str("artist_sort", "albumartist_sort", &info.artist_sort);
-        s.str("artist_credit", "albumartist_credit", &info.artist_credit);
-        s.str("album_id", "mb_albumid", &info.album_id);
-        s.str("artist_id", "mb_albumartistid", &info.artist_id);
-        s.str(
-            "releasegroup_id",
-            "mb_releasegroupid",
-            &info.releasegroup_id,
-        );
-        let (y, mo, d) = if original_date && info.original_year > 0 {
-            (info.original_year, info.original_month, info.original_day)
-        } else {
-            (info.year, info.month, info.day)
-        };
-        if y != 0 {
-            // As beets: with a year, a missing month and day are 0.
-            for (f, v) in [("year", y), ("month", mo), ("day", d)] {
-                s.item.set_int(f, v);
-            }
-        } else {
-            s.int("year", "year", y);
-            s.int("month", "month", mo);
-            s.int("day", "day", d);
-        }
-        s.int("original_year", "original_year", info.original_year);
-        s.int("original_month", "original_month", info.original_month);
-        s.int("original_day", "original_day", info.original_day);
-        s.int("mediums", "disctotal", info.mediums as i64);
-        for (f, v) in [
-            ("albumtype", &info.albumtype),
-            ("albumstatus", &info.albumstatus),
-            ("label", &info.label),
-            ("catalognum", &info.catalognum),
-            ("country", &info.country),
-            ("albumdisambig", &info.albumdisambig),
-            ("releasegroupdisambig", &info.releasegroupdisambig),
-        ] {
-            s.str(f, f, v);
-        }
-        let item = s.item;
-        if per_disc {
-            item.set_int("track", track.medium_index as i64);
-            item.set_int("tracktotal", track.medium_total as i64);
-        } else {
-            item.set_int("track", track.index as i64);
-            item.set_int("tracktotal", info.tracks.len() as i64);
-        }
-        item.set_int("disc", track.medium as i64);
-        item.set("comp", Value::Bool(info.va));
-        sync_list_fields(item, TRACK_LIST_FIELDS);
-        sync_list_fields(item, ALBUM_LIST_FIELDS);
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::model::Value;
 
     /// The defaults with `settings` (YAML) over them.
     fn config(settings: &str) -> Config {
@@ -1794,6 +1657,8 @@ mod tests {
             medium_total: 3,
             length: Some(len),
             track_id: format!("rec{idx}"),
+            // What MusicBrainz didn't give is None, as parsed.
+            nulls: ["isrc", "trackdisambig", "disctitle", "media"].into(),
             ..Default::default()
         };
         AlbumInfo {
@@ -1802,6 +1667,7 @@ mod tests {
             artist: "Band".into(),
             year: 2000,
             mediums: 1,
+            nulls: ["label", "catalognum", "albumdisambig", "asin"].into(),
             tracks: vec![
                 t("Alpha", 1, 200.0),
                 t("Beta", 2, 180.0),
@@ -1863,7 +1729,7 @@ mod tests {
         assert_eq!(items[0].int("original_year"), 1990);
         assert_eq!(items[0].str("isrc"), "OLD");
         assert_eq!(items[0].int("year"), 2000);
-        // ... and clear them when listed (by the match's name or the item's).
+        // ... and clear them when listed (by the match's name for them).
         let cfg = config("overwrite_null:\n  album: [label, original_year]\n  track: [isrc]\n");
         apply_album(&cfg, &mut items, &m);
         assert_eq!(items[0].str("label"), "");

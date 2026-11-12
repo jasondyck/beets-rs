@@ -83,7 +83,7 @@ pub fn load(cfg: &Config) -> Result<Vec<Box<dyn Plugin>>> {
             "embedart" => out.push(Box::new(embedart::EmbedArt::new(cfg))),
             // The autotagger's metadata source, as in beets 2.14: it's
             // queried only while this plugin is enabled.
-            "musicbrainz" => {}
+            "musicbrainz" => crate::mb::warn_deprecated_config(cfg),
             other => bail!(
                 "unknown plugin {other:?} (available: {})",
                 AVAILABLE.join(", ")

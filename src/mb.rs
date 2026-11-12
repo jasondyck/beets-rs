@@ -1,7 +1,13 @@
-//! MusicBrainz web service client (release + recording search and lookup).
+//! MusicBrainz metadata source: a port of beets 2.14's `musicbrainz`
+//! plugin (`beetsplug/musicbrainz.py`) and its web service helper
+//! (`beetsplug/_utils/musicbrainz.py`): release and recording search, the
+//! lookups with beets' includes, and the release/recording JSON as beets'
+//! `AlbumInfo`/`TrackInfo`.
 
 use crate::config::Config;
-use anyhow::{Context, Result, bail};
+use crate::hooks::{Data, V};
+use crate::model::Item;
+use anyhow::{Context, Result};
 use serde_json::Value as J;
 use std::collections::BTreeSet;
 use std::sync::Mutex;
@@ -13,6 +19,64 @@ const USER_AGENT: &str = concat!(
     env!("CARGO_PKG_VERSION"),
     " ( https://github.com/beetbox/beets )"
 );
+const BASE_URL: &str = "https://musicbrainz.org/";
+
+/// beets' `RELEASE_INCLUDES`.
+const RELEASE_INCLUDES: &[&str] = &[
+    "artists",
+    "media",
+    "recordings",
+    "release-groups",
+    "labels",
+    "artist-credits",
+    "aliases",
+    "recording-level-rels",
+    "work-rels",
+    "work-level-rels",
+    "artist-rels",
+    "isrcs",
+    "url-rels",
+    "release-rels",
+    "genres",
+    "tags",
+];
+/// beets' `RECORDING_INCLUDES`.
+const RECORDING_INCLUDES: &[&str] = &[
+    "artists",
+    "aliases",
+    "isrcs",
+    "work-rels",
+    "work-level-rels",
+    "artist-rels",
+];
+/// beets' `BROWSE_INCLUDES`, for releases too big to come with their
+/// recordings' relations.
+const BROWSE_INCLUDES: &[&str] = &[
+    "artist-credits",
+    "aliases",
+    "work-rels",
+    "artist-rels",
+    "recording-rels",
+    "release-rels",
+];
+const BROWSE_CHUNKSIZE: usize = 100;
+const BROWSE_MAXTRACKS: usize = 500;
+
+/// beets' `FIELDS_TO_MB_KEYS`: `musicbrainz.extra_tags` and the search
+/// fields they fill.
+const FIELDS_TO_MB_KEYS: &[(&str, &str)] = &[
+    ("barcode", "barcode"),
+    ("catalognum", "catno"),
+    ("country", "country"),
+    ("label", "label"),
+    ("media", "format"),
+    ("year", "date"),
+    ("tracks", "tracks"),
+    ("alias", "alias"),
+];
+
+/// `musicbrainz.external_ids` sources, in beets' order.
+const EXTERNAL_SOURCES: &[&str] = &["discogs", "bandcamp", "spotify", "deezer", "tidal"];
 
 #[derive(Debug, Clone, Default)]
 pub struct TrackInfo {
@@ -23,8 +87,13 @@ pub struct TrackInfo {
     pub artist_id: String,
     pub artist_sort: String,
     pub artist_credit: String,
+    pub artists: Vec<String>,
+    pub artists_ids: Vec<String>,
+    pub artists_sort: Vec<String>,
+    pub artists_credit: Vec<String>,
     pub length: Option<f64>,
-    /// 1-based position across the whole release.
+    /// 1-based position across the whole release; 0 (None) for a
+    /// recording on its own, as are the other positional fields.
     pub index: usize,
     pub medium: usize,
     pub medium_index: usize,
@@ -37,6 +106,20 @@ pub struct TrackInfo {
     pub trackdisambig: String,
     pub data_source: String,
     pub data_url: String,
+    /// The last work related to the recording, and its composers and
+    /// lyricists (beets' `_parse_work_relations`).
+    pub work: Option<String>,
+    pub mb_workid: Option<String>,
+    pub composers: Option<Vec<String>>,
+    pub composers_ids: Vec<String>,
+    pub composer_sort: Option<String>,
+    pub lyricists: Option<Vec<String>>,
+    pub lyricists_ids: Vec<String>,
+    /// The recording's arrangers and remixers.
+    pub arrangers: Option<Vec<String>>,
+    pub arrangers_ids: Vec<String>,
+    pub remixers: Option<Vec<String>>,
+    pub remixers_ids: Vec<String>,
     /// Fields beets would have as None (MusicBrainz gave nothing), so that
     /// a disambiguation string or `match.required` sees them as beets does.
     pub nulls: BTreeSet<&'static str>,
@@ -50,6 +133,10 @@ pub struct AlbumInfo {
     pub artist_id: String,
     pub artist_sort: String,
     pub artist_credit: String,
+    pub artists: Vec<String>,
+    pub artists_ids: Vec<String>,
+    pub artists_sort: Vec<String>,
+    pub artists_credit: Vec<String>,
     pub va: bool,
     pub year: i64,
     pub month: i64,
@@ -61,9 +148,11 @@ pub struct AlbumInfo {
     pub label: String,
     pub catalognum: String,
     pub albumtype: String,
+    pub albumtypes: Vec<String>,
     pub albumstatus: String,
     pub albumdisambig: String,
     pub releasegroup_id: String,
+    pub release_group_title: Option<String>,
     pub releasegroupdisambig: String,
     pub media: String,
     pub mediums: usize,
@@ -72,113 +161,175 @@ pub struct AlbumInfo {
     pub asin: String,
     pub script: String,
     pub language: String,
+    /// `musicbrainz.genres`: the release group's and release's genres (or
+    /// tags), most counted first.
+    pub genres: Option<Vec<String>>,
+    /// `musicbrainz.external_ids`: (`discogs_album_id`, id), in the order
+    /// beets finds them.
+    pub external_ids: Vec<(String, Option<String>)>,
     pub data_source: String,
     pub data_url: String,
     /// Fields beets would have as None (see [`TrackInfo::nulls`]).
     pub nulls: BTreeSet<&'static str>,
 }
 
-/// Python's `str()` of a float: always with a decimal point.
-fn py_float(f: f64) -> String {
-    if f.is_finite() && f.fract() == 0.0 && f.abs() < 1e16 {
-        format!("{f:.1}")
+/// A string field: None if listed in `nulls`.
+fn nullable(nulls: &BTreeSet<&'static str>, name: &str, v: &str) -> V {
+    if nulls.contains(name) {
+        V::None
     } else {
-        f.to_string()
+        V::Str(v.to_string())
     }
 }
 
-/// A string field for [`AlbumInfo::field`]: `Some(None)` if it's None.
-fn shown(nulls: &BTreeSet<&'static str>, name: &'static str, v: String) -> Option<Option<String>> {
-    Some((!nulls.contains(name)).then_some(v))
-}
-
-fn int_or_null(v: i64) -> Option<String> {
-    (v != 0).then(|| v.to_string())
+fn list(v: &[String]) -> V {
+    V::List(v.to_vec())
 }
 
 impl AlbumInfo {
+    /// The info as beets' `dict(album_info)` (without `tracks`).
+    pub fn to_data(&self) -> Data {
+        let n = &self.nulls;
+        let s = |k: &str, v: &str| nullable(n, k, v);
+        let mut d: Data = [
+            ("album", V::Str(self.album.clone())),
+            ("album_id", V::Str(self.album_id.clone())),
+            ("albumdisambig", s("albumdisambig", &self.albumdisambig)),
+            ("albumstatus", s("albumstatus", &self.albumstatus)),
+            ("albumtype", s("albumtype", &self.albumtype)),
+            ("albumtypes", list(&self.albumtypes)),
+            ("artist", V::Str(self.artist.clone())),
+            ("artist_credit", V::Str(self.artist_credit.clone())),
+            ("artist_id", V::Str(self.artist_id.clone())),
+            ("artist_sort", V::Str(self.artist_sort.clone())),
+            ("artists", list(&self.artists)),
+            ("artists_credit", list(&self.artists_credit)),
+            ("artists_ids", list(&self.artists_ids)),
+            ("artists_sort", list(&self.artists_sort)),
+            ("asin", s("asin", &self.asin)),
+            ("barcode", s("barcode", &self.barcode)),
+            ("catalognum", s("catalognum", &self.catalognum)),
+            ("country", s("country", &self.country)),
+            ("data_source", s("data_source", &self.data_source)),
+            ("data_url", s("data_url", &self.data_url)),
+            ("day", V::int_or_none(self.day)),
+            ("discogs_albumid", V::None),
+            ("discogs_artistid", V::None),
+            ("discogs_labelid", V::None),
+            ("genres", V::opt_list(self.genres.clone())),
+            ("label", s("label", &self.label)),
+            ("language", s("language", &self.language)),
+            ("media", s("media", &self.media)),
+            ("mediums", V::Int(self.mediums as i64)),
+            ("month", V::int_or_none(self.month)),
+            ("original_day", V::int_or_none(self.original_day)),
+            ("original_month", V::int_or_none(self.original_month)),
+            ("original_year", V::int_or_none(self.original_year)),
+            (
+                "release_group_title",
+                V::opt_str(self.release_group_title.clone()),
+            ),
+            ("releasegroup_id", V::Str(self.releasegroup_id.clone())),
+            (
+                "releasegroupdisambig",
+                s("releasegroupdisambig", &self.releasegroupdisambig),
+            ),
+            ("script", s("script", &self.script)),
+            ("style", V::None),
+            ("va", V::Bool(self.va)),
+            ("year", V::int_or_none(self.year)),
+        ]
+        .into_iter()
+        .map(|(k, v)| (k.to_string(), v))
+        .collect();
+        for (k, v) in &self.external_ids {
+            d.insert(k.clone(), V::opt_str(v.clone()));
+        }
+        d
+    }
+
     /// beets' `info[name]`, as `str()` shows it: None if the info has no
     /// such field, `Some(None)` if the field is None.
     pub fn field(&self, name: &str) -> Option<Option<String>> {
-        let n = &self.nulls;
-        Some(match name {
-            "album" => Some(self.album.clone()),
-            "album_id" => Some(self.album_id.clone()),
-            "artist" => Some(self.artist.clone()),
-            "artist_id" => Some(self.artist_id.clone()),
-            "artist_sort" => Some(self.artist_sort.clone()),
-            "artist_credit" => Some(self.artist_credit.clone()),
-            "va" => Some(if self.va { "True" } else { "False" }.into()),
-            "year" => int_or_null(self.year),
-            "month" => int_or_null(self.month),
-            "day" => int_or_null(self.day),
-            "original_year" => int_or_null(self.original_year),
-            "original_month" => int_or_null(self.original_month),
-            "original_day" => int_or_null(self.original_day),
-            "mediums" => Some(self.mediums.to_string()),
-            "country" => return shown(n, "country", self.country.clone()),
-            "label" => return shown(n, "label", self.label.clone()),
-            "catalognum" => return shown(n, "catalognum", self.catalognum.clone()),
-            "albumtype" => return shown(n, "albumtype", self.albumtype.clone()),
-            "albumstatus" => return shown(n, "albumstatus", self.albumstatus.clone()),
-            "albumdisambig" => return shown(n, "albumdisambig", self.albumdisambig.clone()),
-            "releasegroup_id" => Some(self.releasegroup_id.clone()),
-            "releasegroupdisambig" => {
-                return shown(n, "releasegroupdisambig", self.releasegroupdisambig.clone());
-            }
-            "media" => return shown(n, "media", self.media.clone()),
-            "barcode" => return shown(n, "barcode", self.barcode.clone()),
-            "asin" => return shown(n, "asin", self.asin.clone()),
-            "script" => return shown(n, "script", self.script.clone()),
-            "language" => return shown(n, "language", self.language.clone()),
-            "data_source" => return shown(n, "data_source", self.data_source.clone()),
-            "data_url" => return shown(n, "data_url", self.data_url.clone()),
-            _ => return None,
-        })
+        if name == "tracks" {
+            return Some(Some(format!("<{} tracks>", self.tracks.len())));
+        }
+        let v = self.to_data().remove(name)?;
+        Some((v != V::None).then(|| v.py_str()))
     }
 }
 
 impl TrackInfo {
+    /// The info as beets' `dict(track_info)`.
+    pub fn to_data(&self) -> Data {
+        let n = &self.nulls;
+        let s = |k: &str, v: &str| nullable(n, k, v);
+        let positioned = self.index != 0;
+        let pos = |v: usize| {
+            if positioned {
+                V::Int(v as i64)
+            } else {
+                V::None
+            }
+        };
+        [
+            ("album", V::None),
+            ("arrangers", V::opt_list(self.arrangers.clone())),
+            ("arrangers_ids", list(&self.arrangers_ids)),
+            ("artist", V::Str(self.artist.clone())),
+            ("artist_credit", V::Str(self.artist_credit.clone())),
+            ("artist_id", V::Str(self.artist_id.clone())),
+            ("artist_sort", V::Str(self.artist_sort.clone())),
+            ("artists", list(&self.artists)),
+            ("artists_credit", list(&self.artists_credit)),
+            ("artists_ids", list(&self.artists_ids)),
+            ("artists_sort", list(&self.artists_sort)),
+            ("bpm", V::None),
+            ("composer_sort", V::opt_str(self.composer_sort.clone())),
+            ("composers", V::opt_list(self.composers.clone())),
+            ("composers_ids", list(&self.composers_ids)),
+            ("data_source", s("data_source", &self.data_source)),
+            ("data_url", s("data_url", &self.data_url)),
+            ("disctitle", s("disctitle", &self.disctitle)),
+            ("genres", V::None),
+            ("index", pos(self.index)),
+            ("initial_key", V::None),
+            ("isrc", s("isrc", &self.isrc)),
+            ("length", self.length.map_or(V::None, V::Float)),
+            ("lyricists", V::opt_list(self.lyricists.clone())),
+            ("lyricists_ids", list(&self.lyricists_ids)),
+            ("mb_workid", V::opt_str(self.mb_workid.clone())),
+            ("media", s("media", &self.media)),
+            ("medium", pos(self.medium)),
+            ("medium_index", pos(self.medium_index)),
+            ("medium_total", pos(self.medium_total)),
+            (
+                "release_track_id",
+                if self.release_track_id.is_empty() {
+                    V::None
+                } else {
+                    V::Str(self.release_track_id.clone())
+                },
+            ),
+            ("remixers", V::opt_list(self.remixers.clone())),
+            ("remixers_ids", list(&self.remixers_ids)),
+            ("title", V::Str(self.title.clone())),
+            ("track_alt", V::opt_str(self.track_alt.clone())),
+            ("track_id", V::Str(self.track_id.clone())),
+            ("trackdisambig", s("trackdisambig", &self.trackdisambig)),
+            ("work", V::opt_str(self.work.clone())),
+            ("work_disambig", V::None),
+        ]
+        .into_iter()
+        .map(|(k, v)| (k.to_string(), v))
+        .collect()
+    }
+
     /// beets' `info[name]` for a track (see [`AlbumInfo::field`]).
     pub fn field(&self, name: &str) -> Option<Option<String>> {
-        let n = &self.nulls;
-        let num = |v: usize| (v != 0).then(|| v.to_string());
-        Some(match name {
-            "title" => Some(self.title.clone()),
-            "track_id" => Some(self.track_id.clone()),
-            "release_track_id" => Some(self.release_track_id.clone()).filter(|s| !s.is_empty()),
-            "artist" => Some(self.artist.clone()),
-            "artist_id" => Some(self.artist_id.clone()),
-            "artist_sort" => Some(self.artist_sort.clone()),
-            "artist_credit" => Some(self.artist_credit.clone()),
-            "length" => self.length.map(py_float),
-            "index" => num(self.index),
-            "medium" => num(self.medium),
-            "medium_index" => (self.index != 0).then(|| self.medium_index.to_string()),
-            "medium_total" => num(self.medium_total),
-            "disctitle" => return shown(n, "disctitle", self.disctitle.clone()),
-            "media" => return shown(n, "media", self.media.clone()),
-            "track_alt" => self.track_alt.clone(),
-            "trackdisambig" => return shown(n, "trackdisambig", self.trackdisambig.clone()),
-            "isrc" => return shown(n, "isrc", self.isrc.clone()),
-            // beets 2.14's MusicBrainz source never fills a track's album.
-            "album" => None,
-            "data_source" => return shown(n, "data_source", self.data_source.clone()),
-            "data_url" => return shown(n, "data_url", self.data_url.clone()),
-            _ => return None,
-        })
+        let v = self.to_data().remove(name)?;
+        Some((v != V::None).then(|| v.py_str()))
     }
-}
-
-pub struct MusicBrainz {
-    agent: ureq::Agent,
-    base: String,
-    interval: Duration,
-    /// The last request's time; locked while waiting for the next slot, so
-    /// threads sharing the client share the rate limit.
-    last: Mutex<Option<Instant>>,
-    pub search_limit: usize,
-    opts: ParseOpts,
 }
 
 /// Which MusicBrainz alias to use for names and titles: `import.languages`,
@@ -228,8 +379,9 @@ impl AliasPrefs {
 }
 
 /// What shapes a release beyond aliases: beets' `match.ignored_media`,
-/// `ignore_data_tracks`, `ignore_video_tracks` and, for the release event,
-/// `match.preferred.countries`.
+/// `ignore_data_tracks`, `ignore_video_tracks`, for the release event
+/// `match.preferred.countries`, `va_name`, and the plugin's `genres`,
+/// `genres_tag` and `external_ids`.
 #[derive(Debug, Clone)]
 pub struct ParseOpts {
     pub aliases: AliasPrefs,
@@ -237,6 +389,12 @@ pub struct ParseOpts {
     pub ignore_data_tracks: bool,
     pub ignore_video_tracks: bool,
     pub preferred_countries: Vec<String>,
+    pub va_name: String,
+    /// `musicbrainz.genres`: the JSON field to read them from ("genres",
+    /// or "tags" with `genres_tag: tag`), or None.
+    pub genres_field: Option<&'static str>,
+    /// `musicbrainz.external_ids`: the sources wanted.
+    pub external_ids: Vec<String>,
 }
 
 impl Default for ParseOpts {
@@ -247,6 +405,9 @@ impl Default for ParseOpts {
             ignore_data_tracks: true,
             ignore_video_tracks: true,
             preferred_countries: vec![],
+            va_name: "Various Artists".into(),
+            genres_field: None,
+            external_ids: vec![],
         }
     }
 }
@@ -259,6 +420,19 @@ impl ParseOpts {
             ignore_data_tracks: cfg.bool("match.ignore_data_tracks"),
             ignore_video_tracks: cfg.bool("match.ignore_video_tracks"),
             preferred_countries: cfg.list("match.preferred.countries"),
+            va_name: cfg.str("va_name"),
+            genres_field: cfg.bool("musicbrainz.genres").then(|| {
+                if cfg.str("musicbrainz.genres_tag") == "tag" {
+                    "tags"
+                } else {
+                    "genres"
+                }
+            }),
+            external_ids: EXTERNAL_SOURCES
+                .iter()
+                .filter(|src| cfg.bool(&format!("musicbrainz.external_ids.{src}")))
+                .map(|s| s.to_string())
+                .collect(),
         }
     }
 }
@@ -275,11 +449,27 @@ fn s(v: &J, key: &str) -> String {
         .to_string()
 }
 
-/// Lucene-escape a search term.
+fn arr<'j>(v: &'j J, key: &str) -> &'j [J] {
+    v.get(key)
+        .and_then(|x| x.as_array())
+        .map(|a| a.as_slice())
+        .unwrap_or(&[])
+}
+
+/// beets' normalised `<target-type>_relations`: an entity's relations to
+/// one kind of target, in order.
+fn relations<'j>(v: &'j J, target: &str) -> Vec<&'j J> {
+    arr(v, "relations")
+        .iter()
+        .filter(|r| r.get("target-type").and_then(|t| t.as_str()) == Some(target))
+        .collect()
+}
+
+/// Lucene-escape a search term (beets' `LUCENE_SPECIAL_CHAR_PAT`).
 fn escape(term: &str) -> String {
     let mut out = String::new();
     for c in term.chars() {
-        if "+-&|!(){}[]^\"~*?:\\/".contains(c) {
+        if "-+&|!(){}[]^\"~*?:\\/".contains(c) {
             out.push('\\');
         }
         out.push(c);
@@ -287,6 +477,8 @@ fn escape(term: &str) -> String {
     out
 }
 
+/// beets' `_get_date`: a partial `YYYY-MM-DD` as numbers, 0 for each
+/// missing or unparsable part.
 fn parse_date(d: &str) -> (i64, i64, i64) {
     let mut it = d.split('-').map(|p| p.parse::<i64>().unwrap_or(0));
     (
@@ -296,197 +488,133 @@ fn parse_date(d: &str) -> (i64, i64, i64) {
     )
 }
 
-/// Flatten an artist-credit list into (display name, first artist id, sort
-/// name, credit name), using each artist's preferred alias for the name and
-/// sort name (and the credit, with `aliases_as_credits`).
-fn artist_credit(ac: Option<&J>, prefs: &AliasPrefs) -> (String, String, String, String) {
-    let Some(list) = ac.and_then(|a| a.as_array()) else {
-        return Default::default();
-    };
-    let (mut name, mut sort, mut credit, mut id) =
-        (String::new(), String::new(), String::new(), String::new());
-    for c in list {
-        let artist = c.get("artist").cloned().unwrap_or(J::Null);
-        let join = s(c, "joinphrase");
-        let alias = prefs.preferred(&artist);
-        let named = alias.unwrap_or(&artist);
-        let aname = s(named, "name");
-        let cname = match alias {
-            Some(al) if prefs.as_credits => s(al, "name"),
-            _ => c
-                .get("name")
-                .and_then(|x| x.as_str())
-                .map(String::from)
-                .unwrap_or(aname.clone()),
-        };
-        name.push_str(&aname);
-        name.push_str(&join);
-        credit.push_str(&cname);
-        credit.push_str(&join);
-        let sn = s(named, "sort-name");
-        sort.push_str(if sn.is_empty() { &aname } else { &sn });
-        sort.push_str(&join);
-        if id.is_empty() {
-            id = s(&artist, "id");
-        }
-    }
-    (name, id, sort, credit)
+/// beets' `ArtistInfo`, from `_parse_artist_credits`.
+#[derive(Debug, Default)]
+struct Credits {
+    artist: String,
+    artist_id: String,
+    artist_sort: String,
+    artist_credit: String,
+    artists: Vec<String>,
+    artists_ids: Vec<String>,
+    artists_sort: Vec<String>,
+    artists_credit: Vec<String>,
 }
 
-impl MusicBrainz {
-    pub fn new(cfg: &Config) -> Self {
-        let scheme = if cfg.bool("musicbrainz.https") {
-            "https"
-        } else {
-            "http"
+/// beets' `_parse_artist_credits`: names (or their preferred aliases)
+/// joined with the join phrases, and the parallel lists.
+fn parse_credits(credits: &[J], prefs: &AliasPrefs) -> Credits {
+    let mut c = Credits::default();
+    for el in credits {
+        let artist = el.get("artist").unwrap_or(&J::Null);
+        c.artists_ids.push(s(artist, "id"));
+        let alias = prefs.preferred(artist);
+        let named = alias.unwrap_or(artist);
+        let credited = match alias {
+            Some(al) if prefs.as_credits => al,
+            _ => el,
         };
-        let host = cfg.str("musicbrainz.host");
-        let rate = cfg.f64("musicbrainz.ratelimit").max(0.0);
-        let per = cfg.f64("musicbrainz.ratelimit_interval").max(0.0);
-        let interval = if rate > 0.0 {
-            Duration::from_secs_f64(per / rate)
-        } else {
-            Duration::ZERO
-        };
-        MusicBrainz {
-            agent: ureq::AgentBuilder::new()
-                .user_agent(USER_AGENT)
-                .timeout(Duration::from_secs(30))
-                .build(),
-            base: format!("{scheme}://{host}/ws/2"),
-            interval,
-            last: Mutex::new(None),
-            search_limit: cfg.f64("musicbrainz.searchlimit").max(1.0) as usize,
-            opts: ParseOpts::from_config(cfg),
+        let join = s(el, "joinphrase");
+        for (name, joined, multi) in [
+            (s(named, "name"), &mut c.artist, &mut c.artists),
+            (
+                s(named, "sort-name"),
+                &mut c.artist_sort,
+                &mut c.artists_sort,
+            ),
+            (
+                s(credited, "name"),
+                &mut c.artist_credit,
+                &mut c.artists_credit,
+            ),
+        ] {
+            joined.push_str(&name);
+            joined.push_str(&join);
+            multi.push(name);
         }
     }
+    c.artist_id = c.artists_ids.first().cloned().unwrap_or_default();
+    c
+}
 
-    fn throttle(&self) {
-        let mut last = self.last.lock().unwrap_or_else(|e| e.into_inner());
-        if let Some(t) = *last {
-            let elapsed = t.elapsed();
-            if elapsed < self.interval {
-                std::thread::sleep(self.interval - elapsed);
-            }
-        }
-        *last = Some(Instant::now());
-    }
-
-    fn get(&self, path: &str, query: &[(&str, &str)]) -> Result<J> {
-        let url = format!("{}/{}", self.base, path);
-        crate::logging::trace!("musicbrainz: GET {url} {query:?}");
-        let mut attempt = 0;
-        loop {
-            self.throttle();
-            let mut req = self.agent.get(&url).query("fmt", "json");
-            for (k, v) in query {
-                req = req.query(k, v);
-            }
-            match req.call() {
-                Ok(resp) => return resp.into_json().context("parsing MusicBrainz response"),
-                Err(ureq::Error::Status(503 | 429, _)) if attempt < 4 => {
-                    attempt += 1;
-                    std::thread::sleep(Duration::from_secs(attempt));
+/// beets' `_parse_work_relations` and `_parse_artist_relations` into a
+/// track.
+fn parse_relations(info: &mut TrackInfo, r: &J) {
+    let works = relations(r, "work");
+    let (mut lyricists, mut lyricists_ids) = (vec![], vec![]);
+    let (mut composers, mut composers_ids, mut composer_sort) = (vec![], vec![], vec![]);
+    for wr in works.iter().filter(|w| s(w, "type") == "performance") {
+        let work = wr.get("work").unwrap_or(&J::Null);
+        for ar in relations(work, "artist") {
+            let a = ar.get("artist").unwrap_or(&J::Null);
+            match s(ar, "type").as_str() {
+                "lyricist" => {
+                    lyricists.push(s(a, "name"));
+                    lyricists_ids.push(s(a, "id"));
                 }
-                Err(ureq::Error::Status(404, _)) => bail!("not found on MusicBrainz: {path}"),
-                Err(e) => return Err(e).with_context(|| format!("MusicBrainz request {path}")),
+                "composer" => {
+                    composers.push(s(a, "name"));
+                    composers_ids.push(s(a, "id"));
+                    composer_sort.push(s(a, "sort-name"));
+                }
+                _ => {}
             }
         }
     }
-
-    /// Search releases; returns MBIDs in score order.
-    pub fn search_releases(&self, artist: &str, album: &str, tracks: usize) -> Result<Vec<String>> {
-        let mut parts = vec![];
-        if !album.trim().is_empty() {
-            parts.push(format!("release:({})", escape(album.trim())));
-        }
-        if !artist.trim().is_empty() {
-            parts.push(format!("artist:({})", escape(artist.trim())));
-        }
-        if parts.is_empty() {
-            return Ok(vec![]);
-        }
-        if tracks > 0 {
-            parts.push(format!("tracks:{tracks}"));
-        }
-        let q = parts.join(" AND ");
-        let limit = self.search_limit.to_string();
-        crate::logging::debug!("Searching for MusicBrainz releases with: {q}");
-        let res = self.get("release/", &[("query", &q), ("limit", &limit)])?;
-        Ok(res
-            .get("releases")
-            .and_then(|r| r.as_array())
-            .map(|a| {
-                a.iter()
-                    .map(|r| s(r, "id"))
-                    .filter(|id| !id.is_empty())
-                    .collect()
-            })
-            .unwrap_or_default())
+    // As beets (a TODO there): the last work, of any relation type.
+    if let Some(last) = works.last() {
+        let work = last.get("work").unwrap_or(&J::Null);
+        info.work = Some(s(work, "title"));
+        info.mb_workid = Some(s(work, "id"));
     }
+    let some = |v: Vec<String>| (!v.is_empty()).then_some(v);
+    info.lyricists = some(lyricists);
+    info.lyricists_ids = lyricists_ids;
+    info.composers = some(composers);
+    info.composers_ids = composers_ids;
+    info.composer_sort = (!composer_sort.is_empty()).then(|| composer_sort.join(", "));
 
-    pub fn release(&self, id: &str) -> Result<AlbumInfo> {
-        crate::logging::debug!("Requesting MusicBrainz release {id}");
-        let j = self.get(
-            &format!("release/{id}"),
-            &[(
-                "inc",
-                "recordings artist-credits labels release-groups isrcs aliases",
-            )],
-        )?;
-        Ok(parse_release(&j, &self.opts))
-    }
-
-    pub fn search_recordings(&self, artist: &str, title: &str) -> Result<Vec<TrackInfo>> {
-        let mut parts = vec![];
-        if !title.trim().is_empty() {
-            parts.push(format!("recording:({})", escape(title.trim())));
+    let (mut arrangers, mut arrangers_ids, mut remixers, mut remixers_ids) =
+        (vec![], vec![], vec![], vec![]);
+    for ar in relations(r, "artist") {
+        let a = ar.get("artist").unwrap_or(&J::Null);
+        match s(ar, "type").as_str() {
+            "arranger" => {
+                arrangers.push(s(a, "name"));
+                arrangers_ids.push(s(a, "id"));
+            }
+            "remixer" => {
+                remixers.push(s(a, "name"));
+                remixers_ids.push(s(a, "id"));
+            }
+            _ => {}
         }
-        if !artist.trim().is_empty() {
-            parts.push(format!("artist:({})", escape(artist.trim())));
-        }
-        if parts.is_empty() {
-            return Ok(vec![]);
-        }
-        let limit = self.search_limit.to_string();
-        crate::logging::debug!(
-            "Searching for MusicBrainz recordings with: {}",
-            parts.join(" AND ")
-        );
-        let res = self.get(
-            "recording/",
-            &[("query", &parts.join(" AND ")), ("limit", &limit)],
-        )?;
-        Ok(res
-            .get("recordings")
-            .and_then(|r| r.as_array())
-            .map(|a| {
-                a.iter()
-                    .map(|r| parse_recording(r, &self.opts.aliases))
-                    .collect()
-            })
-            .unwrap_or_default())
     }
-
-    pub fn recording(&self, id: &str) -> Result<TrackInfo> {
-        crate::logging::debug!("Requesting MusicBrainz recording {id}");
-        let j = self.get(
-            &format!("recording/{id}"),
-            &[("inc", "artist-credits isrcs aliases")],
-        )?;
-        Ok(parse_recording(&j, &self.opts.aliases))
-    }
+    info.arrangers = some(arrangers);
+    info.arrangers_ids = arrangers_ids;
+    info.remixers = some(remixers);
+    info.remixers_ids = remixers_ids;
 }
 
 /// beets' `track_info`: a recording as a track. Positional fields (index,
 /// medium, ...) are None until the release sets them.
-pub fn parse_recording(r: &J, prefs: &AliasPrefs) -> TrackInfo {
-    let (artist, artist_id, artist_sort, credit) = artist_credit(r.get("artist-credit"), prefs);
-    let isrcs: Vec<&str> = r
-        .get("isrcs")
-        .and_then(|i| i.as_array())
-        .map(|a| a.iter().filter_map(|i| i.as_str()).collect())
-        .unwrap_or_default();
+pub fn parse_recording(r: &J, opts: &ParseOpts) -> TrackInfo {
+    parse_recording_with(r, opts, None, None, None)
+}
+
+/// [`parse_recording`] with a release track's title, credits and length
+/// in place of the recording's (beets copies the recording and overrides
+/// those keys before `track_info`).
+fn parse_recording_with(
+    r: &J,
+    opts: &ParseOpts,
+    title: Option<String>,
+    credits: Option<&[J]>,
+    length: Option<f64>,
+) -> TrackInfo {
+    let prefs = &opts.aliases;
+    let c = parse_credits(credits.unwrap_or(arr(r, "artist-credit")), prefs);
+    let isrcs: Vec<&str> = arr(r, "isrcs").iter().filter_map(|i| i.as_str()).collect();
     let mut nulls: BTreeSet<&'static str> = ["disctitle", "media"].into();
     if isrcs.is_empty() {
         nulls.insert("isrc");
@@ -495,26 +623,29 @@ pub fn parse_recording(r: &J, prefs: &AliasPrefs) -> TrackInfo {
     if trackdisambig.is_empty() {
         nulls.insert("trackdisambig");
     }
+    let length = length.or_else(|| r.get("length").and_then(|l| l.as_f64()));
     let id = s(r, "id");
-    TrackInfo {
-        title: prefs.title(r),
-        data_url: format!("https://musicbrainz.org/recording/{id}"),
+    let mut info = TrackInfo {
+        title: title.unwrap_or_else(|| prefs.title(r)),
+        data_url: format!("{BASE_URL}recording/{id}"),
         track_id: id,
-        artist,
-        artist_id,
-        artist_sort,
-        artist_credit: credit,
-        length: r
-            .get("length")
-            .and_then(|l| l.as_f64())
-            .filter(|l| *l != 0.0)
-            .map(|ms| ms / 1000.0),
+        artist: c.artist,
+        artist_id: c.artist_id,
+        artist_sort: c.artist_sort,
+        artist_credit: c.artist_credit,
+        artists: c.artists,
+        artists_ids: c.artists_ids,
+        artists_sort: c.artists_sort,
+        artists_credit: c.artists_credit,
+        length: length.filter(|l| *l != 0.0).map(|ms| ms / 1000.0),
         isrc: isrcs.join(";"),
         trackdisambig,
         data_source: "MusicBrainz".into(),
         nulls,
         ..Default::default()
-    }
+    };
+    parse_relations(&mut info, r);
+    info
 }
 
 /// beets' `_album_media`: the media's shared format, else their common base
@@ -528,13 +659,14 @@ fn album_media(medias: &BTreeSet<Option<String>>) -> Option<String> {
         .iter()
         .map(|m| {
             m.as_ref()
+                .filter(|m| !m.is_empty())
                 .map(|m| m.split(" (").next().unwrap_or("").to_string())
         })
         .collect();
-    match bases.len() {
-        1 => bases.into_iter().next().flatten(),
-        0 => None,
-        _ => Some("Media".into()),
+    if bases.len() == 1 {
+        bases.into_iter().next().flatten()
+    } else {
+        Some("Media".into())
     }
 }
 
@@ -542,26 +674,19 @@ fn album_media(medias: &BTreeSet<Option<String>>) -> Option<String> {
 /// ignored) the data tracks, without "[data track]" placeholders or (with
 /// `ignore_video_tracks`) videos.
 fn medium_tracks(medium: &J, opts: &ParseOpts) -> Vec<TrackInfo> {
-    let arr = |k: &str| {
-        medium
-            .get(k)
-            .and_then(|t| t.as_array())
-            .cloned()
-            .unwrap_or_default()
-    };
-    let mut all = vec![];
+    let mut all: Vec<&J> = vec![];
     if let Some(p) = medium.get("pregap").filter(|p| !p.is_null()) {
-        all.push(p.clone());
+        all.push(p);
     }
-    all.extend(arr("tracks"));
+    all.extend(arr(medium, "tracks"));
     if !opts.ignore_data_tracks {
-        all.extend(arr("data-tracks"));
+        all.extend(arr(medium, "data-tracks"));
     }
-    let valid: Vec<J> = all
+    let valid: Vec<&J> = all
         .into_iter()
         .filter(|t| {
-            let rec = t.get("recording").cloned().unwrap_or(J::Null);
-            s(&rec, "title") != "[data track]"
+            let rec = t.get("recording").unwrap_or(&J::Null);
+            s(rec, "title") != "[data track]"
                 && !(opts.ignore_video_tracks
                     && rec.get("video").and_then(|v| v.as_bool()) == Some(true))
         })
@@ -574,31 +699,17 @@ fn medium_tracks(medium: &J, opts: &ParseOpts) -> Vec<TrackInfo> {
     valid
         .iter()
         .map(|t| {
-            let rec = t.get("recording").cloned().unwrap_or(J::Null);
-            let mut info = parse_recording(&rec, prefs);
+            let rec = t.get("recording").unwrap_or(&J::Null);
             // The release's track title/credit/length win over the
             // recording's, unless the recording has a preferred alias.
-            let title = s(t, "title");
-            if !title.is_empty() && prefs.preferred(&rec).is_none() {
-                info.title = title;
-            }
-            if t.get("artist-credit")
-                .and_then(|a| a.as_array())
-                .is_some_and(|a| !a.is_empty())
-            {
-                let (a, aid, asort, acred) = artist_credit(t.get("artist-credit"), prefs);
-                info.artist = a;
-                info.artist_id = aid;
-                info.artist_sort = asort;
-                info.artist_credit = acred;
-            }
-            if let Some(l) = t
+            let title =
+                Some(s(t, "title")).filter(|t| !t.is_empty() && prefs.preferred(rec).is_none());
+            let credits = Some(arr(t, "artist-credit")).filter(|a| !a.is_empty());
+            let length = t
                 .get("length")
                 .and_then(|l| l.as_f64())
-                .filter(|l| *l != 0.0)
-            {
-                info.length = Some(l / 1000.0);
-            }
+                .filter(|l| *l != 0.0);
+            let mut info = parse_recording_with(rec, opts, title, credits, length);
             info.release_track_id = s(t, "id");
             info.track_alt = opt_s(t, "number");
             info.medium = position;
@@ -629,13 +740,9 @@ fn medium_tracks(medium: &J, opts: &ParseOpts) -> Vec<TrackInfo> {
 /// beets' `_preferred_release_event`: the first preferred country with a
 /// release event there, and that event's date; else the release's own.
 fn release_event(j: &J, preferred: &[String]) -> (Option<String>, Option<String>) {
-    let events = j
-        .get("release-events")
-        .and_then(|e| e.as_array())
-        .cloned()
-        .unwrap_or_default();
+    let events = arr(j, "release-events");
     for country in preferred {
-        for e in &events {
+        for e in events {
             let codes = e
                 .get("area")
                 .and_then(|a| a.get("iso-3166-1-codes"))
@@ -648,13 +755,88 @@ fn release_event(j: &J, preferred: &[String]) -> (Option<String>, Option<String>
     (opt_s(j, "country"), opt_s(j, "date"))
 }
 
+/// beets' `_parse_genres`: the release group's and the release's genres
+/// (or tags), counts summed, most counted first (ties in first-seen order).
+fn parse_genres(j: &J, field: &str) -> Option<Vec<String>> {
+    let rg = j.get("release-group").unwrap_or(&J::Null);
+    let mut counts: Vec<(String, i64)> = vec![];
+    for g in arr(rg, field).iter().chain(arr(j, field)) {
+        let name = s(g, "name");
+        let count = g.get("count").and_then(|c| c.as_i64()).unwrap_or(0);
+        match counts.iter_mut().find(|(n, _)| *n == name) {
+            Some((_, c)) => *c += count,
+            None => counts.push((name, count)),
+        }
+    }
+    if counts.is_empty() {
+        return None;
+    }
+    counts.sort_by_key(|(_, c)| -c);
+    Some(counts.into_iter().map(|(n, _)| n).collect())
+}
+
+/// beets' `extract_release_id` for an external source's URL.
+fn extract_external_id(source: &str, url: &str) -> Option<String> {
+    let pat = match source {
+        "spotify" => r"(?:^|open\.spotify\.com/[^/]+/|spotify:[a-z]+:)([0-9A-Za-z]{22})",
+        "deezer" => r"(?:^|deezer\.com/)(?:[a-z]*/)?(?:[^/]+/)?(\d+)",
+        "beatport" => r"(?:^|beatport\.com/release/.+/)(\d+)$",
+        "discogs" => r"(?:^|\[?r|discogs\.com/(?:[^/]+/)?release/)(\d+)\b",
+        "bandcamp" => r"(.+)",
+        "tidal" => r"(?:^|tidal\.com/(?:browse/)?(?:album|track)/)(\d+)",
+        _ => return Some(url.to_string()),
+    };
+    let re = regex::Regex::new(pat).ok()?;
+    re.captures(url).map(|c| c[1].to_string())
+}
+
+/// beets' `_parse_external_ids`: for each wanted source, the last URL
+/// relation on its site (`<source>.com` in the URL), as its id.
+fn parse_external_ids(j: &J, wanted: &[String]) -> Vec<(String, Option<String>)> {
+    let urls = relations(j, "url");
+    let mut out: Vec<(String, Option<String>)> = vec![];
+    for source in wanted {
+        let site = format!("{source}.com");
+        let found = urls
+            .iter()
+            .rev()
+            .filter_map(|r| {
+                r.get("url")
+                    .and_then(|u| u.get("resource"))
+                    .and_then(|u| u.as_str())
+            })
+            .find(|u| u.contains(&site));
+        if let Some(url) = found {
+            crate::logging::debug!(
+                "Found link to {} release via MusicBrainz",
+                capitalize(source)
+            );
+            out.push((
+                format!("{source}_album_id"),
+                extract_external_id(source, url),
+            ));
+        }
+    }
+    out
+}
+
+fn capitalize(s: &str) -> String {
+    let mut c = s.chars();
+    match c.next() {
+        Some(f) => f
+            .to_uppercase()
+            .chain(c.flat_map(|c| c.to_lowercase()))
+            .collect(),
+        None => String::new(),
+    }
+}
+
 /// beets' `album_info` for a release.
 pub fn parse_release(j: &J, opts: &ParseOpts) -> AlbumInfo {
     let prefs = &opts.aliases;
-    let (artist, artist_id, artist_sort, artist_credit_s) =
-        artist_credit(j.get("artist-credit"), prefs);
-    let rg = j.get("release-group").cloned().unwrap_or(J::Null);
-    let (oy, om, od) = parse_date(&s(&rg, "first-release-date"));
+    let c = parse_credits(arr(j, "artist-credit"), prefs);
+    let rg = j.get("release-group").unwrap_or(&J::Null);
+    let (oy, om, od) = parse_date(&s(rg, "first-release-date"));
     let mut nulls = BTreeSet::new();
     let mut null_if = |name: &'static str, v: Option<String>| match v {
         Some(v) => v,
@@ -664,30 +846,19 @@ pub fn parse_release(j: &J, opts: &ParseOpts) -> AlbumInfo {
         }
     };
     // beets' `_parse_label_infos`: the first label info.
-    let label_info = j
-        .get("label-info")
-        .and_then(|l| l.as_array())
-        .and_then(|a| a.first())
-        .cloned();
+    let label_info = arr(j, "label-info").first();
     let label = label_info
-        .as_ref()
         .and_then(|li| li.get("label"))
         .and_then(|l| opt_s(l, "name"))
         .filter(|n| n != "[no label]");
-    let catalognum = label_info
-        .as_ref()
-        .and_then(|li| opt_s(li, "catalog-number"));
+    let catalognum = label_info.and_then(|li| opt_s(li, "catalog-number"));
     let label = null_if("label", label);
     let catalognum = null_if("catalognum", catalognum);
 
-    let media_list = j
-        .get("media")
-        .and_then(|m| m.as_array())
-        .cloned()
-        .unwrap_or_default();
+    let media_list = arr(j, "media");
     let mediums = media_list.len();
     let mut tracks = vec![];
-    for medium in &media_list {
+    for medium in media_list {
         let fmt = s(medium, "format");
         if opts.ignored_media.contains(&fmt) {
             continue;
@@ -715,30 +886,41 @@ pub fn parse_release(j: &J, opts: &ParseOpts) -> AlbumInfo {
     );
     let releasegroupdisambig = null_if(
         "releasegroupdisambig",
-        opt_s(&rg, "disambiguation").filter(|d| !d.is_empty()),
+        opt_s(rg, "disambiguation").filter(|d| !d.is_empty()),
     );
-    let albumtype = null_if(
-        "albumtype",
-        opt_s(&rg, "primary-type")
-            .filter(|t| !t.is_empty())
+    // beets' `_parse_release_group`: the primary type, then the secondary
+    // ones, lower-cased.
+    let primary = opt_s(rg, "primary-type")
+        .filter(|t| !t.is_empty())
+        .map(|t| t.to_lowercase());
+    let mut albumtypes: Vec<String> = primary.iter().cloned().collect();
+    albumtypes.extend(
+        arr(rg, "secondary-types")
+            .iter()
+            .filter_map(|t| t.as_str())
             .map(|t| t.to_lowercase()),
     );
-    let albumstatus = null_if("albumstatus", opt_s(j, "status").map(|t| t.to_lowercase()));
-    let text = j.get("text-representation").cloned().unwrap_or(J::Null);
-    let script = null_if("script", opt_s(&text, "script"));
-    let language = null_if("language", opt_s(&text, "language"));
+    let albumtype = null_if("albumtype", primary);
+    let albumstatus = null_if("albumstatus", opt_s(j, "status"));
+    let text = j.get("text-representation").unwrap_or(&J::Null);
+    let script = null_if("script", opt_s(text, "script"));
+    let language = null_if("language", opt_s(text, "language"));
     let barcode = null_if("barcode", opt_s(j, "barcode"));
     let asin = null_if("asin", opt_s(j, "asin"));
     let id = s(j, "id");
-    AlbumInfo {
-        data_url: format!("https://musicbrainz.org/release/{id}"),
+    let mut info = AlbumInfo {
+        data_url: format!("{BASE_URL}release/{id}"),
         album_id: id,
         album: prefs.title(j),
-        va: artist_id == VA_ARTIST_ID,
-        artist,
-        artist_id,
-        artist_sort,
-        artist_credit: artist_credit_s,
+        va: c.artist_id == VA_ARTIST_ID,
+        artist: c.artist,
+        artist_id: c.artist_id,
+        artist_sort: c.artist_sort,
+        artist_credit: c.artist_credit,
+        artists: c.artists,
+        artists_ids: c.artists_ids,
+        artists_sort: c.artists_sort,
+        artists_credit: c.artists_credit,
         year,
         month,
         day,
@@ -749,9 +931,11 @@ pub fn parse_release(j: &J, opts: &ParseOpts) -> AlbumInfo {
         label,
         catalognum,
         albumtype,
+        albumtypes,
         albumstatus,
         albumdisambig,
-        releasegroup_id: s(&rg, "id"),
+        releasegroup_id: s(rg, "id"),
+        release_group_title: Some(prefs.title(rg)),
         releasegroupdisambig,
         media,
         mediums,
@@ -760,18 +944,402 @@ pub fn parse_release(j: &J, opts: &ParseOpts) -> AlbumInfo {
         asin,
         script,
         language,
+        genres: opts.genres_field.and_then(|f| parse_genres(j, f)),
+        external_ids: parse_external_ids(j, &opts.external_ids),
         data_source: "MusicBrainz".into(),
         nulls,
+    };
+    if info.va {
+        let va = &opts.va_name;
+        info.artist = va.clone();
+        info.artist_sort = va.clone();
+        info.artists = vec![va.clone()];
+        info.artists_sort = vec![va.clone()];
+        info.artist_credit = va.clone();
+        info.artists_credit = vec![va.clone()];
+    }
+    info
+}
+
+/// beets' `_merge_pseudo_and_actual_album`: a pseudo-release (a
+/// translated track listing) with the release facts of the actual one.
+fn merge_pseudo_and_actual(mut pseudo: AlbumInfo, actual: AlbumInfo) -> AlbumInfo {
+    for f in ["media", "country", "catalognum", "label", "barcode", "asin"] {
+        pseudo.nulls.remove(f);
+        if actual.nulls.contains(f) {
+            pseudo.nulls.insert(f);
+        }
+    }
+    pseudo.media = actual.media;
+    pseudo.mediums = actual.mediums;
+    pseudo.country = actual.country;
+    pseudo.catalognum = actual.catalognum;
+    pseudo.year = actual.year;
+    pseudo.month = actual.month;
+    pseudo.day = actual.day;
+    pseudo.original_year = actual.original_year;
+    pseudo.original_month = actual.original_month;
+    pseudo.original_day = actual.original_day;
+    pseudo.label = actual.label;
+    pseudo.barcode = actual.barcode;
+    pseudo.asin = actual.asin;
+    pseudo.genres = actual.genres;
+    pseudo
+}
+
+/// Pull an MBID out of a bare id or a URL (beets' `extract_release_id`
+/// for MusicBrainz: as given, not lower-cased).
+pub fn extract_id(s: &str) -> Option<String> {
+    let re = regex::Regex::new(r"(\w{8}(?:-\w{4}){3}-\w{12})").unwrap();
+    re.find(s).map(|m| m.as_str().to_string())
+}
+
+/// beets' `plurality`: the most common value, ties to the first seen.
+fn plurality(values: impl IntoIterator<Item = String>) -> String {
+    let mut counts: Vec<(String, usize)> = vec![];
+    for v in values {
+        match counts.iter_mut().find(|(x, _)| *x == v) {
+            Some((_, c)) => *c += 1,
+            None => counts.push((v, 1)),
+        }
+    }
+    let mut best: Option<(String, usize)> = None;
+    for (v, c) in counts {
+        if best.as_ref().is_none_or(|(_, bc)| c > *bc) {
+            best = Some((v, c));
+        }
+    }
+    best.map(|(v, _)| v).unwrap_or_default()
+}
+
+/// Python's `str()` of an item's field, as beets' `item.get(tag)`.
+fn item_value_str(item: &Item, field: &str) -> String {
+    match item.get(field) {
+        Some(crate::model::Value::Float(f)) => crate::hooks::py_float(f),
+        Some(crate::model::Value::Null) | None => "None".into(),
+        Some(v) => v.raw(),
     }
 }
 
-/// Pull an MBID out of a bare id or a musicbrainz.org URL.
-pub fn extract_id(s: &str) -> Option<String> {
-    let re = regex::Regex::new(
-        r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}",
-    )
-    .unwrap();
-    re.find(s).map(|m| m.as_str().to_lowercase())
+/// beets' search query: each filter as `field:(term)`, the term
+/// lower-cased, stripped and escaped (empty ones left out), joined by
+/// spaces.
+fn search_query(filters: &[(&str, String)]) -> String {
+    filters
+        .iter()
+        .filter_map(|(field, term)| {
+            let term = term.to_lowercase();
+            let term = term.trim();
+            (!term.is_empty()).then(|| format!("{field}:({})", escape(term)))
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// What beets' plugin says when it loads: the deprecated
+/// `searchlimit` (which beets 2.14 reads from `musicbrainz.match`). Once
+/// per run.
+pub fn warn_deprecated_config(cfg: &Config) {
+    static ONCE: std::sync::Once = std::sync::Once::new();
+    if cfg.get("musicbrainz.match.searchlimit").is_some() {
+        ONCE.call_once(|| {
+            crate::logging::emit(
+                "musicbrainz: 'musicbrainz.searchlimit' configuration option is deprecated \
+                 and will be removed in version 3.0.0. Use 'musicbrainz.search_limit' instead."
+                    .to_string(),
+            )
+        });
+    }
+}
+
+pub struct MusicBrainz {
+    agent: ureq::Agent,
+    base: String,
+    interval: Duration,
+    /// The last request's time; locked while waiting for the next slot, so
+    /// threads sharing the client share the rate limit.
+    last: Mutex<Option<Instant>>,
+    pub search_limit: usize,
+    /// `musicbrainz.extra_tags`: (item field, search field), deduplicated.
+    extra_tags: Vec<(&'static str, &'static str)>,
+    opts: ParseOpts,
+}
+
+/// Not found (404), which beets treats as no candidate rather than an error.
+#[derive(Debug)]
+pub struct NotFound;
+
+impl std::fmt::Display for NotFound {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("not found on MusicBrainz")
+    }
+}
+
+impl std::error::Error for NotFound {}
+
+impl MusicBrainz {
+    pub fn new(cfg: &Config) -> Self {
+        // beets' `MusicBrainzAPI`: musicbrainz.org always over https at one
+        // request a second; any other host per `https` and the rate limit.
+        let host = cfg.str("musicbrainz.host");
+        let (base, interval) = if host == "musicbrainz.org" {
+            (
+                "https://musicbrainz.org".to_string(),
+                Duration::from_secs(1),
+            )
+        } else {
+            let scheme = if cfg.bool("musicbrainz.https") {
+                "https"
+            } else {
+                "http"
+            };
+            let rate = cfg.f64("musicbrainz.ratelimit").max(0.0);
+            let per = cfg.f64("musicbrainz.ratelimit_interval").max(0.0);
+            let interval = if rate > 0.0 {
+                Duration::from_secs_f64(per / rate)
+            } else {
+                Duration::ZERO
+            };
+            (format!("{scheme}://{host}"), interval)
+        };
+        // `search_limit`, or the deprecated `match.searchlimit` (read, as
+        // beets 2.14 does, under the plugin's own config).
+        let search_limit = if cfg.get("musicbrainz.match.searchlimit").is_some() {
+            cfg.f64("musicbrainz.match.searchlimit")
+        } else {
+            cfg.f64("musicbrainz.search_limit")
+        };
+        let mut extra_tags: Vec<(&'static str, &'static str)> = vec![];
+        for t in cfg.list("musicbrainz.extra_tags") {
+            if let Some(&(tag, key)) = FIELDS_TO_MB_KEYS.iter().find(|(f, _)| *f == t)
+                && !extra_tags.iter().any(|(f, _)| *f == tag)
+            {
+                extra_tags.push((tag, key));
+            }
+        }
+        if !extra_tags.is_empty() {
+            let shown: Vec<String> = extra_tags
+                .iter()
+                .map(|(t, k)| format!("'{t}': '{k}'"))
+                .collect();
+            crate::logging::debug!(
+                "musicbrainz: Additional search terms: {{{}}}",
+                shown.join(", ")
+            );
+        }
+        MusicBrainz {
+            agent: ureq::AgentBuilder::new()
+                .user_agent(USER_AGENT)
+                .timeout(Duration::from_secs(30))
+                .build(),
+            base: format!("{base}/ws/2"),
+            interval,
+            last: Mutex::new(None),
+            search_limit: search_limit.max(0.0) as usize,
+            extra_tags,
+            opts: ParseOpts::from_config(cfg),
+        }
+    }
+
+    fn throttle(&self) {
+        let mut last = self.last.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(t) = *last {
+            let elapsed = t.elapsed();
+            if elapsed < self.interval {
+                std::thread::sleep(self.interval - elapsed);
+            }
+        }
+        *last = Some(Instant::now());
+    }
+
+    fn get(&self, path: &str, query: &[(&str, &str)]) -> Result<J> {
+        let url = format!("{}/{}", self.base, path);
+        crate::logging::trace!("musicbrainz: GET {url} {query:?}");
+        let mut attempt = 0;
+        loop {
+            self.throttle();
+            let mut req = self.agent.get(&url);
+            for (k, v) in query {
+                req = req.query(k, v);
+            }
+            req = req.query("fmt", "json");
+            match req.call() {
+                Ok(resp) => return resp.into_json().context("parsing MusicBrainz response"),
+                Err(ureq::Error::Status(503 | 429, _)) if attempt < 4 => {
+                    attempt += 1;
+                    std::thread::sleep(Duration::from_secs(attempt));
+                }
+                Err(ureq::Error::Status(404, _)) => return Err(NotFound.into()),
+                Err(e) => return Err(e).with_context(|| format!("MusicBrainz request {path}")),
+            }
+        }
+    }
+
+    /// beets' `MusicBrainzAPI.search`: each filter as `field:(term)`, the
+    /// term lower-cased, stripped and escaped (empty ones left out),
+    /// joined by spaces. Returns the results' ids.
+    fn search(&self, entity: &str, filters: &[(&str, String)]) -> Result<Vec<String>> {
+        let query = search_query(filters);
+        if query.is_empty() {
+            crate::logging::debug!("musicbrainz: Skipping search with empty query and filters");
+            return Ok(vec![]);
+        }
+        crate::logging::debug!(
+            "Searching for MusicBrainz {entity}s with: {}",
+            crate::hooks::py_repr(&query)
+        );
+        let limit = self.search_limit.to_string();
+        let res = self.get(entity, &[("query", &query), ("limit", &limit)])?;
+        let ids: Vec<String> = arr(&res, &format!("{entity}s"))
+            .iter()
+            .map(|r| s(r, "id"))
+            .collect();
+        crate::logging::debug!("musicbrainz: Found {} result(s)", ids.len());
+        Ok(ids)
+    }
+
+    /// beets' `get_album_criteria` and `candidates`: search releases by
+    /// album and artist (the Various Artists id when the album is likely
+    /// VA) and `extra_tags`; returns their ids.
+    pub fn search_releases(
+        &self,
+        items: &[Item],
+        artist: &str,
+        album: &str,
+        va_likely: bool,
+    ) -> Result<Vec<String>> {
+        let mut criteria: Vec<(&str, String)> = vec![("release", album.to_string())];
+        if va_likely {
+            criteria.push(("arid", VA_ARTIST_ID.into()));
+        } else {
+            criteria.push(("artist", artist.to_string()));
+        }
+        for &(tag, key) in &self.extra_tags {
+            let value = match tag {
+                "tracks" => items.len().to_string(),
+                "alias" => album.to_string(),
+                _ => {
+                    let v = plurality(items.iter().map(|i| item_value_str(i, tag)));
+                    if tag == "catalognum" {
+                        v.replace(' ', "")
+                    } else {
+                        v
+                    }
+                }
+            };
+            match criteria.iter_mut().find(|(k, _)| *k == key) {
+                Some(c) => c.1 = value,
+                None => criteria.push((key, value)),
+            }
+        }
+        self.search("release", &criteria)
+    }
+
+    /// beets' `album_for_id`: the release, None if it's not on
+    /// MusicBrainz or the id isn't an MBID; a pseudo-release gets the
+    /// release facts of the release it translates.
+    pub fn album_for_id(&self, album_id: &str) -> Result<Option<AlbumInfo>> {
+        crate::logging::debug!("musicbrainz: Requesting MusicBrainz release {album_id}");
+        let Some(id) = extract_id(album_id) else {
+            crate::logging::debug!("musicbrainz: Invalid MBID ({album_id}).");
+            return Ok(None);
+        };
+        let release = match self.get_release(&id) {
+            Ok(r) => r,
+            Err(e) if e.is::<NotFound>() => {
+                crate::logging::debug!("musicbrainz: Release {id} not found on MusicBrainz.");
+                return Ok(None);
+            }
+            Err(e) => return Err(e),
+        };
+        let album = parse_release(&release, &self.opts);
+        if s(&release, "status") == "Pseudo-Release"
+            && let Some(rel) = relations(&release, "release")
+                .into_iter()
+                .find(|r| s(r, "type") == "transl-tracklisting" && s(r, "direction") == "backward")
+        {
+            let actual_id = rel.get("release").map(|r| s(r, "id")).unwrap_or_default();
+            let actual = parse_release(&self.get_release(&actual_id)?, &self.opts);
+            return Ok(Some(merge_pseudo_and_actual(album, actual)));
+        }
+        Ok(Some(album))
+    }
+
+    /// A release lookup with beets' includes; a release with too many
+    /// tracks for MusicBrainz to send their relations gets its recordings
+    /// browsed (beets' `_ensure_complete_recordings`).
+    fn get_release(&self, id: &str) -> Result<J> {
+        let inc = RELEASE_INCLUDES.join("+");
+        let mut release = self.get(&format!("release/{id}"), &[("inc", &inc)])?;
+        let track_count: usize = arr(&release, "media")
+            .iter()
+            .map(|m| arr(m, "tracks").len())
+            .sum();
+        if track_count > BROWSE_MAXTRACKS {
+            crate::logging::debug!("musicbrainz: Album {id} has too many tracks");
+            let inc = BROWSE_INCLUDES.join("+");
+            let mut recordings: Vec<J> = vec![];
+            for offset in (0..track_count).step_by(BROWSE_CHUNKSIZE) {
+                crate::logging::debug!("musicbrainz: Retrieving tracks starting at {offset}");
+                let res = self.get(
+                    "recording",
+                    &[
+                        ("release", id),
+                        ("limit", &BROWSE_CHUNKSIZE.to_string()),
+                        ("inc", &inc),
+                        ("offset", &offset.to_string()),
+                    ],
+                )?;
+                recordings.extend(arr(&res, "recordings").iter().cloned());
+            }
+            if let Some(media) = release.get_mut("media").and_then(|m| m.as_array_mut()) {
+                for medium in media {
+                    let Some(tracks) = medium.get_mut("tracks").and_then(|t| t.as_array_mut())
+                    else {
+                        continue;
+                    };
+                    for t in tracks {
+                        let rid = t.get("recording").map(|r| s(r, "id")).unwrap_or_default();
+                        if let Some(r) = recordings.iter().find(|r| s(r, "id") == rid) {
+                            t["recording"] = r.clone();
+                        }
+                    }
+                }
+            }
+        }
+        Ok(release)
+    }
+
+    /// beets' `item_candidates`: search recordings by artist and title
+    /// (and title as an alias), then look each one up.
+    pub fn search_recordings(&self, artist: &str, title: &str) -> Result<Vec<TrackInfo>> {
+        let criteria = [
+            ("artist", artist.to_string()),
+            ("recording", title.to_string()),
+            ("alias", title.to_string()),
+        ];
+        let mut out = vec![];
+        for id in self.search("recording", &criteria)? {
+            if let Some(t) = self.track_for_id(&id)? {
+                out.push(t);
+            }
+        }
+        Ok(out)
+    }
+
+    /// beets' `track_for_id`: the recording, None if not found.
+    pub fn track_for_id(&self, track_id: &str) -> Result<Option<TrackInfo>> {
+        let Some(id) = extract_id(track_id) else {
+            crate::logging::debug!("musicbrainz: Invalid MBID ({track_id}).");
+            return Ok(None);
+        };
+        let inc = RECORDING_INCLUDES.join("+");
+        match self.get(&format!("recording/{id}"), &[("inc", &inc)]) {
+            Ok(j) => Ok(Some(parse_recording(&j, &self.opts))),
+            Err(e) if e.is::<NotFound>() => Ok(None),
+            Err(e) => Err(e),
+        }
+    }
 }
 
 #[cfg(test)]
@@ -993,9 +1561,125 @@ mod tests {
         assert_eq!(
             extract_id("https://musicbrainz.org/release/0FA1E0C7-1C4A-4F2B-9A5E-ABCDEF012345")
                 .as_deref(),
-            Some("0fa1e0c7-1c4a-4f2b-9a5e-abcdef012345")
+            Some("0FA1E0C7-1C4A-4F2B-9A5E-ABCDEF012345")
         );
         assert_eq!(extract_id("nope"), None);
         assert_eq!(escape("AC/DC: (live)"), "AC\\/DC\\: \\(live\\)");
+    }
+
+    fn to_json(v: &V) -> J {
+        match v {
+            V::None => J::Null,
+            V::Str(s) => J::from(s.as_str()),
+            V::Int(i) => J::from(*i),
+            V::Float(f) => J::from(*f),
+            V::Bool(b) => J::from(*b),
+            V::List(l) => J::from(l.clone()),
+        }
+    }
+
+    /// Field-by-field differences between ours and reference beets'.
+    fn diffs(what: &str, ours: &Data, theirs: &J, out: &mut Vec<String>) {
+        let theirs = theirs.as_object().unwrap();
+        for (k, v) in theirs {
+            let o = ours.get(k).map(to_json);
+            if o.as_ref() != Some(v) {
+                out.push(format!("{what}.{k}: ours {o:?}, beets {v}"));
+            }
+        }
+        for k in ours.keys().filter(|k| !theirs.contains_key(*k)) {
+            out.push(format!("{what}.{k}: ours {:?}, beets has none", ours[k]));
+        }
+    }
+
+    /// Every fixture release under every config of
+    /// tools/diffbeets/mbexpected.py, parsed and applied as reference
+    /// beets 2.14 does: `dict(album_info)`, each `dict(track_info)`, the
+    /// album's `item_data` and each track's `merge_with_album`.
+    #[test]
+    fn fixtures_parse_and_apply_as_beets() {
+        use crate::hooks::{self, ApplyOpts};
+        let dir = format!("{}/tests/fixtures/mb", env!("CARGO_MANIFEST_DIR"));
+        let mut checked = 0;
+        let mut out = vec![];
+        for entry in std::fs::read_dir(format!("{dir}/expected")).unwrap() {
+            let path = entry.unwrap().path();
+            let name = path.file_name().unwrap().to_string_lossy().into_owned();
+            let id = name.split('.').next().unwrap();
+            let want: J = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+            let tmp = tempfile::tempdir().unwrap();
+            let file = tmp.path().join("config.yaml");
+            std::fs::write(&file, want["config"].as_str().unwrap()).unwrap();
+            let cfg = Config::load_file(&file).unwrap();
+            let release: J = serde_json::from_str(
+                &std::fs::read_to_string(format!("{dir}/release-{id}.json")).unwrap(),
+            )
+            .unwrap();
+            let info = parse_release(&release, &ParseOpts::from_config(&cfg));
+            let o = ApplyOpts::from_config(&cfg);
+            diffs(
+                &format!("{name} album"),
+                &info.to_data(),
+                &want["album"],
+                &mut out,
+            );
+            diffs(
+                &format!("{name} album_item_data"),
+                &hooks::album_item_data(&info.to_data(), &o),
+                &want["album_item_data"],
+                &mut out,
+            );
+            let (tracks, merged) = (
+                want["tracks"].as_array().unwrap(),
+                want["merged"].as_array().unwrap(),
+            );
+            assert_eq!(info.tracks.len(), tracks.len(), "{name}: tracks");
+            for (n, t) in info.tracks.iter().enumerate() {
+                diffs(
+                    &format!("{name} track {n}"),
+                    &t.to_data(),
+                    &tracks[n],
+                    &mut out,
+                );
+                diffs(
+                    &format!("{name} merged {n}"),
+                    &hooks::merge_with_album(t, &info, &o),
+                    &merged[n],
+                    &mut out,
+                );
+            }
+            checked += 1;
+        }
+        assert!(checked >= 12, "expected files: {checked}");
+        assert!(
+            out.is_empty(),
+            "differences from beets:\n{}",
+            out.join("\n")
+        );
+    }
+
+    #[test]
+    fn search_filters_as_beets() {
+        // beets' `format_search_term`: lower-cased, stripped, escaped.
+        let q = search_query(&[
+            ("release", " AC/DC: Live ".into()),
+            ("arid", VA_ARTIST_ID.into()),
+            ("catno", "".into()),
+        ]);
+        assert_eq!(
+            q,
+            "release:(ac\\/dc\\: live) arid:(89ad4ac3\\-39f7\\-470e\\-963a\\-56509c546377)"
+        );
+        let mut a = crate::model::Record::new_item();
+        a.set_str("catalognum", "SMP 001");
+        let b = a.clone();
+        let mut c = a.clone();
+        c.set_str("catalognum", "X");
+        assert_eq!(
+            plurality([&a, &b, &c].map(|i| item_value_str(i, "catalognum"))),
+            "SMP 001"
+        );
+        assert_eq!(item_value_str(&a, "year"), "0");
+        assert_eq!(plurality(["b".to_string(), "a".into()]), "b");
     }
 }

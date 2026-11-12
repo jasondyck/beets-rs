@@ -1,0 +1,752 @@
+{
+ "id": "33333333-3333-3333-3333-333333333333",
+ "title": "Sampler of Sounds",
+ "status": "Official",
+ "status-id": "s",
+ "disambiguation": "",
+ "date": "2010-02-03",
+ "country": "US",
+ "barcode": "",
+ "asin": "B000TEST01",
+ "quality": "normal",
+ "packaging": null,
+ "packaging-id": null,
+ "text-representation": {
+  "script": "Latn",
+  "language": "eng"
+ },
+ "artist-credit": [
+  {
+   "name": "Various Artists",
+   "joinphrase": "",
+   "artist": {
+    "id": "89ad4ac3-39f7-470e-963a-56509c546377",
+    "name": "Various Artists",
+    "sort-name": "Various Artists",
+    "disambiguation": "add compilation artist credits",
+    "type": "Other",
+    "type-id": null,
+    "country": null,
+    "aliases": []
+   }
+  }
+ ],
+ "aliases": [],
+ "genres": [
+  {
+   "name": "pop",
+   "count": 4,
+   "id": "g",
+   "disambiguation": ""
+  },
+  {
+   "name": "jazz",
+   "count": 1,
+   "id": "g",
+   "disambiguation": ""
+  }
+ ],
+ "tags": [
+  {
+   "name": "live",
+   "count": 2
+  },
+  {
+   "name": "jazz",
+   "count": 2
+  }
+ ],
+ "release-group": {
+  "id": "99999999-0000-0000-0000-000000000103",
+  "title": "Sampler of Sounds",
+  "primary-type": "Album",
+  "primary-type-id": "p",
+  "secondary-types": [
+   "Compilation",
+   "Live"
+  ],
+  "secondary-type-ids": [
+   "s",
+   "s"
+  ],
+  "first-release-date": "2009-06-15",
+  "disambiguation": "",
+  "aliases": [],
+  "genres": [
+   {
+    "name": "rock",
+    "count": 3,
+    "id": "g",
+    "disambiguation": ""
+   },
+   {
+    "name": "pop",
+    "count": 1,
+    "id": "g",
+    "disambiguation": ""
+   }
+  ],
+  "tags": [],
+  "artist-credit": [
+   {
+    "name": "Various Artists",
+    "joinphrase": "",
+    "artist": {
+     "id": "89ad4ac3-39f7-470e-963a-56509c546377",
+     "name": "Various Artists",
+     "sort-name": "Various Artists",
+     "disambiguation": "add compilation artist credits",
+     "type": "Other",
+     "type-id": null,
+     "country": null,
+     "aliases": []
+    }
+   }
+  ]
+ },
+ "label-info": [
+  {
+   "catalog-number": "SMP 001",
+   "label": {
+    "id": "l3",
+    "name": "Sampler Records",
+    "sort-name": "Sampler Records",
+    "aliases": [],
+    "disambiguation": "",
+    "label-code": null,
+    "type": null,
+    "type-id": null,
+    "genres": [],
+    "tags": []
+   }
+  }
+ ],
+ "release-events": [
+  {
+   "date": "2010-02-03",
+   "area": {
+    "id": "us",
+    "name": "United States",
+    "sort-name": "United States",
+    "disambiguation": "",
+    "iso-3166-1-codes": [
+     "US"
+    ],
+    "type": null,
+    "type-id": null
+   }
+  },
+  {
+   "date": "2010-03",
+   "area": {
+    "id": "de",
+    "name": "Germany",
+    "sort-name": "Germany",
+    "disambiguation": "",
+    "iso-3166-1-codes": [
+     "DE"
+    ],
+    "type": null,
+    "type-id": null
+   }
+  }
+ ],
+ "cover-art-archive": {
+  "artwork": false,
+  "count": 0,
+  "front": false,
+  "back": false,
+  "darkened": false
+ },
+ "media": [
+  {
+   "position": 1,
+   "format": "CD",
+   "format-id": "f",
+   "title": "The Early Years",
+   "track-count": 2,
+   "track-offset": 0,
+   "tracks": [
+    {
+     "id": "00000000-0000-0000-0004-000000000001",
+     "position": 1,
+     "number": "1",
+     "title": "Ocean Song",
+     "length": 200000,
+     "artist-credit": [
+      {
+       "name": "A.",
+       "joinphrase": " feat. ",
+       "artist": {
+        "id": "aaaaaaaa-0000-0000-0000-000000000101",
+        "name": "Artist A",
+        "sort-name": "A, Artist",
+        "disambiguation": "",
+        "type": "Person",
+        "type-id": null,
+        "country": null,
+        "aliases": [
+         {
+          "name": "Künstler A",
+          "sort-name": "A, Künstler",
+          "locale": "de",
+          "primary": true,
+          "type": "Artist name",
+          "type-id": null,
+          "begin": null,
+          "end": null,
+          "ended": false
+         }
+        ]
+       }
+      },
+      {
+       "name": "Artist B",
+       "joinphrase": "",
+       "artist": {
+        "id": "aaaaaaaa-0000-0000-0000-000000000102",
+        "name": "Artist B",
+        "sort-name": "B, Artist",
+        "disambiguation": "",
+        "type": "Person",
+        "type-id": null,
+        "country": null,
+        "aliases": []
+       }
+      }
+     ],
+     "recording": {
+      "id": "00000000-0000-0000-0003-000000000001",
+      "title": "Ocean Song",
+      "length": 200500,
+      "video": false,
+      "disambiguation": "",
+      "artist-credit": [
+       {
+        "name": "A.",
+        "joinphrase": " feat. ",
+        "artist": {
+         "id": "aaaaaaaa-0000-0000-0000-000000000101",
+         "name": "Artist A",
+         "sort-name": "A, Artist",
+         "disambiguation": "",
+         "type": "Person",
+         "type-id": null,
+         "country": null,
+         "aliases": [
+          {
+           "name": "Künstler A",
+           "sort-name": "A, Künstler",
+           "locale": "de",
+           "primary": true,
+           "type": "Artist name",
+           "type-id": null,
+           "begin": null,
+           "end": null,
+           "ended": false
+          }
+         ]
+        }
+       },
+       {
+        "name": "Artist B",
+        "joinphrase": "",
+        "artist": {
+         "id": "aaaaaaaa-0000-0000-0000-000000000102",
+         "name": "Artist B",
+         "sort-name": "B, Artist",
+         "disambiguation": "",
+         "type": "Person",
+         "type-id": null,
+         "country": null,
+         "aliases": []
+        }
+       }
+      ],
+      "aliases": [],
+      "isrcs": [
+       "GBAAA0900001",
+       "GBAAA0900002"
+      ],
+      "first-release-date": "2009-01-01",
+      "relations": [
+       {
+        "direction": "forward",
+        "begin": null,
+        "end": null,
+        "ended": false,
+        "attributes": [],
+        "attribute-ids": {},
+        "attribute-values": {},
+        "source-credit": "",
+        "target-credit": "",
+        "type-id": "t",
+        "type": "performance",
+        "target-type": "work",
+        "work": {
+         "id": "wwwwwwww-0000-0000-0000-000000000001",
+         "title": "Ocean Song",
+         "disambiguation": "",
+         "iswcs": [],
+         "language": null,
+         "languages": [],
+         "type": "Song",
+         "type-id": null,
+         "attributes": [],
+         "relations": [
+          {
+           "direction": "forward",
+           "begin": null,
+           "end": null,
+           "ended": false,
+           "attributes": [],
+           "attribute-ids": {},
+           "attribute-values": {},
+           "source-credit": "",
+           "target-credit": "",
+           "type-id": "t",
+           "type": "composer",
+           "target-type": "artist",
+           "artist": {
+            "id": "aaaaaaaa-0000-0000-0000-000000000105",
+            "name": "Composer One",
+            "sort-name": "One, Composer",
+            "disambiguation": "",
+            "type": "Person",
+            "type-id": null,
+            "country": null,
+            "aliases": []
+           }
+          },
+          {
+           "direction": "forward",
+           "begin": null,
+           "end": null,
+           "ended": false,
+           "attributes": [],
+           "attribute-ids": {},
+           "attribute-values": {},
+           "source-credit": "",
+           "target-credit": "",
+           "type-id": "t",
+           "type": "lyricist",
+           "target-type": "artist",
+           "artist": {
+            "id": "aaaaaaaa-0000-0000-0000-000000000107",
+            "name": "Lyricist Lee",
+            "sort-name": "Lee, Lyricist",
+            "disambiguation": "",
+            "type": "Person",
+            "type-id": null,
+            "country": null,
+            "aliases": []
+           }
+          },
+          {
+           "direction": "forward",
+           "begin": null,
+           "end": null,
+           "ended": false,
+           "attributes": [],
+           "attribute-ids": {},
+           "attribute-values": {},
+           "source-credit": "",
+           "target-credit": "",
+           "type-id": "t",
+           "type": "composer",
+           "target-type": "artist",
+           "artist": {
+            "id": "aaaaaaaa-0000-0000-0000-000000000106",
+            "name": "Composer Two",
+            "sort-name": "Two, Composer",
+            "disambiguation": "",
+            "type": "Person",
+            "type-id": null,
+            "country": null,
+            "aliases": []
+           }
+          }
+         ]
+        }
+       },
+       {
+        "direction": "forward",
+        "begin": null,
+        "end": null,
+        "ended": false,
+        "attributes": [],
+        "attribute-ids": {},
+        "attribute-values": {},
+        "source-credit": "",
+        "target-credit": "",
+        "type-id": "t",
+        "type": "arranger",
+        "target-type": "artist",
+        "artist": {
+         "id": "aaaaaaaa-0000-0000-0000-000000000108",
+         "name": "Arranger Ann",
+         "sort-name": "Ann, Arranger",
+         "disambiguation": "",
+         "type": "Person",
+         "type-id": null,
+         "country": null,
+         "aliases": []
+        }
+       },
+       {
+        "direction": "forward",
+        "begin": null,
+        "end": null,
+        "ended": false,
+        "attributes": [],
+        "attribute-ids": {},
+        "attribute-values": {},
+        "source-credit": "",
+        "target-credit": "",
+        "type-id": "t",
+        "type": "remixer",
+        "target-type": "artist",
+        "artist": {
+         "id": "aaaaaaaa-0000-0000-0000-000000000109",
+         "name": "Remixer Rob",
+         "sort-name": "Rob, Remixer",
+         "disambiguation": "",
+         "type": "Person",
+         "type-id": null,
+         "country": null,
+         "aliases": []
+        }
+       },
+       {
+        "direction": "forward",
+        "begin": null,
+        "end": null,
+        "ended": false,
+        "attributes": [],
+        "attribute-ids": {},
+        "attribute-values": {},
+        "source-credit": "",
+        "target-credit": "",
+        "type-id": "t",
+        "type": "producer",
+        "target-type": "artist",
+        "artist": {
+         "id": "aaaaaaaa-0000-0000-0000-000000000102",
+         "name": "Artist B",
+         "sort-name": "B, Artist",
+         "disambiguation": "",
+         "type": "Person",
+         "type-id": null,
+         "country": null,
+         "aliases": []
+        }
+       }
+      ]
+     }
+    },
+    {
+     "id": "00000000-0000-0000-0004-000000000002",
+     "position": 2,
+     "number": "2",
+     "title": "Night Drive",
+     "length": 185000,
+     "artist-credit": [
+      {
+       "name": "Band",
+       "joinphrase": "",
+       "artist": {
+        "id": "aaaaaaaa-0000-0000-0000-000000000104",
+        "name": "The Band",
+        "sort-name": "Band, The",
+        "disambiguation": "",
+        "type": "Person",
+        "type-id": null,
+        "country": null,
+        "aliases": []
+       }
+      }
+     ],
+     "recording": {
+      "id": "00000000-0000-0000-0003-000000000002",
+      "title": "Night Drive",
+      "length": 185000,
+      "video": false,
+      "disambiguation": "",
+      "artist-credit": [
+       {
+        "name": "The Band",
+        "joinphrase": "",
+        "artist": {
+         "id": "aaaaaaaa-0000-0000-0000-000000000104",
+         "name": "The Band",
+         "sort-name": "Band, The",
+         "disambiguation": "",
+         "type": "Person",
+         "type-id": null,
+         "country": null,
+         "aliases": []
+        }
+       }
+      ],
+      "aliases": [],
+      "isrcs": [],
+      "first-release-date": "2009-01-01"
+     }
+    }
+   ],
+   "id": "m1"
+  },
+  {
+   "position": 2,
+   "format": "CD",
+   "format-id": "f",
+   "title": "Live Cuts",
+   "track-count": 2,
+   "track-offset": 0,
+   "tracks": [
+    {
+     "id": "00000000-0000-0000-0004-000000000003",
+     "position": 1,
+     "number": "1",
+     "title": "Ocean Song (Live)",
+     "length": null,
+     "artist-credit": [
+      {
+       "name": "Artist A",
+       "joinphrase": " & ",
+       "artist": {
+        "id": "aaaaaaaa-0000-0000-0000-000000000101",
+        "name": "Artist A",
+        "sort-name": "A, Artist",
+        "disambiguation": "",
+        "type": "Person",
+        "type-id": null,
+        "country": null,
+        "aliases": [
+         {
+          "name": "Künstler A",
+          "sort-name": "A, Künstler",
+          "locale": "de",
+          "primary": true,
+          "type": "Artist name",
+          "type-id": null,
+          "begin": null,
+          "end": null,
+          "ended": false
+         }
+        ]
+       }
+      },
+      {
+       "name": "Artist C",
+       "joinphrase": "",
+       "artist": {
+        "id": "aaaaaaaa-0000-0000-0000-000000000103",
+        "name": "Artist C",
+        "sort-name": "C, Artist",
+        "disambiguation": "",
+        "type": "Person",
+        "type-id": null,
+        "country": null,
+        "aliases": []
+       }
+      }
+     ],
+     "recording": {
+      "id": "00000000-0000-0000-0003-000000000003",
+      "title": "Ocean Song",
+      "length": 230000,
+      "video": false,
+      "disambiguation": "live",
+      "artist-credit": [
+       {
+        "name": "Artist A",
+        "joinphrase": " & ",
+        "artist": {
+         "id": "aaaaaaaa-0000-0000-0000-000000000101",
+         "name": "Artist A",
+         "sort-name": "A, Artist",
+         "disambiguation": "",
+         "type": "Person",
+         "type-id": null,
+         "country": null,
+         "aliases": [
+          {
+           "name": "Künstler A",
+           "sort-name": "A, Künstler",
+           "locale": "de",
+           "primary": true,
+           "type": "Artist name",
+           "type-id": null,
+           "begin": null,
+           "end": null,
+           "ended": false
+          }
+         ]
+        }
+       },
+       {
+        "name": "Artist C",
+        "joinphrase": "",
+        "artist": {
+         "id": "aaaaaaaa-0000-0000-0000-000000000103",
+         "name": "Artist C",
+         "sort-name": "C, Artist",
+         "disambiguation": "",
+         "type": "Person",
+         "type-id": null,
+         "country": null,
+         "aliases": []
+        }
+       }
+      ],
+      "aliases": [],
+      "isrcs": [],
+      "first-release-date": "2009-01-01",
+      "relations": [
+       {
+        "direction": "forward",
+        "begin": null,
+        "end": null,
+        "ended": false,
+        "attributes": [],
+        "attribute-ids": {},
+        "attribute-values": {},
+        "source-credit": "",
+        "target-credit": "",
+        "type-id": "t",
+        "type": "performance",
+        "target-type": "work",
+        "work": {
+         "id": "wwwwwwww-0000-0000-0000-000000000001",
+         "title": "Ocean Song",
+         "disambiguation": "",
+         "iswcs": [],
+         "language": null,
+         "languages": [],
+         "type": "Song",
+         "type-id": null,
+         "attributes": [],
+         "relations": [
+          {
+           "direction": "forward",
+           "begin": null,
+           "end": null,
+           "ended": false,
+           "attributes": [],
+           "attribute-ids": {},
+           "attribute-values": {},
+           "source-credit": "",
+           "target-credit": "",
+           "type-id": "t",
+           "type": "composer",
+           "target-type": "artist",
+           "artist": {
+            "id": "aaaaaaaa-0000-0000-0000-000000000105",
+            "name": "Composer One",
+            "sort-name": "One, Composer",
+            "disambiguation": "",
+            "type": "Person",
+            "type-id": null,
+            "country": null,
+            "aliases": []
+           }
+          }
+         ]
+        }
+       }
+      ]
+     }
+    },
+    {
+     "id": "00000000-0000-0000-0004-000000000004",
+     "position": 2,
+     "number": "2",
+     "title": "Final Call (edit)",
+     "length": 199000,
+     "artist-credit": [
+      {
+       "name": "Artist B",
+       "joinphrase": "",
+       "artist": {
+        "id": "aaaaaaaa-0000-0000-0000-000000000102",
+        "name": "Artist B",
+        "sort-name": "B, Artist",
+        "disambiguation": "",
+        "type": "Person",
+        "type-id": null,
+        "country": null,
+        "aliases": []
+       }
+      }
+     ],
+     "recording": {
+      "id": "00000000-0000-0000-0003-000000000004",
+      "title": "Final Call",
+      "length": 199000,
+      "video": false,
+      "disambiguation": "",
+      "artist-credit": [
+       {
+        "name": "Artist B",
+        "joinphrase": "",
+        "artist": {
+         "id": "aaaaaaaa-0000-0000-0000-000000000102",
+         "name": "Artist B",
+         "sort-name": "B, Artist",
+         "disambiguation": "",
+         "type": "Person",
+         "type-id": null,
+         "country": null,
+         "aliases": []
+        }
+       }
+      ],
+      "aliases": [],
+      "isrcs": [],
+      "first-release-date": "2009-01-01"
+     }
+    }
+   ],
+   "id": "m2"
+  }
+ ],
+ "relations": [
+  {
+   "direction": "forward",
+   "begin": null,
+   "end": null,
+   "ended": false,
+   "attributes": [],
+   "attribute-ids": {},
+   "attribute-values": {},
+   "source-credit": "",
+   "target-credit": "",
+   "type-id": "t",
+   "type": "discogs",
+   "target-type": "url",
+   "url": {
+    "id": "u",
+    "resource": "https://www.discogs.com/release/123456"
+   }
+  },
+  {
+   "direction": "forward",
+   "begin": null,
+   "end": null,
+   "ended": false,
+   "attributes": [],
+   "attribute-ids": {},
+   "attribute-values": {},
+   "source-credit": "",
+   "target-credit": "",
+   "type-id": "t",
+   "type": "purchase for download",
+   "target-type": "url",
+   "url": {
+    "id": "u",
+    "resource": "https://someband.bandcamp.com/album/sampler"
+   }
+  }
+ ]
+}

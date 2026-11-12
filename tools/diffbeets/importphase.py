@@ -12,8 +12,12 @@ action on the music directory instead, done when the prompt appears and
 before the next answer. When the answers run out, stdin is closed (beets
 and beets-rs both abort at end of input).
 
-Compared per case: the import's exit status, stdout and stderr
-(`import:<case>`), then `ls` of the items and albums (`import:<case>:ls`).
+Each tool's run gets its own fake server, which logs the requests it
+gets. Compared per case: the import's exit status, stdout and stderr
+(`import:<case>`), `ls` of the items and albums (`import:<case>:ls`), every
+stored field of every item and album (`import:<case>:db`, read from the
+library database) and the MusicBrainz requests made, with their parameters
+(`import:<case>:requests`).
 """
 
 import http.server
@@ -22,10 +26,13 @@ import os
 import re
 import select
 import shutil
+import sqlite3
 import subprocess
 import threading
 import time
 import urllib.parse
+
+import yaml
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(os.path.dirname(HERE))
@@ -63,12 +70,15 @@ def query_term(query, field):
 
 
 class FakeMusicBrainz:
-    """Release search returns every release; recording search the
+    """Release search returns the releases sharing a word with the query's
+    `release:(...)` (every release if it has none); recording search the
     recordings whose title is the query's `recording:(...)`; lookups
-    return the fixture. Anything else is a 404."""
+    return the fixture. Anything else is a 404. `requests` logs each
+    request's path and parameters (without `fmt`)."""
 
     def __init__(self):
         self.releases, self.recordings = load_fixtures()
+        self.requests = []
         fake = self
 
         class Handler(http.server.BaseHTTPRequestHandler):
@@ -100,10 +110,14 @@ class FakeMusicBrainz:
             return None
         parts = parts[2:]
         params = urllib.parse.parse_qs(url.query)
+        self.requests.append("/".join(parts) + " " + " ".join(
+            f"{k}={v!r}" for k, vs in sorted(params.items()) if k != "fmt" for v in vs))
         query = params.get("query", [""])[0]
         limit = int(params.get("limit", ["25"])[0])
         if parts == ["release"]:
-            rels = list(self.releases.values())[:limit]
+            words = set(query_term(query, "release").split())
+            rels = [r for r in self.releases.values()
+                    if not words or words & set(r["title"].lower().split())][:limit]
             return {
                 "releases": [{"id": r["id"], "title": r["title"], "score": 100} for r in rels],
                 "count": len(rels),
@@ -190,6 +204,43 @@ def build_import_corpus(src, corpus, ffmpeg):
             ffmpeg(os.path.join(src, dirname, name), "mp3", tags)
 
 
+def dump_db(path, normalise):
+    """Every stored field of every item and album, one line per field
+    (`items <path> field=value`, `albums <album> +flex=value`), sorted;
+    ids, mtimes and added times left out, paths normalised."""
+    db = sqlite3.connect(path)
+    lines = []
+    for table, attrs in (("items", "item_attributes"), ("albums", "album_attributes")):
+        cols = [c[1] for c in db.execute(f"PRAGMA table_info({table})")]
+        rows = {r["id"]: r for r in (dict(zip(cols, row))
+                                     for row in db.execute(f"SELECT * FROM {table}"))}
+        ident = {eid: normalise(_text(r["path"] if table == "items" else r["album"]))
+                 for eid, r in rows.items()}
+        for eid, rec in rows.items():
+            lines += [f"{table} {ident[eid]}: {c}={normalise(_text(rec[c]))!r}"
+                      for c in cols if c not in ("id", "album_id", "mtime", "added")]
+        for eid, k, v in db.execute(f"SELECT entity_id, key, value FROM {attrs}"):
+            lines.append(f"{table} {ident.get(eid, eid)}: +{k}={normalise(_text(v))!r}")
+    db.close()
+    return "\n".join(sorted(lines))
+
+
+def _text(v):
+    if isinstance(v, bytes):
+        return v.decode("utf-8", "replace")
+    return v if isinstance(v, str) else repr(v)
+
+
+def merge(base, extra):
+    """`extra` (a YAML mapping) over `base`, recursively."""
+    for k, v in extra.items():
+        if isinstance(v, dict) and isinstance(base.get(k), dict):
+            merge(base[k], v)
+        else:
+            base[k] = v
+    return base
+
+
 CASE_CONFIG = """\
 directory: {root}/lib
 library: {root}/library.db
@@ -208,49 +259,64 @@ musicbrainz:
 """
 
 
-def run_import_case(work, case, tools, port, normalise):
+def run_import_case(work, case, tools, normalise):
     """Results [(cid, args, ref outcome, rs outcome)] for one case."""
     name, music, args, extra, answers = case
     outcomes = {}
     for tool in tools:
-        root = os.path.join(work, "import", name, tool.name)
-        os.makedirs(root)
-        with open(os.path.join(root, "config.yaml"), "w") as f:
-            f.write(CASE_CONFIG.format(root=root, port=port) + extra)
-        dest = os.path.join(root, "music")
-        shutil.copytree(os.path.join(work, "import-src", music), dest)
-        env = dict(tool.env)
-        env[tool.envvar] = root
-        env["PYTHONUNBUFFERED"] = "1"
-
-        def act(action, dest=dest):
-            kind, *rest = action
-            if kind == "remove":
-                os.remove(os.path.join(dest, rest[0]))
-            elif kind == "empty":
-                for f in os.listdir(dest):
-                    os.remove(os.path.join(dest, f))
-            elif kind == "copy":  # (copy, from import-src path, to name)
-                shutil.copy(os.path.join(work, "import-src", rest[0]),
-                            os.path.join(dest, rest[1]))
-
-        argv = [tool.beet, "import", *args, dest]
-        code, out, err = drive(argv, env, root, answers, act)
-        res = {"code": 0 if code == 0 else 1,
-               "out": normalise(tool, out, root),
-               "err": normalise(tool, err, root)}
-        ls = []
-        for ls_args in (
-            ["ls", "-f", "$albumartist|$album|$track|$title|$mb_trackid|$data_source|$path"],
-            ["ls", "-a", "-f", "$albumartist|$album|$mb_albumid|$albumtype|$year|$country"],
-        ):
-            p = subprocess.run([tool.beet, *ls_args], env=env, cwd=root,
-                               capture_output=True, text=True, timeout=60)
-            ls.append(normalise(tool, p.stdout + p.stderr, root))
-        outcomes[tool.name] = (res, {"code": 0, "out": "\n".join(ls), "err": ""})
+        with FakeMusicBrainz() as mb:
+            outcomes[tool.name] = run_one(work, name, music, args, extra, answers,
+                                          tool, mb, normalise)
     shown = ["import", *args, f"<{music}>"]
-    (r, rls), (s, sls) = outcomes["ref"], outcomes["rs"]
+    (r, rls, rdb, rreq), (s, sls, sdb, sreq) = outcomes["ref"], outcomes["rs"]
     return [
         (f"import:{name}", shown, r, s),
         (f"import:{name}:ls", ["ls", "(items, albums)"], rls, sls),
+        (f"import:{name}:db", ["(library.db)"], rdb, sdb),
+        (f"import:{name}:requests", ["(MusicBrainz requests)"], rreq, sreq),
     ]
+
+
+def run_one(work, name, music, args, extra, answers, tool, mb, normalise):
+    """One tool's import for a case: (import, ls, db, requests) outcomes."""
+    root = os.path.join(work, "import", name, tool.name)
+    os.makedirs(root)
+    config = merge(yaml.safe_load(CASE_CONFIG.format(root=root, port=mb.port)),
+                   yaml.safe_load(extra) or {})
+    with open(os.path.join(root, "config.yaml"), "w") as f:
+        yaml.safe_dump(config, f, allow_unicode=True)
+    dest = os.path.join(root, "music")
+    shutil.copytree(os.path.join(work, "import-src", music), dest)
+    env = dict(tool.env)
+    env[tool.envvar] = root
+    env["PYTHONUNBUFFERED"] = "1"
+
+    def act(action, dest=dest):
+        kind, *rest = action
+        if kind == "remove":
+            os.remove(os.path.join(dest, rest[0]))
+        elif kind == "empty":
+            for f in os.listdir(dest):
+                os.remove(os.path.join(dest, f))
+        elif kind == "copy":  # (copy, from import-src path, to name)
+            shutil.copy(os.path.join(work, "import-src", rest[0]),
+                        os.path.join(dest, rest[1]))
+
+    argv = [tool.beet, "import", *args, dest]
+    code, out, err = drive(argv, env, root, answers, act)
+    res = {"code": 0 if code == 0 else 1,
+           "out": normalise(tool, out, root),
+           "err": normalise(tool, err, root)}
+    ls = []
+    for ls_args in (
+        ["ls", "-f", "$albumartist|$album|$track|$title|$mb_trackid|$data_source|$path"],
+        ["ls", "-a", "-f", "$albumartist|$album|$mb_albumid|$albumtype|$year|$country"],
+    ):
+        p = subprocess.run([tool.beet, *ls_args], env=env, cwd=root,
+                           capture_output=True, text=True, timeout=60)
+        ls.append(normalise(tool, p.stdout + p.stderr, root))
+    db = dump_db(os.path.join(root, "library.db"),
+                 lambda t: normalise(tool, t, root))
+    reqs = "\n".join(mb.requests)
+    return (res, {"code": 0, "out": "\n".join(ls), "err": ""},
+            {"code": 0, "out": db, "err": ""}, {"code": 0, "out": reqs, "err": ""})

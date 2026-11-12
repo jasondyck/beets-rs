@@ -292,11 +292,10 @@ def import_cases(work, ref, rs, opts):
     todo = [c for c in IMPORT_CASES
             if not opts.only or any(o in f"import:{c[0]}" or o.startswith("import:" + c[0])
                                     for o in opts.only)]
-    with importphase.FakeMusicBrainz() as mb:
-        with concurrent.futures.ThreadPoolExecutor(opts.jobs) as pool:
-            batches = pool.map(
-                lambda c: importphase.run_import_case(work, c, (ref, rs), mb.port, norm), todo)
-            return [r for batch in batches for r in batch]
+    with concurrent.futures.ThreadPoolExecutor(opts.jobs) as pool:
+        batches = pool.map(
+            lambda c: importphase.run_import_case(work, c, (ref, rs), norm), todo)
+        return [r for batch in batches for r in batch]
 
 
 # ---------------------------------------------------------------------------

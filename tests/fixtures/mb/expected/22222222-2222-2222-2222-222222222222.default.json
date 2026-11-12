@@ -1,0 +1,555 @@
+{
+ "album": {
+  "album": "Fixture Album (Deluxe)",
+  "album_id": "22222222-2222-2222-2222-222222222222",
+  "albumdisambig": "deluxe edition",
+  "albumstatus": "Official",
+  "albumtype": "album",
+  "albumtypes": [
+   "album"
+  ],
+  "artist": "Fixture Artist",
+  "artist_credit": "Fixture Artist",
+  "artist_id": "aaaaaaaa-0000-0000-0000-000000000001",
+  "artist_sort": "Fixture Artist",
+  "artists": [
+   "Fixture Artist"
+  ],
+  "artists_credit": [
+   "Fixture Artist"
+  ],
+  "artists_ids": [
+   "aaaaaaaa-0000-0000-0000-000000000001"
+  ],
+  "artists_sort": [
+   "Fixture Artist"
+  ],
+  "asin": null,
+  "barcode": "0123456789012",
+  "catalognum": null,
+  "country": "",
+  "data_source": "MusicBrainz",
+  "data_url": "https://musicbrainz.org/release/22222222-2222-2222-2222-222222222222",
+  "day": null,
+  "discogs_albumid": null,
+  "discogs_artistid": null,
+  "discogs_labelid": null,
+  "genres": null,
+  "label": null,
+  "language": "eng",
+  "media": "Digital Media",
+  "mediums": 1,
+  "month": null,
+  "original_day": null,
+  "original_month": null,
+  "original_year": 2003,
+  "release_group_title": "Fixture Album (Deluxe)",
+  "releasegroup_id": "99999999-0000-0000-0000-000000000002",
+  "releasegroupdisambig": null,
+  "script": "Latn",
+  "style": null,
+  "va": false,
+  "year": 2003
+ },
+ "album_item_data": {
+  "album": "Fixture Album (Deluxe)",
+  "albumartist": "Fixture Artist",
+  "albumartist_credit": "Fixture Artist",
+  "albumartist_sort": "Fixture Artist",
+  "albumartists": [
+   "Fixture Artist"
+  ],
+  "albumartists_credit": [
+   "Fixture Artist"
+  ],
+  "albumartists_sort": [
+   "Fixture Artist"
+  ],
+  "albumdisambig": "deluxe edition",
+  "albumstatus": "Official",
+  "albumtype": "album",
+  "albumtypes": [
+   "album"
+  ],
+  "barcode": "0123456789012",
+  "comp": false,
+  "country": "",
+  "data_source": "MusicBrainz",
+  "day": 0,
+  "disctotal": 1,
+  "language": "eng",
+  "mb_albumartistid": "aaaaaaaa-0000-0000-0000-000000000001",
+  "mb_albumartistids": [
+   "aaaaaaaa-0000-0000-0000-000000000001"
+  ],
+  "mb_albumid": "22222222-2222-2222-2222-222222222222",
+  "mb_releasegroupid": "99999999-0000-0000-0000-000000000002",
+  "media": "Digital Media",
+  "month": 0,
+  "original_year": 2003,
+  "release_group_title": "Fixture Album (Deluxe)",
+  "script": "Latn",
+  "year": 2003
+ },
+ "config": "",
+ "merged": [
+  {
+   "album": "Fixture Album (Deluxe)",
+   "albumartist": "Fixture Artist",
+   "albumartist_credit": "Fixture Artist",
+   "albumartist_sort": "Fixture Artist",
+   "albumartists": [
+    "Fixture Artist"
+   ],
+   "albumartists_credit": [
+    "Fixture Artist"
+   ],
+   "albumartists_sort": [
+    "Fixture Artist"
+   ],
+   "albumdisambig": "deluxe edition",
+   "albumstatus": "Official",
+   "albumtype": "album",
+   "albumtypes": [
+    "album"
+   ],
+   "artist": "Fixture Artist",
+   "artist_credit": "Fixture Artist",
+   "artist_sort": "Fixture Artist",
+   "artists": [
+    "Fixture Artist"
+   ],
+   "artists_credit": [
+    "Fixture Artist"
+   ],
+   "artists_sort": [
+    "Fixture Artist"
+   ],
+   "barcode": "0123456789012",
+   "comp": false,
+   "country": "",
+   "data_source": "MusicBrainz",
+   "day": 0,
+   "disc": 1,
+   "disctitle": "",
+   "disctotal": 1,
+   "language": "eng",
+   "length": 201.0,
+   "mb_albumartistid": "aaaaaaaa-0000-0000-0000-000000000001",
+   "mb_albumartistids": [
+    "aaaaaaaa-0000-0000-0000-000000000001"
+   ],
+   "mb_albumid": "22222222-2222-2222-2222-222222222222",
+   "mb_artistid": "aaaaaaaa-0000-0000-0000-000000000001",
+   "mb_artistids": [
+    "aaaaaaaa-0000-0000-0000-000000000001"
+   ],
+   "mb_releasegroupid": "99999999-0000-0000-0000-000000000002",
+   "mb_releasetrackid": "00000000-0000-0000-0002-000000000011",
+   "mb_trackid": "00000000-0000-0000-0001-000000000011",
+   "media": "Digital Media",
+   "month": 0,
+   "original_year": 2003,
+   "release_group_title": "Fixture Album (Deluxe)",
+   "script": "Latn",
+   "title": "Alpha",
+   "track": 1,
+   "track_alt": "1",
+   "tracktotal": 4,
+   "year": 2003
+  },
+  {
+   "album": "Fixture Album (Deluxe)",
+   "albumartist": "Fixture Artist",
+   "albumartist_credit": "Fixture Artist",
+   "albumartist_sort": "Fixture Artist",
+   "albumartists": [
+    "Fixture Artist"
+   ],
+   "albumartists_credit": [
+    "Fixture Artist"
+   ],
+   "albumartists_sort": [
+    "Fixture Artist"
+   ],
+   "albumdisambig": "deluxe edition",
+   "albumstatus": "Official",
+   "albumtype": "album",
+   "albumtypes": [
+    "album"
+   ],
+   "artist": "Fixture Artist",
+   "artist_credit": "Fixture Artist",
+   "artist_sort": "Fixture Artist",
+   "artists": [
+    "Fixture Artist"
+   ],
+   "artists_credit": [
+    "Fixture Artist"
+   ],
+   "artists_sort": [
+    "Fixture Artist"
+   ],
+   "barcode": "0123456789012",
+   "comp": false,
+   "country": "",
+   "data_source": "MusicBrainz",
+   "day": 0,
+   "disc": 1,
+   "disctitle": "",
+   "disctotal": 1,
+   "language": "eng",
+   "length": 185.0,
+   "mb_albumartistid": "aaaaaaaa-0000-0000-0000-000000000001",
+   "mb_albumartistids": [
+    "aaaaaaaa-0000-0000-0000-000000000001"
+   ],
+   "mb_albumid": "22222222-2222-2222-2222-222222222222",
+   "mb_artistid": "aaaaaaaa-0000-0000-0000-000000000001",
+   "mb_artistids": [
+    "aaaaaaaa-0000-0000-0000-000000000001"
+   ],
+   "mb_releasegroupid": "99999999-0000-0000-0000-000000000002",
+   "mb_releasetrackid": "00000000-0000-0000-0002-000000000012",
+   "mb_trackid": "00000000-0000-0000-0001-000000000012",
+   "media": "Digital Media",
+   "month": 0,
+   "original_year": 2003,
+   "release_group_title": "Fixture Album (Deluxe)",
+   "script": "Latn",
+   "title": "Beta",
+   "track": 2,
+   "track_alt": "2",
+   "tracktotal": 4,
+   "year": 2003
+  },
+  {
+   "album": "Fixture Album (Deluxe)",
+   "albumartist": "Fixture Artist",
+   "albumartist_credit": "Fixture Artist",
+   "albumartist_sort": "Fixture Artist",
+   "albumartists": [
+    "Fixture Artist"
+   ],
+   "albumartists_credit": [
+    "Fixture Artist"
+   ],
+   "albumartists_sort": [
+    "Fixture Artist"
+   ],
+   "albumdisambig": "deluxe edition",
+   "albumstatus": "Official",
+   "albumtype": "album",
+   "albumtypes": [
+    "album"
+   ],
+   "artist": "Fixture Artist",
+   "artist_credit": "Fixture Artist",
+   "artist_sort": "Fixture Artist",
+   "artists": [
+    "Fixture Artist"
+   ],
+   "artists_credit": [
+    "Fixture Artist"
+   ],
+   "artists_sort": [
+    "Fixture Artist"
+   ],
+   "barcode": "0123456789012",
+   "comp": false,
+   "country": "",
+   "data_source": "MusicBrainz",
+   "day": 0,
+   "disc": 1,
+   "disctitle": "",
+   "disctotal": 1,
+   "language": "eng",
+   "length": 239.0,
+   "mb_albumartistid": "aaaaaaaa-0000-0000-0000-000000000001",
+   "mb_albumartistids": [
+    "aaaaaaaa-0000-0000-0000-000000000001"
+   ],
+   "mb_albumid": "22222222-2222-2222-2222-222222222222",
+   "mb_artistid": "aaaaaaaa-0000-0000-0000-000000000001",
+   "mb_artistids": [
+    "aaaaaaaa-0000-0000-0000-000000000001"
+   ],
+   "mb_releasegroupid": "99999999-0000-0000-0000-000000000002",
+   "mb_releasetrackid": "00000000-0000-0000-0002-000000000013",
+   "mb_trackid": "00000000-0000-0000-0001-000000000013",
+   "media": "Digital Media",
+   "month": 0,
+   "original_year": 2003,
+   "release_group_title": "Fixture Album (Deluxe)",
+   "script": "Latn",
+   "title": "Gamma (Remastered)",
+   "track": 3,
+   "track_alt": "3",
+   "tracktotal": 4,
+   "year": 2003
+  },
+  {
+   "album": "Fixture Album (Deluxe)",
+   "albumartist": "Fixture Artist",
+   "albumartist_credit": "Fixture Artist",
+   "albumartist_sort": "Fixture Artist",
+   "albumartists": [
+    "Fixture Artist"
+   ],
+   "albumartists_credit": [
+    "Fixture Artist"
+   ],
+   "albumartists_sort": [
+    "Fixture Artist"
+   ],
+   "albumdisambig": "deluxe edition",
+   "albumstatus": "Official",
+   "albumtype": "album",
+   "albumtypes": [
+    "album"
+   ],
+   "artist": "Fixture Artist",
+   "artist_credit": "Fixture Artist",
+   "artist_sort": "Fixture Artist",
+   "artists": [
+    "Fixture Artist"
+   ],
+   "artists_credit": [
+    "Fixture Artist"
+   ],
+   "artists_sort": [
+    "Fixture Artist"
+   ],
+   "barcode": "0123456789012",
+   "comp": false,
+   "country": "",
+   "data_source": "MusicBrainz",
+   "day": 0,
+   "disc": 1,
+   "disctitle": "",
+   "disctotal": 1,
+   "language": "eng",
+   "length": 210.0,
+   "mb_albumartistid": "aaaaaaaa-0000-0000-0000-000000000001",
+   "mb_albumartistids": [
+    "aaaaaaaa-0000-0000-0000-000000000001"
+   ],
+   "mb_albumid": "22222222-2222-2222-2222-222222222222",
+   "mb_artistid": "aaaaaaaa-0000-0000-0000-000000000001",
+   "mb_artistids": [
+    "aaaaaaaa-0000-0000-0000-000000000001"
+   ],
+   "mb_releasegroupid": "99999999-0000-0000-0000-000000000002",
+   "mb_releasetrackid": "00000000-0000-0000-0002-000000000014",
+   "mb_trackid": "00000000-0000-0000-0001-000000000014",
+   "media": "Digital Media",
+   "month": 0,
+   "original_year": 2003,
+   "release_group_title": "Fixture Album (Deluxe)",
+   "script": "Latn",
+   "title": "Delta",
+   "track": 4,
+   "track_alt": "4",
+   "tracktotal": 4,
+   "year": 2003
+  }
+ ],
+ "tracks": [
+  {
+   "album": null,
+   "arrangers": null,
+   "arrangers_ids": [],
+   "artist": "Fixture Artist",
+   "artist_credit": "Fixture Artist",
+   "artist_id": "aaaaaaaa-0000-0000-0000-000000000001",
+   "artist_sort": "Fixture Artist",
+   "artists": [
+    "Fixture Artist"
+   ],
+   "artists_credit": [
+    "Fixture Artist"
+   ],
+   "artists_ids": [
+    "aaaaaaaa-0000-0000-0000-000000000001"
+   ],
+   "artists_sort": [
+    "Fixture Artist"
+   ],
+   "bpm": null,
+   "composer_sort": null,
+   "composers": null,
+   "composers_ids": [],
+   "data_source": "MusicBrainz",
+   "data_url": "https://musicbrainz.org/recording/00000000-0000-0000-0001-000000000011",
+   "disctitle": "",
+   "genres": null,
+   "index": 1,
+   "initial_key": null,
+   "isrc": null,
+   "length": 201.0,
+   "lyricists": null,
+   "lyricists_ids": [],
+   "mb_workid": null,
+   "media": "Digital Media",
+   "medium": 1,
+   "medium_index": 1,
+   "medium_total": 4,
+   "release_track_id": "00000000-0000-0000-0002-000000000011",
+   "remixers": null,
+   "remixers_ids": [],
+   "title": "Alpha",
+   "track_alt": "1",
+   "track_id": "00000000-0000-0000-0001-000000000011",
+   "trackdisambig": null,
+   "work": null,
+   "work_disambig": null
+  },
+  {
+   "album": null,
+   "arrangers": null,
+   "arrangers_ids": [],
+   "artist": "Fixture Artist",
+   "artist_credit": "Fixture Artist",
+   "artist_id": "aaaaaaaa-0000-0000-0000-000000000001",
+   "artist_sort": "Fixture Artist",
+   "artists": [
+    "Fixture Artist"
+   ],
+   "artists_credit": [
+    "Fixture Artist"
+   ],
+   "artists_ids": [
+    "aaaaaaaa-0000-0000-0000-000000000001"
+   ],
+   "artists_sort": [
+    "Fixture Artist"
+   ],
+   "bpm": null,
+   "composer_sort": null,
+   "composers": null,
+   "composers_ids": [],
+   "data_source": "MusicBrainz",
+   "data_url": "https://musicbrainz.org/recording/00000000-0000-0000-0001-000000000012",
+   "disctitle": "",
+   "genres": null,
+   "index": 2,
+   "initial_key": null,
+   "isrc": null,
+   "length": 185.0,
+   "lyricists": null,
+   "lyricists_ids": [],
+   "mb_workid": null,
+   "media": "Digital Media",
+   "medium": 1,
+   "medium_index": 2,
+   "medium_total": 4,
+   "release_track_id": "00000000-0000-0000-0002-000000000012",
+   "remixers": null,
+   "remixers_ids": [],
+   "title": "Beta",
+   "track_alt": "2",
+   "track_id": "00000000-0000-0000-0001-000000000012",
+   "trackdisambig": null,
+   "work": null,
+   "work_disambig": null
+  },
+  {
+   "album": null,
+   "arrangers": null,
+   "arrangers_ids": [],
+   "artist": "Fixture Artist",
+   "artist_credit": "Fixture Artist",
+   "artist_id": "aaaaaaaa-0000-0000-0000-000000000001",
+   "artist_sort": "Fixture Artist",
+   "artists": [
+    "Fixture Artist"
+   ],
+   "artists_credit": [
+    "Fixture Artist"
+   ],
+   "artists_ids": [
+    "aaaaaaaa-0000-0000-0000-000000000001"
+   ],
+   "artists_sort": [
+    "Fixture Artist"
+   ],
+   "bpm": null,
+   "composer_sort": null,
+   "composers": null,
+   "composers_ids": [],
+   "data_source": "MusicBrainz",
+   "data_url": "https://musicbrainz.org/recording/00000000-0000-0000-0001-000000000013",
+   "disctitle": "",
+   "genres": null,
+   "index": 3,
+   "initial_key": null,
+   "isrc": null,
+   "length": 239.0,
+   "lyricists": null,
+   "lyricists_ids": [],
+   "mb_workid": null,
+   "media": "Digital Media",
+   "medium": 1,
+   "medium_index": 3,
+   "medium_total": 4,
+   "release_track_id": "00000000-0000-0000-0002-000000000013",
+   "remixers": null,
+   "remixers_ids": [],
+   "title": "Gamma (Remastered)",
+   "track_alt": "3",
+   "track_id": "00000000-0000-0000-0001-000000000013",
+   "trackdisambig": null,
+   "work": null,
+   "work_disambig": null
+  },
+  {
+   "album": null,
+   "arrangers": null,
+   "arrangers_ids": [],
+   "artist": "Fixture Artist",
+   "artist_credit": "Fixture Artist",
+   "artist_id": "aaaaaaaa-0000-0000-0000-000000000001",
+   "artist_sort": "Fixture Artist",
+   "artists": [
+    "Fixture Artist"
+   ],
+   "artists_credit": [
+    "Fixture Artist"
+   ],
+   "artists_ids": [
+    "aaaaaaaa-0000-0000-0000-000000000001"
+   ],
+   "artists_sort": [
+    "Fixture Artist"
+   ],
+   "bpm": null,
+   "composer_sort": null,
+   "composers": null,
+   "composers_ids": [],
+   "data_source": "MusicBrainz",
+   "data_url": "https://musicbrainz.org/recording/00000000-0000-0000-0001-000000000014",
+   "disctitle": "",
+   "genres": null,
+   "index": 4,
+   "initial_key": null,
+   "isrc": null,
+   "length": 210.0,
+   "lyricists": null,
+   "lyricists_ids": [],
+   "mb_workid": null,
+   "media": "Digital Media",
+   "medium": 1,
+   "medium_index": 4,
+   "medium_total": 4,
+   "release_track_id": "00000000-0000-0000-0002-000000000014",
+   "remixers": null,
+   "remixers_ids": [],
+   "title": "Delta",
+   "track_alt": "4",
+   "track_id": "00000000-0000-0000-0001-000000000014",
+   "trackdisambig": null,
+   "work": null,
+   "work_disambig": null
+  }
+ ]
+}

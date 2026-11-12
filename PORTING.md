@@ -48,7 +48,7 @@ config`, plugins fetchart / lyrics / embedart, release preferences.
 ## 4. Core: autotagger
 
 - [x] **4.1 Match options**: `match.ignored`, `match.required`, `ignored_media`, `ignore_data_tracks`, `ignore_video_tracks`, `track_length_grace/max` check, `distance_weights` completeness (source, tracks, etc.); `match.album_disambig_fields` / `singleton_disambig_fields`; penalty keys listed in insertion order
-- [ ] **4.2 Metadata fidelity**: MusicBrainz search query exactly as beets 2.14 builds it (lowercased release + artist, Various Artists id for likely-VA albums; ours adds tracks:N and a retry); albumstatus case as beets ("Official"); `artist_credit`, multi-artist/multi-value fields, album types, release group / work fields, `musicbrainz.extra_tags`, `musicbrainz.genres`, VA detection, pregap/data tracks, `per_disc_numbering` checks
+- [x] **4.2 Metadata fidelity**: MusicBrainz search query exactly as beets 2.14 builds it (lowercased release + artist, Various Artists id for likely-VA albums; ours adds tracks:N and a retry); albumstatus case as beets ("Official"); `artist_credit`, multi-artist/multi-value fields, album types, release group / work fields, `musicbrainz.extra_tags`, `musicbrainz.genres`, VA detection, pregap/data tracks, `per_disc_numbering` checks
 
 ## 5. Bundled plugins (by popularity)
 
