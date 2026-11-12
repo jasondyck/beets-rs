@@ -5,6 +5,7 @@ mod config;
 mod diff;
 mod display;
 mod duplicates;
+mod events;
 mod fileops;
 mod formatted;
 mod hooks;
@@ -612,6 +613,19 @@ pub enum Cmd {
         output: Option<String>,
         names: Vec<String>,
     },
+    /// Check for corrupt or missing files (plugin: badfiles)
+    Bad {
+        /// View results for both the bad and uncorrupted files
+        #[arg(short = 'v', long)]
+        verbose: bool,
+        /// Limit query results
+        #[arg(short = 'l', long)]
+        limit: Option<usize>,
+        #[arg(allow_hyphen_values = true)]
+        query: Vec<String>,
+    },
+    /// List all files in the library folder which are not listed in the beets library database (plugin: unimported)
+    Unimported,
     /// List missing tracks (plugin: missing)
     #[command(visible_alias = "miss")]
     Missing {
