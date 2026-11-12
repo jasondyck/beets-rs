@@ -109,11 +109,12 @@ match:
         missing_tracks: medium
         unmatched_tracks: medium
     distance_weights:
+        data_source: 2.0
         artist: 3.0
         album: 3.0
-        year: 1.0
         media: 1.0
         mediums: 1.0
+        year: 1.0
         country: 0.5
         label: 0.5
         catalognum: 0.5
@@ -127,12 +128,20 @@ match:
         track_index: 1.0
         track_length: 2.0
         track_id: 5.0
+        medium: 1.0
     preferred:
         countries: []
         media: []
         original_year: no
+    ignored: []
+    required: []
+    ignored_media: []
+    ignore_data_tracks: yes
+    ignore_video_tracks: yes
     track_length_grace: 10
     track_length_max: 30
+    album_disambig_fields: data_source media year country label catalognum albumdisambig
+    singleton_disambig_fields: data_source index track_alt album
 
 ui:
     terminal_width: 80
@@ -185,6 +194,7 @@ musicbrainz:
     ratelimit_interval: 1.0
     searchlimit: 5
     aliases_as_credits: no
+    data_source_mismatch_penalty: 0.5
 "#;
 
 #[derive(Debug, Clone)]

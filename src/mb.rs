@@ -3,6 +3,7 @@
 use crate::config::Config;
 use anyhow::{Context, Result, bail};
 use serde_json::Value as J;
+use std::collections::BTreeSet;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
@@ -31,9 +32,14 @@ pub struct TrackInfo {
     pub disctitle: String,
     pub media: String,
     pub isrc: String,
-    /// The first release a searched-for recording appears on (display only,
-    /// for `import.singleton_album_disambig`).
-    pub album: String,
+    /// The track's number on the release ("A1", "3"): beets' `track_alt`.
+    pub track_alt: Option<String>,
+    pub trackdisambig: String,
+    pub data_source: String,
+    pub data_url: String,
+    /// Fields beets would have as None (MusicBrainz gave nothing), so that
+    /// a disambiguation string or `match.required` sees them as beets does.
+    pub nulls: BTreeSet<&'static str>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -62,6 +68,106 @@ pub struct AlbumInfo {
     pub media: String,
     pub mediums: usize,
     pub tracks: Vec<TrackInfo>,
+    pub barcode: String,
+    pub asin: String,
+    pub script: String,
+    pub language: String,
+    pub data_source: String,
+    pub data_url: String,
+    /// Fields beets would have as None (see [`TrackInfo::nulls`]).
+    pub nulls: BTreeSet<&'static str>,
+}
+
+/// Python's `str()` of a float: always with a decimal point.
+fn py_float(f: f64) -> String {
+    if f.is_finite() && f.fract() == 0.0 && f.abs() < 1e16 {
+        format!("{f:.1}")
+    } else {
+        f.to_string()
+    }
+}
+
+/// A string field for [`AlbumInfo::field`]: `Some(None)` if it's None.
+fn shown(nulls: &BTreeSet<&'static str>, name: &'static str, v: String) -> Option<Option<String>> {
+    Some((!nulls.contains(name)).then_some(v))
+}
+
+fn int_or_null(v: i64) -> Option<String> {
+    (v != 0).then(|| v.to_string())
+}
+
+impl AlbumInfo {
+    /// beets' `info[name]`, as `str()` shows it: None if the info has no
+    /// such field, `Some(None)` if the field is None.
+    pub fn field(&self, name: &str) -> Option<Option<String>> {
+        let n = &self.nulls;
+        Some(match name {
+            "album" => Some(self.album.clone()),
+            "album_id" => Some(self.album_id.clone()),
+            "artist" => Some(self.artist.clone()),
+            "artist_id" => Some(self.artist_id.clone()),
+            "artist_sort" => Some(self.artist_sort.clone()),
+            "artist_credit" => Some(self.artist_credit.clone()),
+            "va" => Some(if self.va { "True" } else { "False" }.into()),
+            "year" => int_or_null(self.year),
+            "month" => int_or_null(self.month),
+            "day" => int_or_null(self.day),
+            "original_year" => int_or_null(self.original_year),
+            "original_month" => int_or_null(self.original_month),
+            "original_day" => int_or_null(self.original_day),
+            "mediums" => Some(self.mediums.to_string()),
+            "country" => return shown(n, "country", self.country.clone()),
+            "label" => return shown(n, "label", self.label.clone()),
+            "catalognum" => return shown(n, "catalognum", self.catalognum.clone()),
+            "albumtype" => return shown(n, "albumtype", self.albumtype.clone()),
+            "albumstatus" => return shown(n, "albumstatus", self.albumstatus.clone()),
+            "albumdisambig" => return shown(n, "albumdisambig", self.albumdisambig.clone()),
+            "releasegroup_id" => Some(self.releasegroup_id.clone()),
+            "releasegroupdisambig" => {
+                return shown(n, "releasegroupdisambig", self.releasegroupdisambig.clone());
+            }
+            "media" => return shown(n, "media", self.media.clone()),
+            "barcode" => return shown(n, "barcode", self.barcode.clone()),
+            "asin" => return shown(n, "asin", self.asin.clone()),
+            "script" => return shown(n, "script", self.script.clone()),
+            "language" => return shown(n, "language", self.language.clone()),
+            "data_source" => return shown(n, "data_source", self.data_source.clone()),
+            "data_url" => return shown(n, "data_url", self.data_url.clone()),
+            _ => return None,
+        })
+    }
+}
+
+impl TrackInfo {
+    /// beets' `info[name]` for a track (see [`AlbumInfo::field`]).
+    pub fn field(&self, name: &str) -> Option<Option<String>> {
+        let n = &self.nulls;
+        let num = |v: usize| (v != 0).then(|| v.to_string());
+        Some(match name {
+            "title" => Some(self.title.clone()),
+            "track_id" => Some(self.track_id.clone()),
+            "release_track_id" => Some(self.release_track_id.clone()).filter(|s| !s.is_empty()),
+            "artist" => Some(self.artist.clone()),
+            "artist_id" => Some(self.artist_id.clone()),
+            "artist_sort" => Some(self.artist_sort.clone()),
+            "artist_credit" => Some(self.artist_credit.clone()),
+            "length" => self.length.map(py_float),
+            "index" => num(self.index),
+            "medium" => num(self.medium),
+            "medium_index" => (self.index != 0).then(|| self.medium_index.to_string()),
+            "medium_total" => num(self.medium_total),
+            "disctitle" => return shown(n, "disctitle", self.disctitle.clone()),
+            "media" => return shown(n, "media", self.media.clone()),
+            "track_alt" => self.track_alt.clone(),
+            "trackdisambig" => return shown(n, "trackdisambig", self.trackdisambig.clone()),
+            "isrc" => return shown(n, "isrc", self.isrc.clone()),
+            // beets 2.14's MusicBrainz source never fills a track's album.
+            "album" => None,
+            "data_source" => return shown(n, "data_source", self.data_source.clone()),
+            "data_url" => return shown(n, "data_url", self.data_url.clone()),
+            _ => return None,
+        })
+    }
 }
 
 pub struct MusicBrainz {
@@ -72,7 +178,7 @@ pub struct MusicBrainz {
     /// threads sharing the client share the rate limit.
     last: Mutex<Option<Instant>>,
     pub search_limit: usize,
-    aliases: AliasPrefs,
+    opts: ParseOpts,
 }
 
 /// Which MusicBrainz alias to use for names and titles: `import.languages`,
@@ -119,6 +225,47 @@ impl AliasPrefs {
             None => s(obj, "title"),
         }
     }
+}
+
+/// What shapes a release beyond aliases: beets' `match.ignored_media`,
+/// `ignore_data_tracks`, `ignore_video_tracks` and, for the release event,
+/// `match.preferred.countries`.
+#[derive(Debug, Clone)]
+pub struct ParseOpts {
+    pub aliases: AliasPrefs,
+    pub ignored_media: Vec<String>,
+    pub ignore_data_tracks: bool,
+    pub ignore_video_tracks: bool,
+    pub preferred_countries: Vec<String>,
+}
+
+impl Default for ParseOpts {
+    fn default() -> Self {
+        ParseOpts {
+            aliases: AliasPrefs::default(),
+            ignored_media: vec![],
+            ignore_data_tracks: true,
+            ignore_video_tracks: true,
+            preferred_countries: vec![],
+        }
+    }
+}
+
+impl ParseOpts {
+    pub fn from_config(cfg: &Config) -> Self {
+        ParseOpts {
+            aliases: AliasPrefs::from_config(cfg),
+            ignored_media: cfg.list("match.ignored_media"),
+            ignore_data_tracks: cfg.bool("match.ignore_data_tracks"),
+            ignore_video_tracks: cfg.bool("match.ignore_video_tracks"),
+            preferred_countries: cfg.list("match.preferred.countries"),
+        }
+    }
+}
+
+/// A string that's None in beets when null or missing.
+fn opt_s(v: &J, key: &str) -> Option<String> {
+    v.get(key).and_then(|x| x.as_str()).map(String::from)
 }
 
 fn s(v: &J, key: &str) -> String {
@@ -210,7 +357,7 @@ impl MusicBrainz {
             interval,
             last: Mutex::new(None),
             search_limit: cfg.f64("musicbrainz.searchlimit").max(1.0) as usize,
-            aliases: AliasPrefs::from_config(cfg),
+            opts: ParseOpts::from_config(cfg),
         }
     }
 
@@ -287,7 +434,7 @@ impl MusicBrainz {
                 "recordings artist-credits labels release-groups isrcs aliases",
             )],
         )?;
-        Ok(parse_release(&j, &self.aliases))
+        Ok(parse_release(&j, &self.opts))
     }
 
     pub fn search_recordings(&self, artist: &str, title: &str) -> Result<Vec<TrackInfo>> {
@@ -315,7 +462,7 @@ impl MusicBrainz {
             .and_then(|r| r.as_array())
             .map(|a| {
                 a.iter()
-                    .map(|r| parse_recording(r, &self.aliases))
+                    .map(|r| parse_recording(r, &self.opts.aliases))
                     .collect()
             })
             .unwrap_or_default())
@@ -327,21 +474,32 @@ impl MusicBrainz {
             &format!("recording/{id}"),
             &[("inc", "artist-credits isrcs aliases")],
         )?;
-        Ok(parse_recording(&j, &self.aliases))
+        Ok(parse_recording(&j, &self.opts.aliases))
     }
 }
 
+/// beets' `track_info`: a recording as a track. Positional fields (index,
+/// medium, ...) are None until the release sets them.
 pub fn parse_recording(r: &J, prefs: &AliasPrefs) -> TrackInfo {
     let (artist, artist_id, artist_sort, credit) = artist_credit(r.get("artist-credit"), prefs);
+    let isrcs: Vec<&str> = r
+        .get("isrcs")
+        .and_then(|i| i.as_array())
+        .map(|a| a.iter().filter_map(|i| i.as_str()).collect())
+        .unwrap_or_default();
+    let mut nulls: BTreeSet<&'static str> = ["disctitle", "media"].into();
+    if isrcs.is_empty() {
+        nulls.insert("isrc");
+    }
+    let trackdisambig = s(r, "disambiguation");
+    if trackdisambig.is_empty() {
+        nulls.insert("trackdisambig");
+    }
+    let id = s(r, "id");
     TrackInfo {
         title: prefs.title(r),
-        album: r
-            .get("releases")
-            .and_then(|rs| rs.as_array())
-            .and_then(|rs| rs.first())
-            .map(|rel| s(rel, "title"))
-            .unwrap_or_default(),
-        track_id: s(r, "id"),
+        data_url: format!("https://musicbrainz.org/recording/{id}"),
+        track_id: id,
         artist,
         artist_id,
         artist_sort,
@@ -349,95 +507,232 @@ pub fn parse_recording(r: &J, prefs: &AliasPrefs) -> TrackInfo {
         length: r
             .get("length")
             .and_then(|l| l.as_f64())
+            .filter(|l| *l != 0.0)
             .map(|ms| ms / 1000.0),
-        isrc: r
-            .get("isrcs")
-            .and_then(|i| i.as_array())
-            .and_then(|a| a.first())
-            .and_then(|i| i.as_str())
-            .unwrap_or("")
-            .to_string(),
+        isrc: isrcs.join(";"),
+        trackdisambig,
+        data_source: "MusicBrainz".into(),
+        nulls,
         ..Default::default()
     }
 }
 
-pub fn parse_release(j: &J, prefs: &AliasPrefs) -> AlbumInfo {
-    let (artist, artist_id, artist_sort, artist_credit_s) =
-        artist_credit(j.get("artist-credit"), prefs);
-    let (year, month, day) = parse_date(&s(j, "date"));
-    let rg = j.get("release-group").cloned().unwrap_or(J::Null);
-    let (oy, om, od) = parse_date(&s(&rg, "first-release-date"));
-    let label_info = j
-        .get("label-info")
-        .and_then(|l| l.as_array())
-        .and_then(|a| a.first())
-        .cloned()
-        .unwrap_or(J::Null);
-    let label = label_info
-        .get("label")
-        .map(|l| s(l, "name"))
-        .unwrap_or_default();
+/// beets' `_album_media`: the media's shared format, else their common base
+/// when they differ only in a parenthetical, else "Media". None (empty) when
+/// the formats are unknown.
+fn album_media(medias: &BTreeSet<Option<String>>) -> Option<String> {
+    if medias.len() == 1 {
+        return medias.iter().next().cloned().flatten();
+    }
+    let bases: BTreeSet<Option<String>> = medias
+        .iter()
+        .map(|m| {
+            m.as_ref()
+                .map(|m| m.split(" (").next().unwrap_or("").to_string())
+        })
+        .collect();
+    match bases.len() {
+        1 => bases.into_iter().next().flatten(),
+        0 => None,
+        _ => Some("Media".into()),
+    }
+}
 
-    let mut tracks = vec![];
-    let mut formats = vec![];
-    let media = j
-        .get("media")
-        .and_then(|m| m.as_array())
-        .cloned()
-        .unwrap_or_default();
-    let mediums = media.len();
-    for (mi, medium) in media.iter().enumerate() {
-        let pos = medium
-            .get("position")
-            .and_then(|p| p.as_u64())
-            .map(|p| p as usize)
-            .unwrap_or(mi + 1);
-        let fmt = s(medium, "format");
-        if !fmt.is_empty() {
-            formats.push(fmt.clone());
-        }
-        let mtracks = medium
-            .get("tracks")
+/// beets' `get_tracks_from_medium`: the pregap, the tracks and (unless
+/// ignored) the data tracks, without "[data track]" placeholders or (with
+/// `ignore_video_tracks`) videos.
+fn medium_tracks(medium: &J, opts: &ParseOpts) -> Vec<TrackInfo> {
+    let arr = |k: &str| {
+        medium
+            .get(k)
             .and_then(|t| t.as_array())
             .cloned()
-            .unwrap_or_default();
-        let mtotal = mtracks.len();
-        for (ti, t) in mtracks.iter().enumerate() {
+            .unwrap_or_default()
+    };
+    let mut all = vec![];
+    if let Some(p) = medium.get("pregap").filter(|p| !p.is_null()) {
+        all.push(p.clone());
+    }
+    all.extend(arr("tracks"));
+    if !opts.ignore_data_tracks {
+        all.extend(arr("data-tracks"));
+    }
+    let valid: Vec<J> = all
+        .into_iter()
+        .filter(|t| {
+            let rec = t.get("recording").cloned().unwrap_or(J::Null);
+            s(&rec, "title") != "[data track]"
+                && !(opts.ignore_video_tracks
+                    && rec.get("video").and_then(|v| v.as_bool()) == Some(true))
+        })
+        .collect();
+    let format = opt_s(medium, "format");
+    let disctitle = opt_s(medium, "title");
+    let position = medium.get("position").and_then(|p| p.as_u64()).unwrap_or(0) as usize;
+    let total = valid.len();
+    let prefs = &opts.aliases;
+    valid
+        .iter()
+        .map(|t| {
             let rec = t.get("recording").cloned().unwrap_or(J::Null);
             let mut info = parse_recording(&rec, prefs);
-            // The release's track title/credit wins over the recording's,
-            // unless the recording has a preferred alias.
+            // The release's track title/credit/length win over the
+            // recording's, unless the recording has a preferred alias.
             let title = s(t, "title");
             if !title.is_empty() && prefs.preferred(&rec).is_none() {
                 info.title = title;
             }
-            if t.get("artist-credit").is_some() {
+            if t.get("artist-credit")
+                .and_then(|a| a.as_array())
+                .is_some_and(|a| !a.is_empty())
+            {
                 let (a, aid, asort, acred) = artist_credit(t.get("artist-credit"), prefs);
                 info.artist = a;
                 info.artist_id = aid;
                 info.artist_sort = asort;
                 info.artist_credit = acred;
             }
-            if let Some(l) = t.get("length").and_then(|l| l.as_f64()) {
+            if let Some(l) = t
+                .get("length")
+                .and_then(|l| l.as_f64())
+                .filter(|l| *l != 0.0)
+            {
                 info.length = Some(l / 1000.0);
             }
             info.release_track_id = s(t, "id");
-            info.medium = pos;
+            info.track_alt = opt_s(t, "number");
+            info.medium = position;
             info.medium_index = t
                 .get("position")
-                .and_then(|p| p.as_u64())
-                .map(|p| p as usize)
-                .unwrap_or(ti + 1);
-            info.medium_total = mtotal;
-            info.disctitle = s(medium, "title");
-            info.media = fmt.clone();
-            info.index = tracks.len() + 1;
-            tracks.push(info);
+                .and_then(|p| p.as_u64().or_else(|| p.as_str()?.parse().ok()))
+                .unwrap_or(0) as usize;
+            info.medium_total = total;
+            info.nulls.remove("disctitle");
+            info.nulls.remove("media");
+            match &disctitle {
+                Some(d) => info.disctitle = d.clone(),
+                None => {
+                    info.nulls.insert("disctitle");
+                }
+            }
+            match &format {
+                Some(f) => info.media = f.clone(),
+                None => {
+                    info.nulls.insert("media");
+                }
+            }
+            info
+        })
+        .collect()
+}
+
+/// beets' `_preferred_release_event`: the first preferred country with a
+/// release event there, and that event's date; else the release's own.
+fn release_event(j: &J, preferred: &[String]) -> (Option<String>, Option<String>) {
+    let events = j
+        .get("release-events")
+        .and_then(|e| e.as_array())
+        .cloned()
+        .unwrap_or_default();
+    for country in preferred {
+        for e in &events {
+            let codes = e
+                .get("area")
+                .and_then(|a| a.get("iso-3166-1-codes"))
+                .and_then(|c| c.as_array());
+            if codes.is_some_and(|c| c.iter().any(|c| c.as_str() == Some(country))) {
+                return (Some(country.clone()), opt_s(e, "date"));
+            }
         }
     }
-    formats.dedup();
+    (opt_s(j, "country"), opt_s(j, "date"))
+}
+
+/// beets' `album_info` for a release.
+pub fn parse_release(j: &J, opts: &ParseOpts) -> AlbumInfo {
+    let prefs = &opts.aliases;
+    let (artist, artist_id, artist_sort, artist_credit_s) =
+        artist_credit(j.get("artist-credit"), prefs);
+    let rg = j.get("release-group").cloned().unwrap_or(J::Null);
+    let (oy, om, od) = parse_date(&s(&rg, "first-release-date"));
+    let mut nulls = BTreeSet::new();
+    let mut null_if = |name: &'static str, v: Option<String>| match v {
+        Some(v) => v,
+        None => {
+            nulls.insert(name);
+            String::new()
+        }
+    };
+    // beets' `_parse_label_infos`: the first label info.
+    let label_info = j
+        .get("label-info")
+        .and_then(|l| l.as_array())
+        .and_then(|a| a.first())
+        .cloned();
+    let label = label_info
+        .as_ref()
+        .and_then(|li| li.get("label"))
+        .and_then(|l| opt_s(l, "name"))
+        .filter(|n| n != "[no label]");
+    let catalognum = label_info
+        .as_ref()
+        .and_then(|li| opt_s(li, "catalog-number"));
+    let label = null_if("label", label);
+    let catalognum = null_if("catalognum", catalognum);
+
+    let media_list = j
+        .get("media")
+        .and_then(|m| m.as_array())
+        .cloned()
+        .unwrap_or_default();
+    let mediums = media_list.len();
+    let mut tracks = vec![];
+    for medium in &media_list {
+        let fmt = s(medium, "format");
+        if opts.ignored_media.contains(&fmt) {
+            continue;
+        }
+        tracks.extend(medium_tracks(medium, opts));
+    }
+    for (i, t) in tracks.iter_mut().enumerate() {
+        t.index = i + 1;
+    }
+    let medias: BTreeSet<Option<String>> = tracks
+        .iter()
+        .map(|t| (!t.nulls.contains("media")).then(|| t.media.clone()))
+        .collect();
+    let media = null_if("media", album_media(&medias));
+
+    let (country, date) = release_event(j, &opts.preferred_countries);
+    let country = null_if("country", country);
+    let (year, month, day) = match date.filter(|d| !d.is_empty()) {
+        Some(d) => parse_date(&d),
+        None => (oy, om, od),
+    };
+    let albumdisambig = null_if(
+        "albumdisambig",
+        opt_s(j, "disambiguation").filter(|d| !d.is_empty()),
+    );
+    let releasegroupdisambig = null_if(
+        "releasegroupdisambig",
+        opt_s(&rg, "disambiguation").filter(|d| !d.is_empty()),
+    );
+    let albumtype = null_if(
+        "albumtype",
+        opt_s(&rg, "primary-type")
+            .filter(|t| !t.is_empty())
+            .map(|t| t.to_lowercase()),
+    );
+    let albumstatus = null_if("albumstatus", opt_s(j, "status").map(|t| t.to_lowercase()));
+    let text = j.get("text-representation").cloned().unwrap_or(J::Null);
+    let script = null_if("script", opt_s(&text, "script"));
+    let language = null_if("language", opt_s(&text, "language"));
+    let barcode = null_if("barcode", opt_s(j, "barcode"));
+    let asin = null_if("asin", opt_s(j, "asin"));
+    let id = s(j, "id");
     AlbumInfo {
-        album_id: s(j, "id"),
+        data_url: format!("https://musicbrainz.org/release/{id}"),
+        album_id: id,
         album: prefs.title(j),
         va: artist_id == VA_ARTIST_ID,
         artist,
@@ -450,17 +745,23 @@ pub fn parse_release(j: &J, prefs: &AliasPrefs) -> AlbumInfo {
         original_year: oy,
         original_month: om,
         original_day: od,
-        country: s(j, "country"),
+        country,
         label,
-        catalognum: s(&label_info, "catalog-number"),
-        albumtype: s(&rg, "primary-type").to_lowercase(),
-        albumstatus: s(j, "status").to_lowercase(),
-        albumdisambig: s(j, "disambiguation"),
+        catalognum,
+        albumtype,
+        albumstatus,
+        albumdisambig,
         releasegroup_id: s(&rg, "id"),
-        releasegroupdisambig: s(&rg, "disambiguation"),
-        media: formats.join("/"),
+        releasegroupdisambig,
+        media,
         mediums,
         tracks,
+        barcode,
+        asin,
+        script,
+        language,
+        data_source: "MusicBrainz".into(),
+        nulls,
     }
 }
 
@@ -496,7 +797,7 @@ mod tests {
             ]}"#,
         )
         .unwrap();
-        let a = parse_release(&j, &AliasPrefs::default());
+        let a = parse_release(&j, &ParseOpts::default());
         assert_eq!(a.artist, "A & B");
         assert_eq!(a.artist_sort, "A, The & B");
         assert_eq!(a.artist_id, "a1");
@@ -538,13 +839,16 @@ mod tests {
             }"#,
         )
         .unwrap();
-        let prefs = |langs: &[&str], ignored: &[&str], as_credits| AliasPrefs {
-            languages: langs.iter().map(|s| s.to_string()).collect(),
-            ignored_types: ignored.iter().map(|s| s.to_string()).collect(),
-            as_credits,
+        let prefs = |langs: &[&str], ignored: &[&str], as_credits| ParseOpts {
+            aliases: AliasPrefs {
+                languages: langs.iter().map(|s| s.to_string()).collect(),
+                ignored_types: ignored.iter().map(|s| s.to_string()).collect(),
+                as_credits,
+            },
+            ..Default::default()
         };
         // No languages: the plain names, and track titles win.
-        let a = parse_release(&j, &AliasPrefs::default());
+        let a = parse_release(&j, &ParseOpts::default());
         assert_eq!(
             (a.artist.as_str(), a.album.as_str()),
             ("Aatisuto", "Arubamu")
@@ -568,13 +872,120 @@ mod tests {
         assert_eq!(a.album, "Arubamu");
     }
 
+    fn fixture(id: &str, opts: &ParseOpts) -> AlbumInfo {
+        let path = format!(
+            "{}/tests/fixtures/mb/release-{id}.json",
+            env!("CARGO_MANIFEST_DIR")
+        );
+        let j: J = serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+        parse_release(&j, opts)
+    }
+
+    type Row = (usize, usize, usize, usize, String, String);
+
+    fn rows(a: &AlbumInfo) -> Vec<Row> {
+        a.tracks
+            .iter()
+            .map(|t| {
+                (
+                    t.index,
+                    t.medium,
+                    t.medium_index,
+                    t.medium_total,
+                    t.title.clone(),
+                    t.track_alt.clone().unwrap_or_default(),
+                )
+            })
+            .collect()
+    }
+
+    fn row(r: (usize, usize, usize, usize, &str, &str)) -> Row {
+        (r.0, r.1, r.2, r.3, r.4.to_string(), r.5.to_string())
+    }
+
+    /// The fixture's tracks as reference beets 2.14 reads them: the pregap
+    /// kept, "[data track]" placeholders, data tracks and videos left out
+    /// by default, ignored media skipped (still counted in `mediums`).
     #[test]
-    fn searched_recordings_carry_their_first_release() {
-        let r: J = serde_json::from_str(
-            r#"{"id": "r1", "title": "Song", "releases": [{"title": "First"}, {"title": "Second"}]}"#,
+    fn release_tracks_as_beets() {
+        const ID: &str = "11111111-1111-1111-1111-111111111111";
+        let a = fixture(ID, &ParseOpts::default());
+        assert_eq!((a.media.as_str(), a.mediums), ("Media", 2));
+        assert_eq!(
+            rows(&a),
+            [
+                (1, 1, 0, 4, "Hidden Intro", "0"),
+                (2, 1, 1, 4, "Alpha", "1"),
+                (3, 1, 2, 4, "Beta", "2"),
+                (4, 1, 3, 4, "Gamma", "3"),
+                (5, 2, 2, 1, "Interview", "2"),
+            ]
+            .map(row)
+        );
+        assert_eq!(a.tracks[4].media, "DVD-Video");
+        assert_eq!((a.year, a.country.as_str()), (2004, "GB"));
+        assert!(a.nulls.contains("albumdisambig"));
+
+        let all = ParseOpts {
+            ignore_data_tracks: false,
+            ignore_video_tracks: false,
+            ..Default::default()
+        };
+        assert_eq!(
+            rows(&fixture(ID, &all)),
+            [
+                (1, 1, 0, 5, "Hidden Intro", "0"),
+                (2, 1, 1, 5, "Alpha", "1"),
+                (3, 1, 2, 5, "Beta", "2"),
+                (4, 1, 3, 5, "Gamma", "3"),
+                (5, 1, 5, 5, "Data Extra", "5"),
+                (6, 2, 1, 2, "Alpha (video)", "1"),
+                (7, 2, 2, 2, "Interview", "2"),
+            ]
+            .map(row)
+        );
+
+        let no_dvd = ParseOpts {
+            ignored_media: vec!["DVD-Video".into()],
+            ..Default::default()
+        };
+        let a = fixture(ID, &no_dvd);
+        assert_eq!((a.media.as_str(), a.mediums, a.tracks.len()), ("CD", 2, 4));
+
+        // No release date: the release group's; no label info: None.
+        let d = fixture(
+            "22222222-2222-2222-2222-222222222222",
+            &ParseOpts::default(),
+        );
+        assert_eq!((d.year, d.month, d.original_year), (2003, 0, 2003));
+        assert!(d.nulls.contains("label") && d.nulls.contains("catalognum"));
+        assert!(!d.nulls.contains("country"));
+        assert_eq!(d.albumdisambig, "deluxe edition");
+    }
+
+    #[test]
+    fn preferred_countries_pick_the_release_event() {
+        let j: J = serde_json::from_str(
+            r#"{"id": "r", "title": "T", "country": "US", "date": "2001-02-03",
+                "release-events": [
+                  {"date": "2001-02-03", "area": {"iso-3166-1-codes": ["US"]}},
+                  {"date": "2002", "area": {"iso-3166-1-codes": ["GB"]}}],
+                "media": []}"#,
         )
         .unwrap();
-        assert_eq!(parse_recording(&r, &AliasPrefs::default()).album, "First");
+        let with = |c: &[&str]| {
+            let a = parse_release(
+                &j,
+                &ParseOpts {
+                    preferred_countries: c.iter().map(|s| s.to_string()).collect(),
+                    ..Default::default()
+                },
+            );
+            (a.country, a.year, a.month)
+        };
+        assert_eq!(with(&[]), ("US".into(), 2001, 2));
+        assert_eq!(with(&["GB", "US"]), ("GB".into(), 2002, 0));
+        assert_eq!(with(&["JP"]), ("US".into(), 2001, 2));
     }
 
     #[test]

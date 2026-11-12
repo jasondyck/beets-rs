@@ -26,6 +26,7 @@ config`, plugins fetchart / lyrics / embedart, release preferences.
 - [x] **1.6 Duplicate options**: `import.duplicate_keys` (album/item), `duplicate_verbose_prompt`, `singleton_album_disambig`, `import.bell`, `import.languages`; duplicate check for singletons; beets' newer "Upgrade" duplicate action
 - [x] **1.7 Singleton confirm flow**: picking a singleton candidate should show the change and ask Apply / More candidates, as beets does (ours applies immediately); the import header should list every path of a merged multi-disc album
 - [x] **1.8 Grouping and defaults**: beets' `albums_in_dir` sibling multi-disc merging ("Album Disc 1" / "Album Disc 2" folders, collapse_paths incl. subfolders without audio); `import.default_action`
+- [ ] **1.9 Rescan directory**: beets 2.14's "Rescan directory" (R) album prompt choice
 
 ## 2. Core: commands and CLI
 
@@ -46,8 +47,8 @@ config`, plugins fetchart / lyrics / embedart, release preferences.
 
 ## 4. Core: autotagger
 
-- [ ] **4.1 Match options**: `match.ignored`, `match.required`, `ignored_media`, `ignore_data_tracks`, `ignore_video_tracks`, `track_length_grace/max` check, `distance_weights` completeness (source, tracks, etc.); `match.album_disambig_fields` / `singleton_disambig_fields`; penalty keys listed in insertion order
-- [ ] **4.2 Metadata fidelity**: `artist_credit`, multi-artist/multi-value fields, album types, release group / work fields, `musicbrainz.extra_tags`, `musicbrainz.genres`, VA detection, pregap/data tracks, `per_disc_numbering` checks
+- [x] **4.1 Match options**: `match.ignored`, `match.required`, `ignored_media`, `ignore_data_tracks`, `ignore_video_tracks`, `track_length_grace/max` check, `distance_weights` completeness (source, tracks, etc.); `match.album_disambig_fields` / `singleton_disambig_fields`; penalty keys listed in insertion order
+- [ ] **4.2 Metadata fidelity**: MusicBrainz search query exactly as beets 2.14 builds it (lowercased release + artist, Various Artists id for likely-VA albums; ours adds tracks:N and a retry); albumstatus case as beets ("Official"); `artist_credit`, multi-artist/multi-value fields, album types, release group / work fields, `musicbrainz.extra_tags`, `musicbrainz.genres`, VA detection, pregap/data tracks, `per_disc_numbering` checks
 
 ## 5. Bundled plugins (by popularity)
 
@@ -78,7 +79,7 @@ Done: fetchart (filesystem + CAA), lyrics (LRCLIB), embedart.
 ## 6. Quality
 
 - [ ] **6.1 Integration tests**: CLI end-to-end tests in temp `BEETSRSDIR` with generated audio files (import → ls → modify → mv → update → rm)
-- [x] **6.3 Differential checks against reference beets** (`~/.cache/beets-reference`, approved by the maintainer): a repeatable script that builds the same temp library with both `beet`s (generated audio, same config) and diffs `ls`/`ls -a`/`-f` output and destination paths over a corpus of queries and templates; run it for 3.1 (queries) and 3.2 (templates/paths) and fix every difference; reuse it for later items. Done: tools/diffbeets, 857 cases, 0 unexplained diffs, 31 listed deviations; every later item must keep it green and add its own cases
+- [x] **6.3 Differential checks against reference beets** (`~/.cache/beets-reference`, approved by the maintainer): a repeatable script that builds the same temp library with both `beet`s (generated audio, same config) and diffs `ls`/`ls -a`/`-f` output and destination paths over a corpus of queries and templates; run it for 3.1 (queries) and 3.2 (templates/paths) and fix every difference; reuse it for later items. Done: tools/diffbeets, 857 cases, 0 unexplained diffs, 31 listed deviations; every later item must keep it green and add its own cases. TODO: an import phase (fake MusicBrainz serving tests/fixtures/mb on a free port, import -t with scripted answers, stdout/stderr compared)
 - [ ] **6.2 README/docs**: keep README's "What's implemented" table current; document differences from beets
 
 ## Needs the maintainer

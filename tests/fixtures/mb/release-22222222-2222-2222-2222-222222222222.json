@@ -1,0 +1,263 @@
+{
+ "id": "22222222-2222-2222-2222-222222222222",
+ "title": "Fixture Album (Deluxe)",
+ "status": "Official",
+ "status-id": "s",
+ "disambiguation": "deluxe edition",
+ "date": "",
+ "country": "",
+ "barcode": "0123456789012",
+ "asin": null,
+ "quality": "normal",
+ "packaging": null,
+ "packaging-id": null,
+ "text-representation": {
+  "script": "Latn",
+  "language": "eng"
+ },
+ "artist-credit": [
+  {
+   "name": "Fixture Artist",
+   "joinphrase": "",
+   "artist": {
+    "id": "aaaaaaaa-0000-0000-0000-000000000001",
+    "name": "Fixture Artist",
+    "sort-name": "Fixture Artist",
+    "disambiguation": "",
+    "type": "Group",
+    "aliases": []
+   }
+  }
+ ],
+ "aliases": [],
+ "genres": [],
+ "tags": [],
+ "release-group": {
+  "id": "99999999-0000-0000-0000-000000000002",
+  "title": "Fixture Album (Deluxe)",
+  "primary-type": "Album",
+  "primary-type-id": "p",
+  "secondary-types": [],
+  "secondary-type-ids": [],
+  "first-release-date": "2003",
+  "disambiguation": "",
+  "aliases": [],
+  "genres": [],
+  "tags": [],
+  "artist-credit": [
+   {
+    "name": "Fixture Artist",
+    "joinphrase": "",
+    "artist": {
+     "id": "aaaaaaaa-0000-0000-0000-000000000001",
+     "name": "Fixture Artist",
+     "sort-name": "Fixture Artist",
+     "disambiguation": "",
+     "type": "Group",
+     "aliases": []
+    }
+   }
+  ]
+ },
+ "label-info": [],
+ "release-events": [],
+ "media": [
+  {
+   "position": 1,
+   "format": "Digital Media",
+   "format-id": "f",
+   "title": "",
+   "track-count": 4,
+   "track-offset": 0,
+   "tracks": [
+    {
+     "id": "t0000011",
+     "position": 1,
+     "number": "1",
+     "title": "Alpha",
+     "length": 201000,
+     "artist-credit": [
+      {
+       "name": "Fixture Artist",
+       "joinphrase": "",
+       "artist": {
+        "id": "aaaaaaaa-0000-0000-0000-000000000001",
+        "name": "Fixture Artist",
+        "sort-name": "Fixture Artist",
+        "disambiguation": "",
+        "type": "Group",
+        "aliases": []
+       }
+      }
+     ],
+     "recording": {
+      "id": "r0000011",
+      "title": "Alpha",
+      "length": 201000,
+      "video": false,
+      "disambiguation": "",
+      "artist-credit": [
+       {
+        "name": "Fixture Artist",
+        "joinphrase": "",
+        "artist": {
+         "id": "aaaaaaaa-0000-0000-0000-000000000001",
+         "name": "Fixture Artist",
+         "sort-name": "Fixture Artist",
+         "disambiguation": "",
+         "type": "Group",
+         "aliases": []
+        }
+       }
+      ],
+      "aliases": [],
+      "isrcs": [],
+      "first-release-date": "2003-01-01"
+     }
+    },
+    {
+     "id": "t0000012",
+     "position": 2,
+     "number": "2",
+     "title": "Beta",
+     "length": 185000,
+     "artist-credit": [
+      {
+       "name": "Fixture Artist",
+       "joinphrase": "",
+       "artist": {
+        "id": "aaaaaaaa-0000-0000-0000-000000000001",
+        "name": "Fixture Artist",
+        "sort-name": "Fixture Artist",
+        "disambiguation": "",
+        "type": "Group",
+        "aliases": []
+       }
+      }
+     ],
+     "recording": {
+      "id": "r0000012",
+      "title": "Beta",
+      "length": 185000,
+      "video": false,
+      "disambiguation": "",
+      "artist-credit": [
+       {
+        "name": "Fixture Artist",
+        "joinphrase": "",
+        "artist": {
+         "id": "aaaaaaaa-0000-0000-0000-000000000001",
+         "name": "Fixture Artist",
+         "sort-name": "Fixture Artist",
+         "disambiguation": "",
+         "type": "Group",
+         "aliases": []
+        }
+       }
+      ],
+      "aliases": [],
+      "isrcs": [],
+      "first-release-date": "2003-01-01"
+     }
+    },
+    {
+     "id": "t0000013",
+     "position": 3,
+     "number": "3",
+     "title": "Gamma (Remastered)",
+     "length": 239000,
+     "artist-credit": [
+      {
+       "name": "Fixture Artist",
+       "joinphrase": "",
+       "artist": {
+        "id": "aaaaaaaa-0000-0000-0000-000000000001",
+        "name": "Fixture Artist",
+        "sort-name": "Fixture Artist",
+        "disambiguation": "",
+        "type": "Group",
+        "aliases": []
+       }
+      }
+     ],
+     "recording": {
+      "id": "r0000013",
+      "title": "Gamma (Remastered)",
+      "length": 239000,
+      "video": false,
+      "disambiguation": "",
+      "artist-credit": [
+       {
+        "name": "Fixture Artist",
+        "joinphrase": "",
+        "artist": {
+         "id": "aaaaaaaa-0000-0000-0000-000000000001",
+         "name": "Fixture Artist",
+         "sort-name": "Fixture Artist",
+         "disambiguation": "",
+         "type": "Group",
+         "aliases": []
+        }
+       }
+      ],
+      "aliases": [],
+      "isrcs": [],
+      "first-release-date": "2003-01-01"
+     }
+    },
+    {
+     "id": "t0000014",
+     "position": 4,
+     "number": "4",
+     "title": "Delta",
+     "length": 210000,
+     "artist-credit": [
+      {
+       "name": "Fixture Artist",
+       "joinphrase": "",
+       "artist": {
+        "id": "aaaaaaaa-0000-0000-0000-000000000001",
+        "name": "Fixture Artist",
+        "sort-name": "Fixture Artist",
+        "disambiguation": "",
+        "type": "Group",
+        "aliases": []
+       }
+      }
+     ],
+     "recording": {
+      "id": "r0000014",
+      "title": "Delta",
+      "length": 210000,
+      "video": false,
+      "disambiguation": "",
+      "artist-credit": [
+       {
+        "name": "Fixture Artist",
+        "joinphrase": "",
+        "artist": {
+         "id": "aaaaaaaa-0000-0000-0000-000000000001",
+         "name": "Fixture Artist",
+         "sort-name": "Fixture Artist",
+         "disambiguation": "",
+         "type": "Group",
+         "aliases": []
+        }
+       }
+      ],
+      "aliases": [],
+      "isrcs": [],
+      "first-release-date": "2003-01-01"
+     }
+    }
+   ]
+  }
+ ],
+ "cover-art-archive": {
+  "artwork": false,
+  "count": 0,
+  "front": false,
+  "back": false,
+  "darkened": false
+ }
+}

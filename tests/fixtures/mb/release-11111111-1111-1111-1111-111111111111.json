@@ -1,0 +1,481 @@
+{
+ "id": "11111111-1111-1111-1111-111111111111",
+ "title": "Fixture Album",
+ "status": "Official",
+ "status-id": "s",
+ "disambiguation": "",
+ "date": "2004-03-01",
+ "country": "GB",
+ "barcode": "0123456789012",
+ "asin": null,
+ "quality": "normal",
+ "packaging": null,
+ "packaging-id": null,
+ "text-representation": {
+  "script": "Latn",
+  "language": "eng"
+ },
+ "artist-credit": [
+  {
+   "name": "Fixture Artist",
+   "joinphrase": "",
+   "artist": {
+    "id": "aaaaaaaa-0000-0000-0000-000000000001",
+    "name": "Fixture Artist",
+    "sort-name": "Fixture Artist",
+    "disambiguation": "",
+    "type": "Group",
+    "aliases": []
+   }
+  }
+ ],
+ "aliases": [],
+ "genres": [],
+ "tags": [],
+ "release-group": {
+  "id": "99999999-0000-0000-0000-000000000001",
+  "title": "Fixture Album",
+  "primary-type": "Album",
+  "primary-type-id": "p",
+  "secondary-types": [],
+  "secondary-type-ids": [],
+  "first-release-date": "2003",
+  "disambiguation": "",
+  "aliases": [],
+  "genres": [],
+  "tags": [],
+  "artist-credit": [
+   {
+    "name": "Fixture Artist",
+    "joinphrase": "",
+    "artist": {
+     "id": "aaaaaaaa-0000-0000-0000-000000000001",
+     "name": "Fixture Artist",
+     "sort-name": "Fixture Artist",
+     "disambiguation": "",
+     "type": "Group",
+     "aliases": []
+    }
+   }
+  ]
+ },
+ "label-info": [
+  {
+   "catalog-number": "FX-001",
+   "label": {
+    "id": "l1",
+    "name": "Fixture Records",
+    "aliases": [],
+    "disambiguation": "",
+    "label-code": null,
+    "type": "Original Production",
+    "sort-name": "Fixture Records"
+   }
+  }
+ ],
+ "release-events": [
+  {
+   "date": "2004-03-01",
+   "area": {
+    "id": "ar",
+    "name": "GB",
+    "sort-name": "GB",
+    "disambiguation": "",
+    "iso-3166-1-codes": [
+     "GB"
+    ]
+   }
+  }
+ ],
+ "media": [
+  {
+   "position": 1,
+   "format": "CD",
+   "format-id": "f",
+   "title": "",
+   "track-count": 3,
+   "track-offset": 0,
+   "tracks": [
+    {
+     "id": "t0000001",
+     "position": 1,
+     "number": "1",
+     "title": "Alpha",
+     "length": 200000,
+     "artist-credit": [
+      {
+       "name": "Fixture Artist",
+       "joinphrase": "",
+       "artist": {
+        "id": "aaaaaaaa-0000-0000-0000-000000000001",
+        "name": "Fixture Artist",
+        "sort-name": "Fixture Artist",
+        "disambiguation": "",
+        "type": "Group",
+        "aliases": []
+       }
+      }
+     ],
+     "recording": {
+      "id": "r0000001",
+      "title": "Alpha",
+      "length": 200000,
+      "video": false,
+      "disambiguation": "",
+      "artist-credit": [
+       {
+        "name": "Fixture Artist",
+        "joinphrase": "",
+        "artist": {
+         "id": "aaaaaaaa-0000-0000-0000-000000000001",
+         "name": "Fixture Artist",
+         "sort-name": "Fixture Artist",
+         "disambiguation": "",
+         "type": "Group",
+         "aliases": []
+        }
+       }
+      ],
+      "aliases": [],
+      "isrcs": [],
+      "first-release-date": "2003-01-01"
+     }
+    },
+    {
+     "id": "t0000002",
+     "position": 2,
+     "number": "2",
+     "title": "Beta",
+     "length": 180000,
+     "artist-credit": [
+      {
+       "name": "Fixture Artist",
+       "joinphrase": "",
+       "artist": {
+        "id": "aaaaaaaa-0000-0000-0000-000000000001",
+        "name": "Fixture Artist",
+        "sort-name": "Fixture Artist",
+        "disambiguation": "",
+        "type": "Group",
+        "aliases": []
+       }
+      }
+     ],
+     "recording": {
+      "id": "r0000002",
+      "title": "Beta",
+      "length": 180000,
+      "video": false,
+      "disambiguation": "",
+      "artist-credit": [
+       {
+        "name": "Fixture Artist",
+        "joinphrase": "",
+        "artist": {
+         "id": "aaaaaaaa-0000-0000-0000-000000000001",
+         "name": "Fixture Artist",
+         "sort-name": "Fixture Artist",
+         "disambiguation": "",
+         "type": "Group",
+         "aliases": []
+        }
+       }
+      ],
+      "aliases": [],
+      "isrcs": [],
+      "first-release-date": "2003-01-01"
+     }
+    },
+    {
+     "id": "t0000003",
+     "position": 3,
+     "number": "3",
+     "title": "Gamma",
+     "length": 240000,
+     "artist-credit": [
+      {
+       "name": "Fixture Artist",
+       "joinphrase": "",
+       "artist": {
+        "id": "aaaaaaaa-0000-0000-0000-000000000001",
+        "name": "Fixture Artist",
+        "sort-name": "Fixture Artist",
+        "disambiguation": "",
+        "type": "Group",
+        "aliases": []
+       }
+      }
+     ],
+     "recording": {
+      "id": "r0000003",
+      "title": "Gamma",
+      "length": 240000,
+      "video": false,
+      "disambiguation": "",
+      "artist-credit": [
+       {
+        "name": "Fixture Artist",
+        "joinphrase": "",
+        "artist": {
+         "id": "aaaaaaaa-0000-0000-0000-000000000001",
+         "name": "Fixture Artist",
+         "sort-name": "Fixture Artist",
+         "disambiguation": "",
+         "type": "Group",
+         "aliases": []
+        }
+       }
+      ],
+      "aliases": [],
+      "isrcs": [],
+      "first-release-date": "2003-01-01"
+     }
+    }
+   ],
+   "pregap": {
+    "id": "t0000000",
+    "position": 0,
+    "number": "0",
+    "title": "Hidden Intro",
+    "length": 30000,
+    "artist-credit": [
+     {
+      "name": "Fixture Artist",
+      "joinphrase": "",
+      "artist": {
+       "id": "aaaaaaaa-0000-0000-0000-000000000001",
+       "name": "Fixture Artist",
+       "sort-name": "Fixture Artist",
+       "disambiguation": "",
+       "type": "Group",
+       "aliases": []
+      }
+     }
+    ],
+    "recording": {
+     "id": "r0000000",
+     "title": "Hidden Intro",
+     "length": 30000,
+     "video": false,
+     "disambiguation": "",
+     "artist-credit": [
+      {
+       "name": "Fixture Artist",
+       "joinphrase": "",
+       "artist": {
+        "id": "aaaaaaaa-0000-0000-0000-000000000001",
+        "name": "Fixture Artist",
+        "sort-name": "Fixture Artist",
+        "disambiguation": "",
+        "type": "Group",
+        "aliases": []
+       }
+      }
+     ],
+     "aliases": [],
+     "isrcs": [],
+     "first-release-date": "2003-01-01"
+    }
+   },
+   "data-tracks": [
+    {
+     "id": "t0000004",
+     "position": 4,
+     "number": "4",
+     "title": "[data track]",
+     "length": 1000,
+     "artist-credit": [
+      {
+       "name": "Fixture Artist",
+       "joinphrase": "",
+       "artist": {
+        "id": "aaaaaaaa-0000-0000-0000-000000000001",
+        "name": "Fixture Artist",
+        "sort-name": "Fixture Artist",
+        "disambiguation": "",
+        "type": "Group",
+        "aliases": []
+       }
+      }
+     ],
+     "recording": {
+      "id": "r0000004",
+      "title": "[data track]",
+      "length": 1000,
+      "video": false,
+      "disambiguation": "",
+      "artist-credit": [
+       {
+        "name": "Fixture Artist",
+        "joinphrase": "",
+        "artist": {
+         "id": "aaaaaaaa-0000-0000-0000-000000000001",
+         "name": "Fixture Artist",
+         "sort-name": "Fixture Artist",
+         "disambiguation": "",
+         "type": "Group",
+         "aliases": []
+        }
+       }
+      ],
+      "aliases": [],
+      "isrcs": [],
+      "first-release-date": "2003-01-01"
+     }
+    },
+    {
+     "id": "t0000005",
+     "position": 5,
+     "number": "5",
+     "title": "Data Extra",
+     "length": 60000,
+     "artist-credit": [
+      {
+       "name": "Fixture Artist",
+       "joinphrase": "",
+       "artist": {
+        "id": "aaaaaaaa-0000-0000-0000-000000000001",
+        "name": "Fixture Artist",
+        "sort-name": "Fixture Artist",
+        "disambiguation": "",
+        "type": "Group",
+        "aliases": []
+       }
+      }
+     ],
+     "recording": {
+      "id": "r0000005",
+      "title": "Data Extra",
+      "length": 60000,
+      "video": false,
+      "disambiguation": "",
+      "artist-credit": [
+       {
+        "name": "Fixture Artist",
+        "joinphrase": "",
+        "artist": {
+         "id": "aaaaaaaa-0000-0000-0000-000000000001",
+         "name": "Fixture Artist",
+         "sort-name": "Fixture Artist",
+         "disambiguation": "",
+         "type": "Group",
+         "aliases": []
+        }
+       }
+      ],
+      "aliases": [],
+      "isrcs": [],
+      "first-release-date": "2003-01-01"
+     }
+    }
+   ]
+  },
+  {
+   "position": 2,
+   "format": "DVD-Video",
+   "format-id": "f",
+   "title": "",
+   "track-count": 2,
+   "track-offset": 0,
+   "tracks": [
+    {
+     "id": "t0000006",
+     "position": 1,
+     "number": "1",
+     "title": "Alpha (video)",
+     "length": 200000,
+     "artist-credit": [
+      {
+       "name": "Fixture Artist",
+       "joinphrase": "",
+       "artist": {
+        "id": "aaaaaaaa-0000-0000-0000-000000000001",
+        "name": "Fixture Artist",
+        "sort-name": "Fixture Artist",
+        "disambiguation": "",
+        "type": "Group",
+        "aliases": []
+       }
+      }
+     ],
+     "recording": {
+      "id": "r0000006",
+      "title": "Alpha (video)",
+      "length": 200000,
+      "video": true,
+      "disambiguation": "",
+      "artist-credit": [
+       {
+        "name": "Fixture Artist",
+        "joinphrase": "",
+        "artist": {
+         "id": "aaaaaaaa-0000-0000-0000-000000000001",
+         "name": "Fixture Artist",
+         "sort-name": "Fixture Artist",
+         "disambiguation": "",
+         "type": "Group",
+         "aliases": []
+        }
+       }
+      ],
+      "aliases": [],
+      "isrcs": [],
+      "first-release-date": "2003-01-01"
+     }
+    },
+    {
+     "id": "t0000007",
+     "position": 2,
+     "number": "2",
+     "title": "Interview",
+     "length": 600000,
+     "artist-credit": [
+      {
+       "name": "Fixture Artist",
+       "joinphrase": "",
+       "artist": {
+        "id": "aaaaaaaa-0000-0000-0000-000000000001",
+        "name": "Fixture Artist",
+        "sort-name": "Fixture Artist",
+        "disambiguation": "",
+        "type": "Group",
+        "aliases": []
+       }
+      }
+     ],
+     "recording": {
+      "id": "r0000007",
+      "title": "Interview",
+      "length": 600000,
+      "video": false,
+      "disambiguation": "",
+      "artist-credit": [
+       {
+        "name": "Fixture Artist",
+        "joinphrase": "",
+        "artist": {
+         "id": "aaaaaaaa-0000-0000-0000-000000000001",
+         "name": "Fixture Artist",
+         "sort-name": "Fixture Artist",
+         "disambiguation": "",
+         "type": "Group",
+         "aliases": []
+        }
+       }
+      ],
+      "aliases": [],
+      "isrcs": [],
+      "first-release-date": "2003-01-01"
+     }
+    }
+   ]
+  }
+ ],
+ "cover-art-archive": {
+  "artwork": false,
+  "count": 0,
+  "front": false,
+  "back": false,
+  "darkened": false
+ }
+}

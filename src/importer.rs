@@ -1435,7 +1435,7 @@ impl<'a> Importer<'a> {
                 &m.distance,
                 &m.info.artist,
                 &m.info.album,
-                &Display::album_disambig(&m.info),
+                &disp.album_disambig(&m.info),
             ) {
                 println!("{line}");
             }
@@ -3504,21 +3504,28 @@ mod tests {
     }
 
     #[test]
-    fn singleton_candidates_show_their_album_unless_disabled() {
+    fn singleton_candidates_show_beets_disambiguation() {
         let (_d, mut cfg, lib, _src) = setup(&[]);
-        let info = crate::mb::TrackInfo {
-            album: "Alb".into(),
-            ..Default::default()
-        };
-        let disambig = |cfg: &Config| {
+        let mut info = crate::mb::parse_recording(
+            &serde_json::json!({"id": "r1", "title": "T", "releases": [{"title": "Alb"}]}),
+            &Default::default(),
+        );
+        let disambig = |cfg: &Config, info: &crate::mb::TrackInfo| {
             Importer::new(cfg, &lib, opts(cfg), &[])
                 .unwrap()
                 .display()
-                .track_disambig(&info)
+                .track_disambig(info)
         };
-        assert_eq!(disambig(&cfg), "MusicBrainz, [Alb]");
+        // As beets 2.14: a searched-for recording has no position, number
+        // or album.
+        assert_eq!(
+            disambig(&cfg, &info),
+            "MusicBrainz, Index None, Track None, "
+        );
+        info.index = 3;
+        info.track_alt = Some("A3".into());
         cfg.set("import.singleton_album_disambig", false.into());
-        assert_eq!(disambig(&cfg), "MusicBrainz");
+        assert_eq!(disambig(&cfg, &info), "MusicBrainz, Index 3, Track A3, ");
     }
 
     #[test]

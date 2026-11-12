@@ -33,6 +33,9 @@ pub struct Display {
     /// Lines shown so far (`take` hands them over).
     out: std::cell::RefCell<Vec<String>>,
     singleton_album_disambig: bool,
+    /// `match.album_disambig_fields` / `singleton_disambig_fields`.
+    album_fields: Vec<String>,
+    track_fields: Vec<String>,
 }
 
 impl Display {
@@ -55,6 +58,8 @@ impl Display {
             per_disc: cfg.bool("per_disc_numbering"),
             show_all: cfg.bool("import.detail"),
             singleton_album_disambig: cfg.bool("import.singleton_album_disambig"),
+            album_fields: cfg.list("match.album_disambig_fields"),
+            track_fields: cfg.list("match.singleton_disambig_fields"),
             out: Default::default(),
         }
     }
@@ -101,46 +106,76 @@ impl Display {
         }
     }
 
-    /// beets' album `disambig_string` (data source, media, year, country,
-    /// label, catalogue number, disambiguation; empty ones left out).
-    pub fn album_disambig(info: &AlbumInfo) -> String {
-        let media = if info.mediums > 1 && !info.media.is_empty() {
-            format!("{}x{}", info.mediums, info.media)
-        } else {
-            info.media.clone()
-        };
-        let year = if info.year > 0 {
-            info.year.to_string()
-        } else {
-            String::new()
-        };
-        [
-            "MusicBrainz",
-            &media,
-            &year,
-            &info.country,
-            &info.label,
-            &info.catalognum,
-            &info.albumdisambig,
-        ]
-        .iter()
-        .filter(|s| !s.is_empty())
-        .copied()
-        .collect::<Vec<_>>()
-        .join(", ")
+    /// beets' `Match.disambig_string`: the configured fields the candidate
+    /// has, `str()`-formatted (so a missing value shows as "None"), with
+    /// `base` overriding some; ", "-joined. Unknown fields are left out
+    /// with a warning (beets warns twice, once per look at the fields).
+    fn disambig_string(
+        fields: &[String],
+        value: impl Fn(&str) -> Option<Option<String>>,
+        base: impl Fn(&str) -> Option<String>,
+    ) -> String {
+        let missing: Vec<String> = fields
+            .iter()
+            .filter(|f| value(f).is_none())
+            .map(|f| format!("'{f}'"))
+            .collect();
+        if !missing.is_empty() {
+            for _ in 0..2 {
+                crate::logging::emit(format!(
+                    "Disambiguation string keys {{{}}} do not exist.",
+                    missing.join(", ")
+                ));
+            }
+        }
+        fields
+            .iter()
+            .filter_map(|f| {
+                let v = value(f)?;
+                Some(base(f).unwrap_or_else(|| v.unwrap_or_else(|| "None".into())))
+            })
+            .collect::<Vec<_>>()
+            .join(", ")
     }
 
-    /// beets' singleton `disambig_string` (data source, index, album in
-    /// brackets with `import.singleton_album_disambig`).
+    /// An album candidate's disambiguation (`match.album_disambig_fields`;
+    /// the media with its count, "2xCD").
+    pub fn album_disambig(&self, info: &AlbumInfo) -> String {
+        Self::disambig_string(
+            &self.album_fields,
+            |f| info.field(f),
+            |f| {
+                (f == "media").then(|| {
+                    let media = info.field("media").flatten();
+                    let media = media.unwrap_or_else(|| "None".into());
+                    if info.mediums > 1 {
+                        format!("{}x{media}", info.mediums)
+                    } else {
+                        media
+                    }
+                })
+            },
+        )
+    }
+
+    /// A track candidate's (`match.singleton_disambig_fields`): "Index N",
+    /// "Track A1", and the album in brackets with
+    /// `import.singleton_album_disambig` when the candidate has one.
     pub fn track_disambig(&self, info: &TrackInfo) -> String {
-        let mut parts = vec!["MusicBrainz".to_string()];
-        if info.index > 0 {
-            parts.push(format!("Index {}", info.index));
-        }
-        if self.singleton_album_disambig && !info.album.is_empty() {
-            parts.push(format!("[{}]", info.album));
-        }
-        parts.join(", ")
+        let shown = |f: &str| info.field(f).flatten().unwrap_or_else(|| "None".into());
+        Self::disambig_string(
+            &self.track_fields,
+            |f| info.field(f),
+            |f| match f {
+                "index" => Some(format!("Index {}", shown("index"))),
+                "track_alt" => Some(format!("Track {}", shown("track_alt"))),
+                "album" => Some(match info.field("album").flatten() {
+                    Some(a) if self.singleton_album_disambig && !a.is_empty() => format!("[{a}]"),
+                    _ => String::new(),
+                }),
+                _ => None,
+            },
+        )
     }
 
     /// beets' `show_match_header`.
@@ -244,7 +279,7 @@ impl Display {
             &m.distance,
             &info.artist,
             &info.album,
-            &Self::album_disambig(info),
+            &self.album_disambig(info),
             &format!("https://musicbrainz.org/release/{}", info.album_id),
         );
         self.show_match_details(&src.artist, &src.album, &info.artist, &info.album, "Album");
@@ -513,6 +548,11 @@ mod tests {
             media: "CD".into(),
             mediums: 1,
             year: 2001,
+            country: "GB".into(),
+            label: "Label".into(),
+            catalognum: "CAT 1".into(),
+            data_source: "MusicBrainz".into(),
+            nulls: ["albumdisambig"].into(),
             tracks: vec![
                 track("Song One", 1, 181.0),
                 track("Song Two", 2, 230.0),
@@ -533,9 +573,7 @@ mod tests {
         let src = Current {
             artist: "The Band".into(),
             album: "Album".into(),
-            year: 0,
-            mb_albumid: String::new(),
-            va: false,
+            ..Default::default()
         };
         d.show_album_change(&items, &src, &m);
         let out = d.take();
@@ -547,7 +585,7 @@ mod tests {
                 format!("  Match ({pct}):"),
                 "  The Band - The Album".into(),
                 "  \u{2260} album, missing tracks".into(),
-                "  MusicBrainz, CD, 2001".into(),
+                "  MusicBrainz, CD, 2001, GB, Label, CAT 1, None".into(),
                 "  https://musicbrainz.org/release/abc".into(),
                 "  * Artist: The Band".into(),
                 "  \u{2260} Album: Album -> The Album".into(),
@@ -575,10 +613,11 @@ mod tests {
         d.width = 80;
         let mut it = item("Song 1", 1, 180.0);
         it.set_str("artist", "The Band");
+        // A searched-for recording: no position, no number, no album.
         let info = TrackInfo {
             track_id: "rec1".into(),
             artist: "The Band".into(),
-            album: "The Album".into(),
+            data_source: "MusicBrainz".into(),
             ..track("Song One", 0, 181.0)
         };
         let mut dist = Distance::new(&cfg);
@@ -596,7 +635,7 @@ mod tests {
                 format!("  Match ({pct}):"),
                 "  The Band - Song One".into(),
                 "  \u{2260} title".into(),
-                "  MusicBrainz, [The Album]".into(),
+                "  MusicBrainz, Index None, Track None, ".into(),
                 "  https://musicbrainz.org/recording/rec1".into(),
                 "  * Artist: The Band".into(),
                 "  \u{2260} Track: Song 1 -> Song One".into(),
@@ -643,25 +682,69 @@ mod tests {
         );
         assert_eq!(
             lines[1],
-            format!("{}\u{2260} album, artist, media, ...", " ".repeat(13))
+            format!("{}\u{2260} album, artist, year, ...", " ".repeat(13))
         );
         assert_eq!(lines[2], format!("{}MusicBrainz, 2001", " ".repeat(13)));
     }
 
     #[test]
-    fn seconds_and_disambig() {
+    fn seconds() {
         assert_eq!(human_seconds_short(59.9), "0:59");
         assert_eq!(human_seconds_short(3725.0), "62:05");
-        let info = AlbumInfo {
-            media: "CD".into(),
-            mediums: 2,
-            year: 2004,
-            country: "GB".into(),
-            ..Default::default()
+    }
+
+    /// The candidates of tests/fixtures/mb as reference beets 2.14 shows
+    /// them (with its None for the fields MusicBrainz leaves empty).
+    #[test]
+    fn disambiguation_as_beets() {
+        use crate::mb::{ParseOpts, parse_release};
+        let fixture = |id: &str| {
+            let path = format!(
+                "{}/tests/fixtures/mb/release-{id}.json",
+                env!("CARGO_MANIFEST_DIR")
+            );
+            let j = serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+            parse_release(&j, &ParseOpts::default())
         };
+        let full = fixture("11111111-1111-1111-1111-111111111111");
+        let deluxe = fixture("22222222-2222-2222-2222-222222222222");
+        let mut cfg = Config::defaults();
+        let d = Display::new(&cfg);
         assert_eq!(
-            Display::album_disambig(&info),
-            "MusicBrainz, 2xCD, 2004, GB"
+            d.album_disambig(&full),
+            "MusicBrainz, 2xMedia, 2004, GB, Fixture Records, FX-001, None"
+        );
+        assert_eq!(
+            d.album_disambig(&deluxe),
+            "MusicBrainz, Digital Media, 2003, , None, None, deluxe edition"
+        );
+        // Other fields, in the order given.
+        cfg.set(
+            "match.album_disambig_fields",
+            "albumdisambig year albumtype releasegroupdisambig mediums va".into(),
+        );
+        assert_eq!(
+            Display::new(&cfg).album_disambig(&deluxe),
+            "deluxe edition, 2003, album, None, 1, False"
+        );
+        // Unknown fields are left out (with a warning).
+        cfg.set("match.album_disambig_fields", "year bogus country".into());
+        assert_eq!(Display::new(&cfg).album_disambig(&full), "2004, GB");
+
+        // Tracks of a release have an index and a number; the album shows
+        // only for a candidate that has one (never from MusicBrainz).
+        let d = Display::new(&cfg);
+        assert_eq!(
+            d.track_disambig(&full.tracks[1]),
+            "MusicBrainz, Index 2, Track 1, "
+        );
+        cfg.set(
+            "match.singleton_disambig_fields",
+            "index media disctitle length medium_total".into(),
+        );
+        assert_eq!(
+            Display::new(&cfg).track_disambig(&full.tracks[4]),
+            "Index 5, DVD-Video, , 600.0, 1"
         );
     }
 }
