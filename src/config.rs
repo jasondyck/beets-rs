@@ -373,6 +373,15 @@ edit:
     itemfields: track title artist album
     ignore_fields: id path
 
+web:
+    host: 127.0.0.1
+    port: 8337
+    cors: ''
+    cors_supports_credentials: no
+    reverse_proxy: no
+    include_paths: no
+    readonly: yes
+
 musicbrainz:
     host: musicbrainz.org
     https: no
@@ -452,6 +461,7 @@ const PLUGIN_SECTIONS: &[&str] = &[
     "scrub",
     "convert",
     "edit",
+    "web",
 ];
 
 /// `DEFAULT_CONFIG` parsed, with the defaults computed at run time

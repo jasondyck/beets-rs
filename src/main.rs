@@ -568,6 +568,15 @@ pub enum Cmd {
         #[arg(allow_hyphen_values = true)]
         query: Vec<String>,
     },
+    /// Start a Web interface (plugin: web)
+    Web {
+        /// Debug mode
+        #[arg(short = 'd', long)]
+        debug: bool,
+        /// [HOST] [PORT]
+        #[arg(value_name = "HOST PORT")]
+        args: Vec<String>,
+    },
     /// List missing tracks (plugin: missing)
     #[command(visible_alias = "miss")]
     Missing {

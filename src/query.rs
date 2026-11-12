@@ -1455,6 +1455,21 @@ impl Query {
         })
     }
 
+    /// beets' `PathQuery(field, pattern)` on its own (no query parsing).
+    pub fn path(kind: Kind, field: &str, pattern: &str) -> Self {
+        Query {
+            kind,
+            pred: Pred::Field(FieldQuery {
+                field: field.to_string(),
+                col: column(kind, field),
+                fast: true,
+                db_path: false,
+                test: path_test(pattern),
+            }),
+            sort: Sort::default(),
+        }
+    }
+
     /// The sort to use: the query's own, else the configured default (which
     /// beets always sorts case-insensitively).
     pub fn effective_sort(&self) -> Sort {

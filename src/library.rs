@@ -1239,6 +1239,16 @@ impl Library {
         )
     }
 
+    /// The first column of an SQL query's rows, as SQLite has them (the
+    /// web plugin's raw `SELECT DISTINCT`s).
+    pub fn query_column(&self, sql: &str) -> Result<Vec<SqlValue>> {
+        Ok(self
+            .conn
+            .prepare(sql)?
+            .query_map([], |r| r.get(0))?
+            .collect::<Result<_, _>>()?)
+    }
+
     /// How many items and albums the library holds.
     pub fn counts(&self) -> Result<(i64, i64)> {
         Ok((

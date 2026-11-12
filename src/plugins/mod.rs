@@ -20,6 +20,7 @@ pub mod requests;
 pub mod scrub;
 pub mod the;
 pub mod types;
+pub mod web;
 pub mod zero;
 
 use crate::config::Config;
@@ -135,6 +136,7 @@ pub const AVAILABLE: &[&str] = &[
     "the",
     "zero",
     "types",
+    "web",
 ];
 
 /// The plugins to load: `plugins` (or `-p`) minus `disabled_plugins` (`-P`),
@@ -191,6 +193,7 @@ pub fn load(cfg: &Config) -> Result<Vec<Box<dyn Plugin>>> {
                 Err(e) => crate::logging::emit(format!("** error loading plugin {name}\n{e:#}")),
             },
             "types" => out.push(Box::new(types::TypesPlugin)),
+            "web" => out.push(Box::new(web::WebPlugin)),
             // The autotagger's metadata source, as in beets 2.14: it's
             // queried only while this plugin is enabled.
             "musicbrainz" => crate::mb::warn_deprecated_config(cfg),

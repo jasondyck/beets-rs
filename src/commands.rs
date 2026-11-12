@@ -678,6 +678,10 @@ pub fn run(cli: Cli) -> Result<()> {
                 },
             )
         }
+        Cmd::Web { debug, args } => {
+            require_plugin(&cfg, "web")?;
+            plugins::web::command(&cfg, &lib, plugins::web::CmdOpts { debug, args })
+        }
         Cmd::Missing {
             count,
             total,
@@ -1396,7 +1400,7 @@ fn remove_prompts(
 
 /// beets' `Item.remove`: drop the item (and its album, if that leaves it
 /// empty); with `delete`, delete the file and prune emptied directories.
-fn remove_item(
+pub(crate) fn remove_item(
     cfg: &Config,
     lib: &Library,
     item: &Item,
@@ -1423,7 +1427,7 @@ fn remove_item(
 
 /// beets' `Album.remove`: drop the album, with `delete` its art file, and
 /// with `with_items` its items too.
-fn remove_album(
+pub(crate) fn remove_album(
     cfg: &Config,
     lib: &Library,
     album: &Album,
