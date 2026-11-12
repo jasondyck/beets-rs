@@ -36,6 +36,9 @@ pub struct FormatEnv {
     pub aunique: UniqueCfg,
     pub sunique: UniqueCfg,
     pub tunique: UniqueCfg,
+    /// Album template fields of the enabled plugins (beets'
+    /// `album_template_fields`, computed fields of every album).
+    pub album_template_fields: Vec<&'static str>,
 }
 
 /// beets' `CHAR_REPLACE`: the replacements used when the configured ones
@@ -124,6 +127,11 @@ impl FormatEnv {
             aunique: unique("aunique"),
             sunique: unique("sunique"),
             tunique: unique("tunique"),
+            album_template_fields: if crate::plugins::enabled(cfg, "missing") {
+                vec!["missing"]
+            } else {
+                vec![]
+            },
         })
     }
 
@@ -329,6 +337,9 @@ impl<'a> Formatted<'a> {
         let with_computed = |rec: &Record| {
             let mut keys = rec.keys();
             keys.extend(computed(rec.kind).iter().map(|k| k.to_string()));
+            if rec.kind == Kind::Album {
+                keys.extend(self.env.album_template_fields.iter().map(|k| k.to_string()));
+            }
             keys
         };
         let mut keys: std::collections::BTreeSet<String> =
@@ -359,13 +370,41 @@ impl<'a> Formatted<'a> {
         rec.kind == self.rec.kind && rec.id == self.rec.id
     }
 
-    fn has_key(rec: &Record, key: &str) -> bool {
-        rec.has_field(key) || computed(rec.kind, key)
+    fn has_key(&self, rec: &Record, key: &str) -> bool {
+        rec.has_field(key) || computed(rec.kind, key) || self.template_field(rec, key)
+    }
+
+    /// A plugin's album template field (which beets looks up before the
+    /// album's own fields).
+    fn template_field(&self, rec: &Record, key: &str) -> bool {
+        rec.kind == Kind::Album && self.env.album_template_fields.contains(&key)
+    }
+
+    /// The album's computed `albumtotal`.
+    fn albumtotal(&self, rec: &Record) -> i64 {
+        let items = self.album_items();
+        if rec.int("disctotal") == 1 || !self.env.per_disc_numbering {
+            return items.first().map(|i| i.int("tracktotal")).unwrap_or(0);
+        }
+        let mut counted = vec![];
+        let mut total = 0;
+        for i in items {
+            let disc = i.int("disc");
+            if counted.contains(&disc) {
+                continue;
+            }
+            total += i.int("tracktotal");
+            counted.push(disc);
+            if counted.len() as i64 == rec.int("disctotal") {
+                break;
+            }
+        }
+        total
     }
 
     /// beets' `FormattedItemMapping.album_keys` membership.
     fn album_key(&self, album: &Album, key: &str) -> bool {
-        Self::has_key(album, key) && (album_item_key(key) || !item_fixed_field(key))
+        self.has_key(album, key) && (album_item_key(key) || !item_fixed_field(key))
     }
 
     /// The value of one field of `rec` (the record itself or the album).
@@ -384,30 +423,15 @@ impl<'a> Formatted<'a> {
                 .and_then(|i| i.path().parent())
                 .map(|p| p.to_string_lossy().into_owned())
                 .unwrap_or_default(),
-            (Kind::Album, "albumtotal") if self.is_self(rec) => {
-                let items = self.album_items();
-                let total = if rec.int("disctotal") == 1 || !self.env.per_disc_numbering {
-                    items.first().map(|i| i.int("tracktotal")).unwrap_or(0)
-                } else {
-                    let mut counted = vec![];
-                    let mut total = 0;
-                    for i in items {
-                        let disc = i.int("disc");
-                        if counted.contains(&disc) {
-                            continue;
-                        }
-                        total += i.int("tracktotal");
-                        counted.push(disc);
-                        if counted.len() as i64 == rec.int("disctotal") {
-                            break;
-                        }
-                    }
-                    total
-                };
-                total.to_string()
+            (Kind::Album, "albumtotal") if self.is_self(rec) => self.albumtotal(rec).to_string(),
+            // The missing plugin's `_missing_count`.
+            (Kind::Album, "missing") if self.is_self(rec) && self.template_field(rec, key) => {
+                (self.albumtotal(rec) - self.album_items().len() as i64).to_string()
             }
             // An item's album's computed fields, through a view of it.
-            (Kind::Album, "path" | "albumtotal") => {
+            (Kind::Album, k)
+                if matches!(k, "path" | "albumtotal") || self.template_field(rec, k) =>
+            {
                 return Formatted::with_env(rec, self.lib, self.env.clone()).value(rec, key);
             }
             _ => rec.formatted(key).unwrap_or_default(),
@@ -440,11 +464,13 @@ impl<'a> Formatted<'a> {
 
     fn get_raw(&self, key: &str) -> Option<String> {
         if self.rec.kind == Kind::Album {
-            return Self::has_key(self.rec, key).then(|| self.value(self.rec, key));
+            return self
+                .has_key(self.rec, key)
+                .then(|| self.value(self.rec, key));
         }
         // The album is only loaded when it can matter: in paths (album
         // values first), or for a key the item doesn't have.
-        let own = Self::has_key(self.rec, key);
+        let own = self.has_key(self.rec, key);
         if !own || self.for_path {
             let album = self.the_album().filter(|a| self.album_key(a, key));
             if let Some(a) = album {
@@ -719,8 +745,8 @@ impl Context for Formatted<'_> {
     /// `field in item` (with the album's fields), then the field's
     /// non-path formatted value.
     fn ifdef(&self, name: &str) -> Option<String> {
-        let exists = Self::has_key(self.rec, name)
-            || self.the_album().is_some_and(|a| Self::has_key(a, name));
+        let exists =
+            self.has_key(self.rec, name) || self.the_album().is_some_and(|a| self.has_key(a, name));
         if !exists {
             return None;
         }

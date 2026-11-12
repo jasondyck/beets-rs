@@ -439,6 +439,34 @@ pub enum Cmd {
         #[arg(allow_hyphen_values = true)]
         args: Vec<String>,
     },
+    /// List missing tracks (plugin: missing)
+    #[command(visible_alias = "miss")]
+    Missing {
+        /// Count missing tracks per album
+        #[arg(short = 'c', long)]
+        count: bool,
+        /// Count total of missing tracks
+        #[arg(short = 't', long)]
+        total: bool,
+        /// Show missing album releases for artist instead of tracks;
+        /// Defaults to only releases of type 'album'
+        #[arg(short = 'a', long)]
+        album: bool,
+        /// Comma-separated list of release types for missing albums (valid:
+        /// nat, album, single, ep, broadcast, other, compilation, soundtrack,
+        /// spokenword, interview, audiobook, live, remix, dj-mix,
+        /// mixtape/street)
+        #[arg(long = "release-types", value_name = "RELEASE_TYPES")]
+        release_types: Vec<String>,
+        /// Print with custom format
+        #[arg(short = 'f', long)]
+        format: Option<String>,
+        /// Limit query results
+        #[arg(short = 'l', long)]
+        limit: Option<usize>,
+        #[arg(allow_hyphen_values = true)]
+        query: Vec<String>,
+    },
     /// Output version information
     Version,
     /// Give detailed help on a specific sub-command

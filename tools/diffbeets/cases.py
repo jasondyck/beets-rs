@@ -864,7 +864,33 @@ def cases():
             out.append((f"-c {name} ls -a:{q}", ["-c", f"{ROOT}/{name}", "ls", "-a", *args]))
     for args in INFO_ARGS:
         out.append((f"info:{' '.join(args)}", ["-p", "info", "info", *args]))
+    for args in MISSING_ARGS:
+        out.append((f"missing:{' '.join(args)}", [*_NOMB, "-p", "missing", *args]))
     return out
+
+
+# missing plugin, offline: counts (`$missing`), formats and the album mode
+# (no album artist in the corpus has a MusicBrainz id, so no lookups; the
+# musicbrainz plugin isn't loaded, so the track mode never looks up either).
+_NOMB = ["-c", f"{ROOT}/nomb.yaml"]
+EXTRA_CONFIGS["nomb.yaml"] = "musicbrainz:\n    host: 127.0.0.1:9\n"
+MISSING_ARGS = [
+    ["missing"],
+    ["miss", "-c"],
+    ["missing", "-t"],
+    ["missing", "-c", "-t"],
+    ["missing", "-c", "-f", "$albumartist / $album"],
+    ["missing", "-c", "album:Every Format"],
+    ["missing", "-c", "-l", "2"],
+    ["missing", "-t", "Hit"],
+    ["missing", "-a"],
+    ["missing", "-a", "-t"],
+    ["missing", "-a", "--release-types", "ep,single", "-t"],
+    ["ls", "-a", "-f", "$album: $missing/$albumtotal"],
+    ["ls", "-f", "$title $missing"],
+    ["ls", "-a", "-f", "%ifdef{missing,yes,no}"],
+    ["fields"],
+]
 
 
 # info plugin: tags read from files (paths or queries), library values (-l,
