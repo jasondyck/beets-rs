@@ -377,6 +377,23 @@ pathfields: {}
 item_fields: {}
 album_fields: {}
 
+bucket:
+    bucket_year: []
+    bucket_alpha: []
+    bucket_alpha_regex: {}
+    extrapolate: no
+
+albumtypes:
+    types:
+    - [ep, EP]
+    - [single, Single]
+    - [soundtrack, OST]
+    - [live, Live]
+    - [compilation, Anthology]
+    - [remix, Remix]
+    ignore_va: [compilation]
+    bracket: '[]'
+
 musicbrainz:
     host: musicbrainz.org
     https: no
@@ -454,6 +471,8 @@ const PLUGIN_SECTIONS: &[&str] = &[
     "replaygain",
     "duplicates",
     "scrub",
+    "bucket",
+    "albumtypes",
     "convert",
     "edit",
 ];

@@ -114,6 +114,59 @@ item_fields:
         return os.sep
 """,
     "inline-syntax.yaml": "plugins: [inline]\nitem_fields:\n    bad: 'def ('\n    ok: track + 1\n",
+    # 5.18a: rewrite, advancedrewrite, substitute, bucket
+    "rewrite.yaml": """\
+plugins: [rewrite]
+rewrite:
+    artist .*artist a.*: Rewritten A
+    artist the zebras: Zebras, The
+    genres rock: Classic Rock
+    albumartist zoo.*: Zoo Rewritten
+    title hit: HIT
+""",
+    "advancedrewrite.yaml": """\
+plugins: [advancedrewrite]
+advancedrewrite:
+    - artist artist b: B (simple)
+    - match: "album:'Album One' track:1"
+      replacements:
+          title: First of Album One
+          artists: [Uno, Dos]
+    - match: year:..2000
+      replacements:
+          genres: Old
+          album: Before 2000
+""",
+    "substitute.yaml": """\
+plugins: [substitute]
+substitute:
+    '^(.*?)(,| &| and| feat).*': '\\1'
+    '^the (.*)': '\\1, The'
+    '[aeiou]': '_'
+paths:
+    default: '%substitute{{$albumartist}}/$album/$title'
+""",
+    "bucket.yaml": """\
+plugins: [bucket]
+bucket:
+    bucket_year: ['1990s', '2000-09', '2010']
+    bucket_alpha: ['A-F', 'G-M', 'N-S', 'TUVWXYZ', 'numbers']
+    bucket_alpha_regex:
+        numbers: '^[0-9]'
+""",
+    "rewrite-bad.yaml": "plugins: [rewrite]\nrewrite:\n    artist: Nobody\n",
+    "advancedrewrite-bad.yaml": ("plugins: [advancedrewrite]\nadvancedrewrite:\n"
+                                 "    - match: 'artist:A'\n      replacements: {{}}\n"),
+    "advancedrewrite-list.yaml": ("plugins: [advancedrewrite]\nadvancedrewrite:\n"
+                                  "    - match: 'artist:A'\n      replacements:\n"
+                                  "          artist: [C, D]\n"),
+    "bucket-bad.yaml": "plugins: [bucket]\nbucket:\n    bucket_alpha: ['$%']\n",
+    "bucket-extra.yaml": """\
+plugins: [bucket]
+bucket:
+    bucket_year: ['1962-81', '2002', '2012-14']
+    extrapolate: yes
+""",
     "the-paths.yaml": "plugins: [the]\npaths:\n    default: '%the{{$albumartist}}/%the{{$album}}/$title'\n"
                       "    singleton: '%the{{$artist}}/$title'\n",
 }
@@ -957,6 +1010,35 @@ def cases():
         ("inline ok field with syntax error", ["-c", f"{ROOT}/inline-syntax.yaml", "ls", "-f",
                                                 "$ok", "track:1"]),
     ]
+    # 5.18a
+    for name, extra in [("rewrite.yaml", []), ("advancedrewrite.yaml", [])]:
+        _c = ["-c", f"{ROOT}/{name}"]
+        out += [
+            (f"{name} ls", [*_c, "ls"]),
+            (f"{name} ls -a", [*_c, "ls", "-a"]),
+            (f"{name} ls -f", [*_c, "ls", "-f", "$artist|$albumartist|$artists|$title|$album|"
+                               "$genres|$artist_sort"]),
+            (f"{name} ls -a -f", [*_c, "ls", "-a", "-f", "$albumartist|$album|$genres"]),
+            (f"{name} mv -p", [*_c, "mv", "-p"]),
+            (f"{name} query", [*_c, "ls", "artist:Rewritten", ",", "artist:Artist"]),
+            (f"{name} sort", [*_c, "ls", "-f", "$artist $title", "artist+", "title+"]),
+        ]
+    _s = ["-c", f"{ROOT}/substitute.yaml", "ls", "-f"]
+    out += [
+        ("substitute", [*_s, "%substitute{$artist}|%substitute{$title}|%substitute{}|"
+                        "%substitute{a,b}"]),
+        ("substitute paths", ["-c", f"{ROOT}/substitute.yaml", "mv", "-p"]),
+    ]
+    for name in ["bucket.yaml", "bucket-extra.yaml"]:
+        out.append((f"{name}", ["-c", f"{ROOT}/{name}", "ls", "-f",
+                                "%bucket{$year}|%bucket{$artist}|%bucket{$albumartist}|"
+                                "%bucket{$original_year,year}|%bucket{$title}"]))
+    for name in ["rewrite-bad.yaml", "advancedrewrite-bad.yaml", "advancedrewrite-list.yaml",
+                 "bucket-bad.yaml"]:
+        out.append((f"{name} load", ["-c", f"{ROOT}/{name}", "ls", "-f", "$artist", "title:Hit One"]))
+    out.append(("bucket errors", ["-c", f"{ROOT}/bucket.yaml", "ls", "-f",
+                                  "%bucket{$title,year}|%bucket{}|%bucket{a,b,c}|"
+                                  "%bucket{$genres}", "title:Hit"]))
     _err = ["-c", f"{ROOT}/inline-errors.yaml", "ls", "-f"]
     for name in ["boom", "noname", "lam", "imp"]:
         out.append((f"inline error {name}", [*_err, f"$title ${name}", "title:Hit One"]))
@@ -1099,6 +1181,10 @@ IMPORT_CORPUS = {
               for n, t in enumerate(["First Duet", "Second Duet", "Third Duet"], 1)],
     # Spare files the rescan cases put into a directory at the prompt.
     "extra": [("delta.mp3", {**_FX, "title": "Delta", "track": "4"})],
+    # fromfilename: no titles or track numbers in the tags, only in the
+    # file names.
+    "notitle": [(f"{n:02d} - Fixture Artist - {t}.mp3", {"album": "Fixture Album"})
+                for n, t in enumerate(["Alpha", "Beta", "Gamma"], 1)],
 }
 
 # The scripted editor (`editor` option) for the edit cases.
@@ -1201,6 +1287,13 @@ IMPORT_CASES = [
           ("s", "fx", ["-t", "-s", "-C"], [[["Alpha", "Solo"]], [["Beta", "B"]]], "",
            ["d", "a", "c", "1", "a", "s"]),
       ]],
+    # fromfilename (import_task_start: only while autotagging)
+    ("fromfilename-t", "notitle", ["-t", "-C"], "plugins: [musicbrainz, fromfilename]\n",
+     ["2", "a"]),
+    ("fromfilename-s", "notitle", ["-t", "-s", "-C"], "plugins: [musicbrainz, fromfilename]\n",
+     ["1", "a", "1", "a", "1", "a"]),
+    ("fromfilename-A", "notitle", ["-A", "-C"], "plugins: [musicbrainz, fromfilename]\n", []),
+    ("fromfilename-u", "notitle", ["-t", "-C"], "plugins: [musicbrainz, fromfilename]\n", ["u"]),
     ("zero-q-asis", "fx", ["-q", "-C", "--quiet-fallback=asis"],
      "plugins: [musicbrainz, zero]\nzero:\n    fields: title\n", []),
 ]
@@ -1573,6 +1666,23 @@ EXPECTED.update({
     "inline ok field with syntax error": _INLINE_SYNTAX,
 })
 
+# albumtypes: $atypes (album types set with modify).
+_AT = "{{plugins: [albumtypes]}}"
+ART_CASES += [
+    ("albumtypes", "tracks", {}, _AT,
+     [_IMP, ["modify", "-y", "-a", "albumtypes=ep; live; soundtrack; remix"],
+      ["ls", "-a", "-f", "$albumtypes|$atypes"], ["ls", "-f", "$title $atypes"],
+      ["modify", "-y", "-a", "mb_albumartistid=89ad4ac3-39f7-470e-963a-56509c546377",
+       "albumtypes=compilation; live"], ["ls", "-a", "-f", "$atypes"], ["fields"]]),
+    ("albumtypes-config", "tracks", {},
+     "{{plugins: [albumtypes], albumtypes: {{types: [[live, LIVE], [ep, ''], {{remix: RMX}}], "
+     "ignore_va: [], bracket: '<>'}}}}",
+     [_IMP, ["modify", "-y", "-a", "albumtypes=ep; live; remix"], ["ls", "-a", "-f", "$atypes"]]),
+    ("albumtypes-no-bracket", "tracks", {},
+     "{{plugins: [albumtypes], albumtypes: {{bracket: ''}}}}",
+     [_IMP, ["modify", "-y", "-a", "albumtypes=ep; single"], ["ls", "-a", "-f", "$atypes"]]),
+]
+
 _PLUGIN_LOAD = ("a plugin that fails to set up (bad `fetchart.sources`): beets logs \"** error "
                 "loading plugin fetchart\" with a Python traceback and runs without it; beets-rs "
                 "logs the same line with the error message (and the `fetchart` command fails "
@@ -1936,3 +2046,12 @@ IMPORT_CASES += [
         ["mbsync"],
      ]),
 ]
+
+# 5.18a: a plugin whose config is invalid fails to load, as fetchart's.
+_PLUGIN_LOAD_518A = ("a plugin that fails to set up (an invalid rewrite rule or bucket "
+                     "range): beets logs \"** error loading plugin\" with a Python traceback "
+                     "and runs without it; beets-rs logs the same line with the error message")
+EXPECTED.update({c: _PLUGIN_LOAD_518A for c in [
+    "rewrite-bad.yaml load", "migrate:rewrite-bad.yaml load",
+    "bucket-bad.yaml load", "migrate:bucket-bad.yaml load",
+]})

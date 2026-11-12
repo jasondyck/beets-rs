@@ -45,6 +45,14 @@ pub struct FormatEnv {
     pub the: Option<Rc<crate::plugins::the::The>>,
     /// The inline plugin's fields, when it's enabled.
     pub inline: Option<Rc<crate::inline::Inline>>,
+    /// The rewrite and advancedrewrite plugins' rules, in plugin order
+    /// (a later plugin's rules for a field win, as beets' getters).
+    pub rewriters: Vec<Rc<crate::plugins::rewrite::Rewriter>>,
+    /// `%substitute{}`, `%bucket{}` and `$atypes`, when their plugins are
+    /// enabled.
+    pub substitute: Option<Rc<crate::plugins::substitute::Substitute>>,
+    pub bucket: Option<Rc<crate::plugins::bucket::Bucket>>,
+    pub albumtypes: Option<Rc<crate::plugins::albumtypes::AlbumTypes>>,
 }
 
 /// beets' `CHAR_REPLACE`: the replacements used when the configured ones
@@ -65,7 +73,7 @@ fn default_replacements() -> Vec<(Regex, String)> {
 
 /// Turn a Python `re.sub` replacement (`\1`, `\g<name>`, backslash escapes)
 /// into the `regex` crate's syntax (where `$` is special).
-fn python_repl(r: &str) -> String {
+pub(crate) fn python_repl(r: &str) -> String {
     let mut out = String::new();
     let mut chars = r.chars().peekable();
     while let Some(c) = chars.next() {
@@ -141,6 +149,9 @@ impl FormatEnv {
                 if crate::plugins::enabled(cfg, "ftintitle") {
                     v.push("album_artist_no_feat");
                 }
+                if crate::plugins::enabled(cfg, "albumtypes") {
+                    v.push("atypes");
+                }
                 v
             },
             ftintitle_custom_words: cfg.list("ftintitle.custom_words"),
@@ -148,6 +159,25 @@ impl FormatEnv {
                 .then(|| Rc::new(crate::plugins::the::The::new(cfg))),
             inline: crate::plugins::enabled(cfg, "inline")
                 .then(|| Rc::new(crate::inline::Inline::new(cfg, false))),
+            rewriters: crate::plugins::names(cfg)
+                .iter()
+                .filter_map(|n| match n.as_str() {
+                    "rewrite" => crate::plugins::rewrite::Rewriter::rewrite(cfg).ok(),
+                    "advancedrewrite" => crate::plugins::rewrite::Rewriter::advanced(cfg).ok(),
+                    _ => None,
+                })
+                .map(Rc::new)
+                .collect(),
+            substitute: crate::plugins::enabled(cfg, "substitute")
+                .then(|| crate::plugins::substitute::Substitute::new(cfg).ok())
+                .flatten()
+                .map(Rc::new),
+            bucket: crate::plugins::enabled(cfg, "bucket")
+                .then(|| crate::plugins::bucket::Bucket::new(cfg).ok())
+                .flatten()
+                .map(Rc::new),
+            albumtypes: crate::plugins::enabled(cfg, "albumtypes")
+                .then(|| Rc::new(crate::plugins::albumtypes::AlbumTypes::new(cfg))),
         })
     }
 
@@ -402,6 +432,23 @@ impl<'a> Formatted<'a> {
                 .is_some_and(|i| i.field(rec.kind, key).is_some())
     }
 
+    /// `rec` with `key` rewritten by rewrite/advancedrewrite, if a rule
+    /// applies.
+    fn rewritten(&self, rec: &Record, key: &str) -> Option<Record> {
+        let r = self
+            .env
+            .rewriters
+            .iter()
+            .rev()
+            .find(|r| r.defines(rec.kind, key))?;
+        let album = if rec.kind == Kind::Item {
+            self.the_album()
+        } else {
+            None
+        };
+        r.rewritten(rec, album, key)
+    }
+
     /// The inline plugin's field names for `kind`.
     fn inline_names(&self, kind: Kind) -> Vec<String> {
         self.env.inline.as_ref().map_or_else(Vec::new, |i| {
@@ -461,6 +508,8 @@ impl<'a> Formatted<'a> {
         let v = match (rec.kind, key) {
             // Template fields come before the record's own (beets' getters).
             _ if let Some(v) = self.inline_value(rec, key) => v,
+            // rewrite/advancedrewrite: the field's rewritten value.
+            _ if let Some(r) = self.rewritten(rec, key) => r.formatted(key).unwrap_or_default(),
             (Kind::Item, "filesize") => std::fs::metadata(rec.path())
                 .map(|m| m.len().to_string())
                 .unwrap_or_else(|_| "0".into()),
@@ -479,6 +528,13 @@ impl<'a> Formatted<'a> {
             (Kind::Album, "missing") if self.is_self(rec) && self.template_field(rec, key) => {
                 (self.albumtotal(rec) - self.album_items().len() as i64).to_string()
             }
+            // albumtypes' `_atypes`.
+            (Kind::Album, "atypes") if self.template_field(rec, key) => self
+                .env
+                .albumtypes
+                .as_ref()
+                .map(|a| a.atypes(rec))
+                .unwrap_or_default(),
             // ftintitle's `_album_artist_no_feat`.
             (Kind::Album, "album_artist_no_feat") if self.template_field(rec, key) => {
                 crate::plugins::ftintitle::album_artist_no_feat(
@@ -604,19 +660,26 @@ impl<'a> Formatted<'a> {
         let key_list: Vec<&str> = keys.split_whitespace().collect();
         // The raw key values to narrow by. Only text values narrow (in SQL);
         // other keys are left to the grouping below, which checks them all.
+        // beets takes them with `db_item.get(key)`, so a rewritten field
+        // (rewrite/advancedrewrite) narrows by its rewritten value, which
+        // the stored ones then don't match.
         let want: Vec<(String, Option<String>)> = key_list
             .iter()
             .map(|k| {
-                let v = match db_item.get(k) {
-                    Some(crate::model::Value::Str(s)) => Some(s),
-                    _ => None,
+                let v = match self.rewritten(db_item, k) {
+                    Some(r) => r.get(k).map(|v| v.raw()),
+                    None => match db_item.get(k) {
+                        Some(crate::model::Value::Str(s)) => Some(s),
+                        _ => None,
+                    },
                 };
                 (k.to_string(), v)
             })
             .collect();
         let raw: Vec<String> = key_list
             .iter()
-            .map(|k| format!("{:?}", db_item.get(k)))
+            .zip(&want)
+            .map(|(k, w)| format!("{:?}{:?}", db_item.get(k), w.1))
             .collect();
         let memo_key = format!(
             "{name}\0{keys}\0{disam}\0{scope}\0{}\0{}",
@@ -826,6 +889,8 @@ impl Context for Formatted<'_> {
             "sunique" => Some(self.sunique(args)),
             "tunique" => Some(self.tunique(args)),
             "the" => self.env.the.as_ref().map(|t| t.call(args)),
+            "substitute" => self.env.substitute.as_ref().map(|s| s.call(args)),
+            "bucket" => self.env.bucket.as_ref().map(|b| b.call(args)),
             _ => None,
         }
     }
