@@ -413,6 +413,32 @@ pub enum Cmd {
         #[arg(allow_hyphen_values = true)]
         query: Vec<String>,
     },
+    /// Show file metadata (plugin: info)
+    Info {
+        /// Match albums instead of tracks
+        #[arg(short = 'a', long)]
+        album: bool,
+        /// Show library fields instead of tags
+        #[arg(short = 'l', long)]
+        library: bool,
+        /// Summarize the tags of all files
+        #[arg(short = 's', long)]
+        summarize: bool,
+        /// Comma separated list of keys to show
+        #[arg(short = 'i', long = "include-keys", value_name = "INCLUDED_KEYS")]
+        included_keys: Vec<String>,
+        /// Show only the keys
+        #[arg(short = 'k', long = "keys-only")]
+        keys_only: bool,
+        /// Print with custom format
+        #[arg(short = 'f', long)]
+        format: Option<String>,
+        /// Limit query results
+        #[arg(long)]
+        limit: Option<usize>,
+        #[arg(allow_hyphen_values = true)]
+        args: Vec<String>,
+    },
     /// Output version information
     Version,
     /// Give detailed help on a specific sub-command

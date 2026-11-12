@@ -5,6 +5,7 @@
 pub mod art;
 pub mod embedart;
 pub mod fetchart;
+pub mod info;
 pub mod lyrics;
 pub mod requests;
 
@@ -55,7 +56,7 @@ pub trait Plugin {
     }
 }
 
-pub const AVAILABLE: &[&str] = &["embedart", "fetchart", "lyrics", "musicbrainz"];
+pub const AVAILABLE: &[&str] = &["embedart", "fetchart", "info", "lyrics", "musicbrainz"];
 
 /// The plugins to load: `plugins` (or `-p`) minus `disabled_plugins` (`-P`),
 /// as beets' `get_plugin_names`.
@@ -84,6 +85,7 @@ pub fn load(cfg: &Config) -> Result<Vec<Box<dyn Plugin>>> {
             },
             "lyrics" => out.push(Box::new(lyrics::LyricsPlugin::new(cfg))),
             "embedart" => out.push(Box::new(embedart::EmbedArt::new(cfg))),
+            "info" => out.push(Box::new(info::InfoPlugin)),
             // The autotagger's metadata source, as in beets 2.14: it's
             // queried only while this plugin is enabled.
             "musicbrainz" => crate::mb::warn_deprecated_config(cfg),
