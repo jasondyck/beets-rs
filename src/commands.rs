@@ -441,6 +441,10 @@ pub fn run(cli: Cli) -> Result<()> {
                 },
             )
         }
+        Cmd::Zero { limit, query } => {
+            require_plugin(&cfg, "zero")?;
+            plugins::zero::command(&cfg, &lib, &plugins, limit, &query)
+        }
         Cmd::Lastgenre {
             pretend,
             force,

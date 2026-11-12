@@ -47,6 +47,14 @@ replace:
     "art.yaml": "art_filename: 'cover-$album'\n",
     "id3v23.yaml": "id3v23: yes\n",
     "unthreaded.yaml": "threaded: no\n",
+    # the plugin
+    "the.yaml": "plugins: [the]\n",
+    "the-custom.yaml": "plugins: [the]\nthe:\n    a: no\n    patterns: ['^artist\\s', '^(hit)\\s+',"
+                       " 'zoo$']\n    format: '{{1}} ({{0}})'\n",
+    "the-strip.yaml": "plugins: [the]\nthe:\n    strip: yes\n    patterns: ['^artist\\s']\n",
+    "the-none.yaml": "plugins: [the]\nthe:\n    the: no\n    a: no\n",
+    "the-paths.yaml": "plugins: [the]\npaths:\n    default: '%the{{$albumartist}}/%the{{$album}}/$title'\n"
+                      "    singleton: '%the{{$artist}}/$title'\n",
 }
 
 # ---------------------------------------------------------------------------
@@ -822,6 +830,12 @@ TAG_FIELDS = [
 TAG_TEMPLATE = "|".join(f"{f}=${f}" for f in TAG_FIELDS)
 
 
+# the plugin's %the{} (with -c the*.yaml); without the plugin it stays as written.
+THE_CONFIGS = ["the.yaml", "the-custom.yaml", "the-strip.yaml", "the-none.yaml"]
+THE_TEMPLATES = ["%the{$artist}|%the{$title}|%the{$album}", "%the{The A}|%the{an  apple}|%the{A}",
+                 "%the{}", "%the{a,b}", "%the{%the{The The X}}"]
+
+
 def cases():
     out = []
     for q in RAW_DASH:
@@ -857,6 +871,11 @@ def cases():
     out.append(("mv -p -d", ["mv", "-p", "-d", DEST]))
     out.append(("mv -p -a -d", ["mv", "-p", "-a", "-d", DEST]))
     out.append(("mv -p -d Hit", ["mv", "-p", "-d", DEST, "Hit"]))
+    for name in THE_CONFIGS:
+        for t in THE_TEMPLATES:
+            out.append((f"-c {name} ls -f:{t}", ["-c", f"{ROOT}/{name}", "ls", "-f", t]))
+    out.append(("ls -f:%the{$artist} (no plugin)", ["ls", "-f", "%the{$artist}"]))
+    out.append(("-c the-paths.yaml mv -p", ["-c", f"{ROOT}/the-paths.yaml", "mv", "-p"]))
     for name in ["nocaseins.yaml", "sortcfg.yaml"]:
         for q in SORT_CONFIG_QUERIES:
             args = _query_args(q)
@@ -1044,6 +1063,15 @@ IMPORT_CASES = [
     ("t-duets-credit", "duets", ["-t", "-C"],
      "artist_credit: yes\nimport:\n    languages: [de]\n", ["a"]),
     ("s-va", "sampler", ["-t", "-s", "-C"], "", ["a", "a", "a", "a"]),
+    # zero: on write while importing, and its as-is warning.
+    ("zero-apply", "tagged", ["-t", "-C"],
+     "plugins: [musicbrainz, zero]\nimport:\n    write: yes\n"
+     "zero:\n    fields: [title, label, catalognum]\n    title: ['^gam']\n"
+     "    update_database: yes\n", ["a"]),
+    ("zero-asis", "fx", ["-t", "-C"],
+     "plugins: [musicbrainz, zero]\nimport:\n    write: yes\nzero:\n    fields: title\n", ["u"]),
+    ("zero-q-asis", "fx", ["-q", "-C", "--quiet-fallback=asis"],
+     "plugins: [musicbrainz, zero]\nzero:\n    fields: title\n", []),
 ]
 
 # ---------------------------------------------------------------------------
@@ -1236,6 +1264,60 @@ ART_CASES = [
      [_IMP, ["clearart", "-y", "title:One"], ["clearart", "-y"]]),
     ("clearart-prompt", "tracks-art", {}, _EMBEDART,
      [_IMP, (["clearart"], "n\n"), (["clearart", "title:Two"], "y\n")]),
+]
+
+# zero (state: the files' tags, as `write -p` shows them against the library).
+_ZERO_LS = ["ls", "-f", "$title|$artist|$album|$year-$month|$disc/$disctotal|$comments|$genres"
+            "|$catalognum"]
+_ZERO_MOD = ["modify", "-y", "comments=hello", "genres=Rock", "catalognum=C1", "month=5"]
+_ZERO_BACK = [["write", "-p"], _ZERO_LS]
+
+
+def _zero(cfg):
+    return "{{plugins: [zero], import: {{write: yes}}, zero: " + cfg + "}}"
+
+
+ART_CASES += [
+    ("zero-write", "tracks", {}, _zero("{{fields: [year, comments]}}"),
+     [_IMP, _ZERO_MOD, *_ZERO_BACK]),
+    ("zero-write-patterns", "tracks", {},
+     _zero("{{fields: title comments genres, title: ['^o'], comments: [hel+o], "
+           "genres: [\"'rock'\"]}}"), [_IMP, _ZERO_MOD, *_ZERO_BACK]),
+    ("zero-write-db", "tracks", {}, _zero("{{fields: [month, comments], update_database: yes}}"),
+     [_IMP, _ZERO_MOD, _ZERO_LS, *_ZERO_BACK]),
+    ("zero-auto-off", "tracks", {}, _zero("{{fields: [comments], auto: no}}"),
+     [_IMP, _ZERO_MOD, *_ZERO_BACK]),
+    ("zero-keep", "tracks", {}, _zero("{{keep_fields: [title, artist, comments]}}"),
+     [_IMP, _ZERO_MOD, *_ZERO_BACK]),
+    ("zero-aliases", "tracks", {}, _zero("{{fields: [date, genre, catalognums, languages]}}"),
+     [_IMP, _ZERO_MOD + ["language=eng"], *_ZERO_BACK, ["ls", "-f", "$language"]]),
+    ("zero-single-disc", "tracks", {}, _zero("{{omit_single_disc: yes, fields: [comments]}}"),
+     [_IMP, ["modify", "-y", "disc=1", "disctotal=1", "title:One"],
+      ["modify", "-y", "disc=1", "disctotal=2", "title:Two"], *_ZERO_BACK]),
+    ("zero-images", "tracks-art", {}, _zero("{{fields: [images]}}"), [_IMP, _ZERO_MOD]),
+    ("zero-art", "tracks-art", {}, _zero("{{fields: [art]}}"), [_IMP, _ZERO_MOD]),
+    ("zero-keep-images", "tracks-art", {}, _zero("{{keep_fields: [images]}}"),
+     [_IMP, _ZERO_MOD, *_ZERO_BACK]),
+    ("zero-config-warnings", "tracks", {},
+     _zero("{{fields: [bogus, id, path, comments], keep_fields: [title]}}"),
+     [_IMP, _ZERO_MOD, ["zero", "title:One"], _ZERO_LS]),
+    ("zero-invalid-fields", "tracks", {}, _zero("{{fields: [bogus, id, comments]}}"),
+     [_IMP, _ZERO_MOD, *_ZERO_BACK]),
+    ("zero-no-fields", "tracks", {}, _zero("{{fields: []}}"),
+     [_IMP, ["zero", "title:One"], (["zero"], "y\n")]),
+    # The command.
+    ("zero-cmd", "tracks", {}, _zero("{{fields: [comments, year], auto: no}}"),
+     [_IMP, _ZERO_MOD, (["zero"], "y\n"), _ZERO_LS, *_ZERO_BACK]),
+    ("zero-cmd-db", "tracks", {},
+     _zero("{{fields: [comments, year], auto: no, update_database: yes}}"),
+     [_IMP, _ZERO_MOD, ["zero", "title:One"], _ZERO_LS, *_ZERO_BACK]),
+    ("zero-cmd-prompt", "tracks", {}, _zero("{{fields: [comments], update_database: yes}}"),
+     [_IMP, (["zero"], "n\n"), (["zero"], "x\n\ny\n"), (["zero", "-l", "1"], "y\n"),
+      _ZERO_LS]),
+    ("zero-cmd-limit", "tracks", {}, _zero("{{fields: [title], update_database: yes}}"),
+     [_IMP, ["zero", "--limit=1", "album:Art"], _ZERO_LS, ["zero", "nomatch"]]),
+    ("zero-cmd-images", "tracks-art", {}, _zero("{{fields: [images], auto: no}}"),
+     [_IMP, ["zero", "title:One"]]),
 ]
 
 _PLUGIN_LOAD = ("a plugin that fails to set up (bad `fetchart.sources`): beets logs \"** error "

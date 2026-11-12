@@ -39,6 +39,8 @@ pub struct FormatEnv {
     /// Album template fields of the enabled plugins (beets'
     /// `album_template_fields`, computed fields of every album).
     pub album_template_fields: Vec<&'static str>,
+    /// The `the` plugin's `%the{}`, when it's enabled.
+    pub the: Option<Rc<crate::plugins::the::The>>,
 }
 
 /// beets' `CHAR_REPLACE`: the replacements used when the configured ones
@@ -132,6 +134,8 @@ impl FormatEnv {
             } else {
                 vec![]
             },
+            the: crate::plugins::enabled(cfg, "the")
+                .then(|| Rc::new(crate::plugins::the::The::new(cfg))),
         })
     }
 
@@ -767,6 +771,7 @@ impl Context for Formatted<'_> {
             "aunique" => Some(Ok(self.aunique(args))),
             "sunique" => Some(self.sunique(args)),
             "tunique" => Some(self.tunique(args)),
+            "the" => self.env.the.as_ref().map(|t| t.call(args)),
             _ => None,
         }
     }
