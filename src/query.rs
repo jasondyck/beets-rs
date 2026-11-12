@@ -34,6 +34,13 @@ pub struct Context {
     /// `sort_item` / `sort_album`: the default sorts.
     pub sort_item: Vec<String>,
     pub sort_album: Vec<String>,
+    /// The playlist plugin's `playlist_dir` (for `playlist:` queries).
+    pub playlist_dir: PathBuf,
+    /// `playlist.relative_to`: None for "playlist" (the playlist's own
+    /// directory), else the base paths in a playlist are relative to.
+    pub playlist_relative_to: Option<PathBuf>,
+    /// Whether the playlist plugin is enabled (its `playlist:` query).
+    pub playlist: bool,
 }
 
 impl Default for Context {
@@ -45,6 +52,9 @@ impl Default for Context {
                 .map(String::from)
                 .to_vec(),
             sort_album: ["albumartist+", "album+"].map(String::from).to_vec(),
+            playlist_dir: PathBuf::from("."),
+            playlist_relative_to: None,
+            playlist: false,
         }
     }
 }
@@ -55,11 +65,22 @@ thread_local! {
 
 /// Take the query settings from the configuration (for this thread).
 pub fn configure(cfg: &Config) {
+    let relative_to = match cfg.str("playlist.relative_to").as_str() {
+        "playlist" => None,
+        "library" => Some(cfg.directory()),
+        other => Some(crate::config::expand_tilde(other)),
+    };
+    let plugins = cfg.list("plugins");
+    let disabled = cfg.list("disabled_plugins");
     set_context(Context {
         music_dir: Some(normpath(&cfg.directory())),
         sort_case_insensitive: cfg.bool("sort_case_insensitive"),
         sort_item: cfg.list("sort_item"),
         sort_album: cfg.list("sort_album"),
+        playlist_dir: crate::config::expand_tilde(&cfg.str("playlist.playlist_dir")),
+        playlist_relative_to: relative_to,
+        playlist: plugins.iter().any(|p| p == "playlist")
+            && !disabled.iter().any(|p| p == "playlist"),
     });
 }
 
@@ -519,6 +540,9 @@ enum Test {
     },
     /// `NoneQuery`.
     IsNone,
+    /// beets' `InQuery` (the playlist plugin's `PlaylistQuery`): one of
+    /// these paths.
+    In(Vec<Vec<u8>>),
 }
 
 #[derive(Clone, Debug)]
@@ -731,6 +755,7 @@ impl FieldQuery {
                     ],
                 )
             }
+            Test::In(_) => return None,
             Test::IsNone => {
                 // A singleton's album_id is NULL (an album_id of 0, which
                 // beets-rs used to store, links nothing either).
@@ -770,6 +795,16 @@ impl FieldQuery {
             Test::Match(p) => match value.unwrap_or(PyVal::None) {
                 PyVal::List(v) => v.iter().any(|s| p.py_eq(&PyVal::Str(s.clone()))),
                 v => p.py_eq(&v),
+            },
+            Test::In(paths) => match value {
+                Some(PyVal::Bytes(b)) => {
+                    let p = crate::library::lexical_normpath(&PathBuf::from(
+                        std::ffi::OsStr::from_bytes(&b),
+                    ));
+                    let p = p.as_os_str().as_bytes();
+                    paths.iter().any(|q| q.as_slice() == p)
+                }
+                _ => false,
             },
             Test::Regexp(re) => value.unwrap_or(PyVal::None).strings().iter().any(|s| {
                 let s: String = s.nfc().collect();
@@ -1193,6 +1228,17 @@ fn construct_query_part(kind: Kind, part: &str) -> Result<Pred, String> {
 
 /// beets' `LibModel.field_query`.
 fn field_query(kind: Kind, field: &str, pattern: &str, class: Class) -> Result<Pred, String> {
+    // beets' plugin `item_queries`: the playlist plugin's `playlist:`.
+    if kind == Kind::Item && field == "playlist" && context().playlist {
+        let paths = crate::plugins::playlist::query_paths(pattern, &context());
+        return Ok(Pred::Field(FieldQuery {
+            field: "path".into(),
+            col: column(kind, "path"),
+            fast: false,
+            db_path: false,
+            test: Test::In(paths),
+        }));
+    }
     let mut pattern = pattern.to_string();
     let db_path = is_path_typed(kind, field) && class != Class::Path;
     if db_path {

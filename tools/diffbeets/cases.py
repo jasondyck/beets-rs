@@ -2118,3 +2118,36 @@ EXPECTED.update({c: _PLUGIN_LOAD_518A for c in [
     "rewrite-bad.yaml load", "migrate:rewrite-bad.yaml load",
     "bucket-bad.yaml load", "migrate:bucket-bad.yaml load",
 ]})
+
+# 5.18c: export, random, playlist and parentwork. Export writes the tags or
+# (with -l/-a) the library fields; the playlist query reads the playlist
+# smartplaylist wrote; parentwork logs its "No work ..." message (the corpus
+# has no MusicBrainz ids, so it makes no requests).
+ART_CASES += [
+    ("export", "tracks", {}, "{{plugins: [export]}}", [
+        ["export", "-f", "json", "-i", "title,album", "artist"],
+        ["export", "-f", "jsonlines", "-i", "title,album", "artist"],
+        ["export", "-f", "csv", "-i", "title,album", "artist"],
+        ["export", "-f", "xml", "-i", "title,album", "artist"],
+        ["export", "-l", "-f", "json", "-i", "title,album,path,id", "artist"],
+        ["export", "-a", "-f", "json", "-i", "album,albumartist", "Art Artist"],
+        ["export", "-f", "json"],
+    ]),
+    ("random", "tracks", {}, "{{plugins: [random]}}", [
+        ["random", "-n", "0"],
+        ["random", "-n", "0", "nothing"],
+    ]),
+    ("parentwork", "tracks", {}, "{{plugins: [parentwork]}}", [
+        ["parentwork"],
+        ["parentwork", "-f"],
+    ]),
+    ("playlist", "tracks", {},
+     "{{plugins: [playlist, smartplaylist], smartplaylist: {{playlist_dir:"
+     " '{root}/out', playlists: [{{name: all.m3u, query: ''}}]}}, playlist:"
+     " {{playlist_dir: '{root}/out', relative_to: library}}}}", [
+        ["splupdate"],
+        ["ls", "playlist:all"],
+        ["ls", "-f", "$title", "playlist:{root}/out/all.m3u"],
+        ["ls", "playlist:nonexisting"],
+    ]),
+]
