@@ -74,7 +74,7 @@ Done: fetchart (filesystem + CAA), lyrics (LRCLIB), embedart.
 - [x] **5.11 missing**: `beet missing [-c] [-t] [-a] [-f FMT]`
 - [x] **5.12 mbsync**: `beet mbsync [-p] [-M] [-W] [-f]` re-fetching MusicBrainz metadata by ID
 - [x] **5.13 the, zero**: `the` template function (`%the{}`, a/an options); `zero` (`fields`, `keep_fields`, per-field patterns, `update_database`, `beet zero`)
-- [ ] **5.14 inline**: inline fields (`item_fields`, `album_fields`) via a small built-in expression language covering common inline uses (field access, string ops, conditionals, arithmetic), as decided by the maintainer; no embedded Python (no pyo3). Python `pluginpath` plugins are out of scope
+- [x] **5.14 inline**: inline fields (`item_fields`, `album_fields`) via a small built-in expression language covering common inline uses (field access, string ops, conditionals, arithmetic), as decided by the maintainer; no embedded Python (no pyo3). Python `pluginpath` plugins are out of scope
 - [x] **5.15 smartplaylist**: m3u generation from queries, `playlist_dir`, `relative_to`, `prefix`, `auto` on db change, `beet splupdate`
 - [x] **5.16 web**: HTTP JSON API compatible with beets' web plugin (`/item/`, `/album/`, queries, `/item/<id>/file`), plus a minimal browser UI
 - [x] **5.17 types**: declare flex attribute types (int/float/bool/date) for queries and sorting; also a framework for plugins' own `item_types`/`album_types` (e.g. lyrics_instrumental should format as True/False)

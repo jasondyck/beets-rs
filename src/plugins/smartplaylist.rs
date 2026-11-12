@@ -396,6 +396,7 @@ fn entry(lib: &Library, s: &Settings, item: &Item, uri: &[u8]) -> Result<Vec<u8>
             rec: item,
             album: album.as_ref(),
             album_dir: None,
+            lib: Some(lib),
             album_counts: None,
         };
         let mut attrs = String::new();

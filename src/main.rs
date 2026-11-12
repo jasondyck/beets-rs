@@ -9,6 +9,7 @@ mod fileops;
 mod formatted;
 mod hooks;
 mod importer;
+mod inline;
 mod layout;
 mod library;
 mod logging;

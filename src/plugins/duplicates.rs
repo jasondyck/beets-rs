@@ -238,6 +238,7 @@ impl Model {
             album: self.album.as_ref(),
             album_dir: self.dir.as_deref(),
             album_counts: None,
+            lib: None,
         }
         .get(key)
         .unwrap_or(PyVal::None)

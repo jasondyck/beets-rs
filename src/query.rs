@@ -322,6 +322,9 @@ pub struct Obj<'a> {
     pub rec: &'a Record,
     pub album: Option<&'a Record>,
     pub album_dir: Option<&'a Path>,
+    /// The library, for template fields that reach other records (the
+    /// inline plugin's album `items`).
+    pub lib: Option<&'a crate::library::Library>,
     /// The album's (an album's own, an item's album's) [`AlbumCounts`].
     pub album_counts: Option<AlbumCounts>,
 }
@@ -340,13 +343,38 @@ impl<'a> Obj<'a> {
             rec,
             album: None,
             album_dir: None,
+            lib: None,
             album_counts: None,
+        }
+    }
+
+    /// The inline plugin's field `key`, if it's one (beets' getters come
+    /// before the fields).
+    fn inline(&self, key: &str) -> Option<PyVal> {
+        let env = crate::formatted::env();
+        let f = env.inline.as_ref()?.field(self.rec.kind, key)?;
+        use crate::inline::value::V;
+        match crate::inline::evaluate(f, self.rec, self.album, self.lib, &env) {
+            Ok(v) => Some(match v {
+                V::None => PyVal::None,
+                V::Bool(b) => PyVal::Bool(b),
+                V::Int(i) => PyVal::Int(i),
+                V::Float(x) => PyVal::Float(x),
+                V::Str(s) => PyVal::Str(s.to_string()),
+                V::Bytes(b) => PyVal::Bytes(b.to_vec()),
+                V::List(l) => PyVal::List(l.borrow().iter().map(V::to_str).collect()),
+                other => PyVal::Str(other.to_str()),
+            }),
+            Err(e) => crate::inline::fail(&crate::inline::inline_error(&f.code, &e)),
         }
     }
 
     /// beets' `Model.get(key)` (with an item's album fallback); None when
     /// the field doesn't exist.
     pub fn get(&self, key: &str) -> Option<PyVal> {
+        if let Some(v) = self.inline(key) {
+            return Some(v);
+        }
         let rec = self.rec;
         match rec.kind {
             Kind::Item => match key {
@@ -405,13 +433,10 @@ impl<'a> Obj<'a> {
         if rec.kind == Kind::Item
             && let Some(a) = self.album
         {
-            return Obj {
-                rec: a,
-                album: None,
-                album_dir: None,
-                album_counts: self.album_counts,
-            }
-            .get(key);
+            let mut o = Obj::new(a);
+            o.lib = self.lib;
+            o.album_counts = self.album_counts;
+            return o.get(key);
         }
         None
     }

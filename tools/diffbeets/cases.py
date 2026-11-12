@@ -57,6 +57,63 @@ replace:
                        " 'zoo$']\n    format: '{{1}} ({{0}})'\n",
     "the-strip.yaml": "plugins: [the]\nthe:\n    strip: yes\n    patterns: ['^artist\\s']\n",
     "the-none.yaml": "plugins: [the]\nthe:\n    the: no\n    a: no\n",
+    # inline (braces doubled: these configs go through str.format)
+    "inline.yaml": """\
+plugins: [inline]
+item_fields:
+    initial: (albumartist or artist or '_')[0].upper() + u'.'
+    disc_and_track: f"{{disc:02d}}.{{track:02d}}" if disctotal > 1 else f"{{track:02d}}"
+    minsec: "'%d:%02d' % divmod(int(length), 60)"
+    decade: f'{{year // 10 * 10}}s' if year else 'Unknown'
+    kbps: f'{{bitrate // 1000}}kbps'
+    genre1: genres[0] if genres else 'none'
+    fname: path.decode('utf-8').split('/')[-1]
+    shout: title.upper().replace(' ', '_')
+    half: length / 2
+    later: track > 1
+    nothing: None
+    glist: genres
+    compf: comp
+    single: db_obj.singleton
+    words: len(title.split())
+    padded: str(track).zfill(3) + '|' + title[:5].ljust(5, '.') + '|'
+    kind: |
+        if disctotal > 1:
+            return 'multi'
+        elif not track:
+            return 'none'
+        return 'single'
+    sortname: |
+        a = albumartist or artist
+        if a.lower().startswith('the '):
+            a = a[4:] + ', The'
+        return a
+album_fields:
+    n: len(items)
+    total_len: round(sum(i.length for i in items), 1)
+    first: items[0].title if items else ''
+    tracks: "','.join(str(t) for t in sorted(i.track for i in items))"
+    alb_total: db_obj.albumtotal
+    avg_br: |
+        total = 0
+        for item in items:
+            total += item.bitrate
+        return total // len(items)
+paths:
+    default: $initial/$sortname/$album%aunique{{}}/$disc_and_track $title
+    singleton: Non-Album/$initial/$artist/$title
+""",
+    "inline-errors.yaml": """\
+plugins: [inline]
+item_fields:
+    boom: 1 / (track - track)
+    noname: undefined_thing
+    lam: '(lambda x: x)(1)'
+    imp: |
+        import os
+        return os.sep
+""",
+    "inline-syntax.yaml": "plugins: [inline]\nitem_fields:\n    bad: 'def ('\n    ok: track + 1\n",
     "the-paths.yaml": "plugins: [the]\npaths:\n    default: '%the{{$albumartist}}/%the{{$album}}/$title'\n"
                       "    singleton: '%the{{$artist}}/$title'\n",
 }
@@ -882,6 +939,27 @@ def cases():
         for t in THE_TEMPLATES:
             out.append((f"-c {name} ls -f:{t}", ["-c", f"{ROOT}/{name}", "ls", "-f", t]))
     out.append(("ls -f:%the{$artist} (no plugin)", ["ls", "-f", "%the{$artist}"]))
+    # inline
+    _inl = ["-c", f"{ROOT}/inline.yaml"]
+    out += [
+        ("inline ls -f items", [*_inl, "ls", "-f", "$initial|$disc_and_track|$minsec|$decade|$kbps|"
+                                "$genre1|$fname|$shout|$half|$later|$nothing|$glist|$compf|"
+                                "$single|$words|$padded|$kind|$sortname"]),
+        ("inline ls -a -f albums", [*_inl, "ls", "-a", "-f",
+                                    "$album|$n|$total_len|$first|$tracks|$alb_total|$avg_br"]),
+        ("inline ls -f album fields from items", [*_inl, "ls", "-f", "$title|$n|$first"]),
+        ("inline mv -p", [*_inl, "mv", "-p"]),
+        ("inline fields", [*_inl, "fields"]),
+        ("inline query", [*_inl, "ls", "-f", "$title|$kind", "kind:multi"]),
+        ("inline query album", [*_inl, "ls", "-a", "n:3"]),
+        ("inline sort", [*_inl, "ls", "-f", "$minsec $title", "minsec+", "title+"]),
+        ("inline %if", [*_inl, "ls", "-f", "%if{$later,later,first}|%upper{$initial}"]),
+        ("inline ok field with syntax error", ["-c", f"{ROOT}/inline-syntax.yaml", "ls", "-f",
+                                                "$ok", "track:1"]),
+    ]
+    _err = ["-c", f"{ROOT}/inline-errors.yaml", "ls", "-f"]
+    for name in ["boom", "noname", "lam", "imp"]:
+        out.append((f"inline error {name}", [*_err, f"$title ${name}", "title:Hit One"]))
     out.append(("-c the-paths.yaml mv -p", ["-c", f"{ROOT}/the-paths.yaml", "mv", "-p"]))
     for name in ["nocaseins.yaml", "sortcfg.yaml"]:
         for q in SORT_CONFIG_QUERIES:
@@ -1478,6 +1556,22 @@ ART_CASES += [
     ("edit-no-editor", "tracks", {}, "{{plugins: [edit], editor: nonexistent-editor}}",
      [_IMP, ["edit"]]),
 ]
+
+_INLINE_CRASH = ("an inline field's runtime error: beets crashes with a traceback "
+                 "(InlineError), beets-rs prints the same InlineError message and exits 1")
+_INLINE_UNSUPPORTED = ("Python beyond beets-rs' inline subset (lambda, import): beets "
+                       "evaluates it, beets-rs stops with \"error in inline path field code: "
+                       "... NotImplementedError: beets-rs' inline doesn't support ...\"")
+_INLINE_SYNTAX = ("an inline definition that isn't Python: beets logs \"syntax error in "
+                  "inline field definition\" with a Python traceback, beets-rs with the "
+                  "parser's message")
+EXPECTED.update({
+    "inline error boom": _INLINE_CRASH,
+    "inline error noname": _INLINE_CRASH,
+    "inline error lam": _INLINE_UNSUPPORTED,
+    "inline error imp": _INLINE_UNSUPPORTED,
+    "inline ok field with syntax error": _INLINE_SYNTAX,
+})
 
 _PLUGIN_LOAD = ("a plugin that fails to set up (bad `fetchart.sources`): beets logs \"** error "
                 "loading plugin fetchart\" with a Python traceback and runs without it; beets-rs "

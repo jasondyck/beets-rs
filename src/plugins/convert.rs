@@ -443,6 +443,7 @@ impl<'a> Selector<'a> {
             album: album.as_ref(),
             album_dir: None,
             album_counts: None,
+            lib: None,
         })
     }
 

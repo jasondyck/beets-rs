@@ -43,6 +43,8 @@ pub struct FormatEnv {
     pub ftintitle_custom_words: Vec<String>,
     /// The `the` plugin's `%the{}`, when it's enabled.
     pub the: Option<Rc<crate::plugins::the::The>>,
+    /// The inline plugin's fields, when it's enabled.
+    pub inline: Option<Rc<crate::inline::Inline>>,
 }
 
 /// beets' `CHAR_REPLACE`: the replacements used when the configured ones
@@ -144,6 +146,8 @@ impl FormatEnv {
             ftintitle_custom_words: cfg.list("ftintitle.custom_words"),
             the: crate::plugins::enabled(cfg, "the")
                 .then(|| Rc::new(crate::plugins::the::The::new(cfg))),
+            inline: crate::plugins::enabled(cfg, "inline")
+                .then(|| Rc::new(crate::inline::Inline::new(cfg, false))),
         })
     }
 
@@ -352,6 +356,7 @@ impl<'a> Formatted<'a> {
             if rec.kind == Kind::Album {
                 keys.extend(self.env.album_template_fields.iter().map(|k| k.to_string()));
             }
+            keys.extend(self.inline_names(rec.kind));
             keys
         };
         let mut keys: std::collections::BTreeSet<String> =
@@ -389,7 +394,39 @@ impl<'a> Formatted<'a> {
     /// A plugin's album template field (which beets looks up before the
     /// album's own fields).
     fn template_field(&self, rec: &Record, key: &str) -> bool {
-        rec.kind == Kind::Album && self.env.album_template_fields.contains(&key)
+        (rec.kind == Kind::Album && self.env.album_template_fields.contains(&key))
+            || self
+                .env
+                .inline
+                .as_ref()
+                .is_some_and(|i| i.field(rec.kind, key).is_some())
+    }
+
+    /// The inline plugin's field names for `kind`.
+    fn inline_names(&self, kind: Kind) -> Vec<String> {
+        self.env.inline.as_ref().map_or_else(Vec::new, |i| {
+            let fields = match kind {
+                Kind::Item => &i.item_fields,
+                Kind::Album => &i.album_fields,
+            };
+            fields.iter().map(|f| f.name.clone()).collect()
+        })
+    }
+
+    /// An inline field's value (a runtime error ends the command, as
+    /// beets' `InlineError` does).
+    fn inline_value(&self, rec: &Record, key: &str) -> Option<String> {
+        let inline = self.env.inline.as_ref()?;
+        let f = inline.field(rec.kind, key)?;
+        let album = if rec.kind == Kind::Item {
+            self.the_album()
+        } else {
+            None
+        };
+        match crate::inline::evaluate(f, rec, album, self.lib, &self.env) {
+            Ok(v) => Some(crate::inline::format_result(&v, rec, key)),
+            Err(e) => crate::inline::fail(&crate::inline::inline_error(&f.code, &e)),
+        }
     }
 
     /// The album's computed `albumtotal`.
@@ -422,6 +459,8 @@ impl<'a> Formatted<'a> {
     /// The value of one field of `rec` (the record itself or the album).
     fn value(&self, rec: &Record, key: &str) -> String {
         let v = match (rec.kind, key) {
+            // Template fields come before the record's own (beets' getters).
+            _ if let Some(v) = self.inline_value(rec, key) => v,
             (Kind::Item, "filesize") => std::fs::metadata(rec.path())
                 .map(|m| m.len().to_string())
                 .unwrap_or_else(|_| "0".into()),

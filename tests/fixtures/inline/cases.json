@@ -1,0 +1,1305 @@
+{
+"globals": {
+"title": "Hello World",
+"artist": "The Beatles",
+"albumartist": "",
+"album": "Abbey Road",
+"track": 3,
+"tracktotal": 12,
+"disc": 1,
+"disctotal": 2,
+"year": 1969,
+"month": 0,
+"length": 187.5,
+"bitrate": 320000,
+"comp": 0,
+"genres": [
+"Rock",
+"Pop"
+],
+"path": "/music/The Beatles/01 Come.mp3",
+"rg_track_gain": null,
+"format": "MP3",
+"label": "Apple",
+"id": 7,
+"album_id": 2,
+"items": [
+1,
+2,
+3
+]
+},
+"exprs": [
+[
+"1//0",
+{
+"error": [
+"ZeroDivisionError",
+"integer division or modulo by zero"
+]
+}
+],
+[
+"1%0",
+{
+"error": [
+"ZeroDivisionError",
+"integer modulo by zero"
+]
+}
+],
+[
+"1/0",
+{
+"error": [
+"ZeroDivisionError",
+"division by zero"
+]
+}
+],
+[
+"1.0//0",
+{
+"error": [
+"ZeroDivisionError",
+"float floor division by zero"
+]
+}
+],
+[
+"'a'+1",
+{
+"error": [
+"TypeError",
+"can only concatenate str (not \"int\") to str"
+]
+}
+],
+[
+"1+'a'",
+{
+"error": [
+"TypeError",
+"unsupported operand type(s) for +: 'int' and 'str'"
+]
+}
+],
+[
+"'a'<1",
+{
+"error": [
+"TypeError",
+"'<' not supported between instances of 'str' and 'int'"
+]
+}
+],
+[
+"int('x')",
+{
+"error": [
+"ValueError",
+"invalid literal for int() with base 10: 'x'"
+]
+}
+],
+[
+"'abc'[5]",
+{
+"error": [
+"IndexError",
+"string index out of range"
+]
+}
+],
+[
+"[1][3]",
+{
+"error": [
+"IndexError",
+"list index out of range"
+]
+}
+],
+[
+"{}['k']",
+{
+"error": [
+"KeyError",
+"'k'"
+]
+}
+],
+[
+"None.x",
+{
+"error": [
+"AttributeError",
+"'NoneType' object has no attribute 'x'"
+]
+}
+],
+[
+"'s'.foo",
+{
+"error": [
+"AttributeError",
+"'str' object has no attribute 'foo'"
+]
+}
+],
+[
+"len(5)",
+{
+"error": [
+"TypeError",
+"object of type 'int' has no len()"
+]
+}
+],
+[
+"x",
+{
+"error": [
+"NameError",
+"name 'x' is not defined"
+]
+}
+],
+[
+"round(2.5)",
+{
+"repr": "2"
+}
+],
+[
+"round(2.675,2)",
+{
+"repr": "2.67"
+}
+],
+[
+"'%5.2f|%-4d|%x|%r' % (3.14159, 7, 255, 'q')",
+{
+"repr": "\" 3.14|7   |ff|'q'\""
+}
+],
+[
+"f'{3.0:g}|{1e20:g}|{0.0001:g}|{12345678.9:g}|{1234:,}|{0.25:%}|{5:+05d}|{-3:>6}|{\"ab\":^7}|{255:#x}'",
+{
+"repr": "'3|1e+20|0.0001|1.23457e+07|1,234|25.000000%|+0005|    -3|  ab   |0xff'"
+}
+],
+[
+"str(1e16)+str(1e-5)+str(0.1+0.2)",
+{
+"repr": "'1e+161e-050.30000000000000004'"
+}
+],
+[
+"'a'*3",
+{
+"repr": "'aaa'"
+}
+],
+[
+"[1]*2",
+{
+"repr": "[1, 1]"
+}
+],
+[
+"3*'x'",
+{
+"repr": "'xxx'"
+}
+],
+[
+"divmod(-7,2)",
+{
+"repr": "(-4, 1)"
+}
+],
+[
+"-7//2",
+{
+"repr": "-4"
+}
+],
+[
+"-7%2",
+{
+"repr": "1"
+}
+],
+[
+"2**-1",
+{
+"repr": "0.5"
+}
+],
+[
+"abs(-0.0)",
+{
+"repr": "0.0"
+}
+],
+[
+"min('b','a')",
+{
+"repr": "'a'"
+}
+],
+[
+"max([3,1])",
+{
+"repr": "3"
+}
+],
+[
+"sorted('cba')",
+{
+"repr": "['a', 'b', 'c']"
+}
+],
+[
+"'a b  c'.split()",
+{
+"repr": "['a', 'b', 'c']"
+}
+],
+[
+"'x'.join(['a','b'])",
+{
+"repr": "'axb'"
+}
+],
+[
+"'%s' % None",
+{
+"repr": "'None'"
+}
+],
+[
+"'%d' % 3.7",
+{
+"repr": "'3'"
+}
+],
+[
+"f'{None}'",
+{
+"repr": "'None'"
+}
+],
+[
+"str(True+1)",
+{
+"repr": "'2'"
+}
+],
+[
+"bool('')",
+{
+"repr": "False"
+}
+],
+[
+"'abc'.title()",
+{
+"repr": "'Abc'"
+}
+],
+[
+"'hello world'.capitalize()",
+{
+"repr": "'Hello world'"
+}
+],
+[
+"'  x '.strip()",
+{
+"repr": "'x'"
+}
+],
+[
+"'a,b'.split(',',1)",
+{
+"repr": "['a', 'b']"
+}
+],
+[
+"'abc'.startswith(('x','a'))",
+{
+"repr": "True"
+}
+],
+[
+"[1,'a',None]",
+{
+"repr": "[1, 'a', None]"
+}
+],
+[
+"(1,)",
+{
+"repr": "(1,)"
+}
+],
+[
+"{'a':1}",
+{
+"repr": "{'a': 1}"
+}
+],
+[
+"b'x'",
+{
+"repr": "b'x'"
+}
+],
+[
+"'%(a)s' % {'a':1}",
+{
+"repr": "'1'"
+}
+],
+[
+"int(3.9)",
+{
+"repr": "3"
+}
+],
+[
+"int(' 12 ')",
+{
+"repr": "12"
+}
+],
+[
+"float('1e3')",
+{
+"repr": "1000.0"
+}
+],
+[
+"str(1.0)",
+{
+"repr": "'1.0'"
+}
+],
+[
+"1 < 'a'",
+{
+"error": [
+"TypeError",
+"'<' not supported between instances of 'int' and 'str'"
+]
+}
+],
+[
+"[1,2] < [1,3]",
+{
+"repr": "True"
+}
+],
+[
+"'x' in 'xyz'",
+{
+"repr": "True"
+}
+],
+[
+"3 in [1,2]",
+{
+"repr": "False"
+}
+],
+[
+"None or 'd'",
+{
+"repr": "'d'"
+}
+],
+[
+"0 and 1",
+{
+"repr": "0"
+}
+],
+[
+"'{0}-{1:02d}-{x}'.format('a', 3, x=1)",
+{
+"repr": "'a-03-1'"
+}
+],
+[
+"'{:>5}'.format('ab')",
+{
+"repr": "'   ab'"
+}
+],
+[
+"'abc'[::-1]",
+{
+"repr": "'cba'"
+}
+],
+[
+"'abc'[-1]",
+{
+"repr": "'c'"
+}
+],
+[
+"'abc'[1:]",
+{
+"repr": "'bc'"
+}
+],
+[
+"len(b'abc')",
+{
+"repr": "3"
+}
+],
+[
+"b'abc'.decode()",
+{
+"repr": "'abc'"
+}
+],
+[
+"'ÄB'.lower()",
+{
+"repr": "'äb'"
+}
+],
+[
+"1 if 0 else 2",
+{
+"repr": "2"
+}
+],
+[
+"round(-0.5)",
+{
+"repr": "0"
+}
+],
+[
+"round(1.5)",
+{
+"repr": "2"
+}
+],
+[
+"round(3.14159, 2)",
+{
+"repr": "3.14"
+}
+],
+[
+"f'{2.5:.0f}'",
+{
+"repr": "'2'"
+}
+],
+[
+"f'{0.125:.2f}'",
+{
+"repr": "'0.12'"
+}
+],
+[
+"'%.0f' % 0.5",
+{
+"repr": "'0'"
+}
+],
+[
+"'%.1f' % 0.25",
+{
+"repr": "'0.2'"
+}
+],
+[
+"f'{1234567:_}'",
+{
+"repr": "'1_234_567'"
+}
+],
+[
+"f'{12:b}'",
+{
+"repr": "'1100'"
+}
+],
+[
+"f'{12:o}'",
+{
+"repr": "'14'"
+}
+],
+[
+"f'{65:c}'",
+{
+"repr": "'A'"
+}
+],
+[
+"f'{3:e}'",
+{
+"repr": "'3.000000e+00'"
+}
+],
+[
+"f'{123.456:.2e}'",
+{
+"repr": "'1.23e+02'"
+}
+],
+[
+"f'{1.5:G}'",
+{
+"repr": "'1.5'"
+}
+],
+[
+"str(float('inf'))",
+{
+"repr": "'inf'"
+}
+],
+[
+"f'{\"x\"!r:>5}'",
+{
+"repr": "\"  'x'\""
+}
+],
+[
+"'%c' % 65",
+{
+"repr": "'A'"
+}
+],
+[
+"'%5s|%-5s|' % ('a','b')",
+{
+"repr": "'    a|b    |'"
+}
+],
+[
+"'%+d % d' % (5, 5)",
+{
+"repr": "'+5  5'"
+}
+],
+[
+"'%03d' % -5",
+{
+"repr": "'-05'"
+}
+],
+[
+"'%e' % 12345.678",
+{
+"repr": "'1.234568e+04'"
+}
+],
+[
+"'%g' % 0.00001234",
+{
+"repr": "'1.234e-05'"
+}
+],
+[
+"'%#o' % 8",
+{
+"repr": "'0o10'"
+}
+],
+[
+"albumartist[0].upper() + u'.'",
+{
+"error": [
+"IndexError",
+"string index out of range"
+]
+}
+],
+[
+"artist[0].upper() + u'.'",
+{
+"repr": "'T.'"
+}
+],
+[
+"f\"{disc:02d}.{track:02d}\" if disctotal > 1 else f\"{track:02d}\"",
+{
+"repr": "'01.03'"
+}
+],
+[
+"f'{disc:02d}-{track:02d}' if disctotal > 1 else f'{track:02d}'",
+{
+"repr": "'01-03'"
+}
+],
+[
+"'%02d' % track",
+{
+"repr": "'03'"
+}
+],
+[
+"str(track).zfill(2)",
+{
+"repr": "'03'"
+}
+],
+[
+"artist.lower().replace(' ', '_')",
+{
+"repr": "'the_beatles'"
+}
+],
+[
+"artist[4:] + ', The' if artist.startswith('The ') else artist",
+{
+"repr": "'Beatles, The'"
+}
+],
+[
+"title.split()[0]",
+{
+"repr": "'Hello'"
+}
+],
+[
+"' '.join(w.capitalize() for w in title.split())",
+{
+"repr": "'Hello World'"
+}
+],
+[
+"len(genres)",
+{
+"repr": "2"
+}
+],
+[
+"'; '.join(genres)",
+{
+"repr": "'Rock; Pop'"
+}
+],
+[
+"genres[0] if genres else 'Unknown'",
+{
+"repr": "'Rock'"
+}
+],
+[
+"path.decode('utf-8').split('/')[-1]",
+{
+"repr": "'01 Come.mp3'"
+}
+],
+[
+"path.decode().rsplit('/', 1)[0]",
+{
+"repr": "'/music/The Beatles'"
+}
+],
+[
+"int(length // 60)",
+{
+"repr": "3"
+}
+],
+[
+"'%d:%02d' % divmod(int(length), 60)",
+{
+"repr": "'3:07'"
+}
+],
+[
+"f'{int(length) // 60}:{int(length) % 60:02d}'",
+{
+"repr": "'3:07'"
+}
+],
+[
+"round(bitrate / 1000)",
+{
+"repr": "320"
+}
+],
+[
+"f'{bitrate // 1000}kbps'",
+{
+"repr": "'320kbps'"
+}
+],
+[
+"year or 'Unknown'",
+{
+"repr": "1969"
+}
+],
+[
+"str(year)[:3] + '0s' if year else 'Unknown'",
+{
+"repr": "'1960s'"
+}
+],
+[
+"f'{year // 10 * 10}s'",
+{
+"repr": "'1960s'"
+}
+],
+[
+"'Compilations' if comp else albumartist or artist",
+{
+"repr": "'The Beatles'"
+}
+],
+[
+"rg_track_gain is None",
+{
+"repr": "True"
+}
+],
+[
+"rg_track_gain or 0.0",
+{
+"repr": "0.0"
+}
+],
+[
+"format.lower()",
+{
+"repr": "'mp3'"
+}
+],
+[
+"title[:20]",
+{
+"repr": "'Hello World'"
+}
+],
+[
+"title.upper() == title",
+{
+"repr": "False"
+}
+],
+[
+"not comp",
+{
+"repr": "True"
+}
+],
+[
+"artist if len(artist) < 5 else artist[:5]",
+{
+"repr": "'The B'"
+}
+],
+[
+"[g.upper() for g in genres if g != 'Pop']",
+{
+"repr": "['ROCK']"
+}
+],
+[
+"sum(i for i in items)",
+{
+"repr": "6"
+}
+],
+[
+"sum(items) / len(items)",
+{
+"repr": "2.0"
+}
+],
+[
+"max(items) - min(items)",
+{
+"repr": "2"
+}
+],
+[
+"any(g == 'Rock' for g in genres)",
+{
+"repr": "True"
+}
+],
+[
+"title.find('World')",
+{
+"repr": "6"
+}
+],
+[
+"title.count('l')",
+{
+"repr": "3"
+}
+],
+[
+"title.center(15, '*')",
+{
+"repr": "'**Hello World**'"
+}
+],
+[
+"title.ljust(14, '.')",
+{
+"repr": "'Hello World...'"
+}
+],
+[
+"title.rjust(14)",
+{
+"repr": "'   Hello World'"
+}
+],
+[
+"title.partition(' ')",
+{
+"repr": "('Hello', ' ', 'World')"
+}
+],
+[
+"title.swapcase()",
+{
+"repr": "'hELLO wORLD'"
+}
+],
+[
+"'x'.join(str(i) for i in range(3))",
+{
+"repr": "'0x1x2'"
+}
+],
+[
+"list(range(10, 0, -3))",
+{
+"repr": "[10, 7, 4, 1]"
+}
+],
+[
+"list(enumerate('ab', 1))",
+{
+"repr": "[(1, 'a'), (2, 'b')]"
+}
+],
+[
+"list(zip('ab', [1, 2]))",
+{
+"repr": "[('a', 1), ('b', 2)]"
+}
+],
+[
+"sorted(genres, reverse=True)",
+{
+"repr": "['Rock', 'Pop']"
+}
+],
+[
+"''.join(reversed(title))",
+{
+"repr": "'dlroW olleH'"
+}
+],
+[
+"'{} - {}'.format(artist, title)",
+{
+"repr": "'The Beatles - Hello World'"
+}
+],
+[
+"'{0[0]}|{1}'.format(genres, len(genres))",
+{
+"repr": "'Rock|2'"
+}
+],
+[
+"isinstance(track, int)",
+{
+"repr": "True"
+}
+],
+[
+"isinstance(title, (int, str))",
+{
+"repr": "True"
+}
+],
+[
+"chr(ord('a') + 1)",
+{
+"repr": "'b'"
+}
+],
+[
+"hex(255)",
+{
+"repr": "'0xff'"
+}
+],
+[
+"f'{track!s:>4}|{title!r}'",
+{
+"repr": "\"   3|'Hello World'\""
+}
+],
+[
+"f\"{'nested ' + f'{track}'}\"",
+{
+"repr": "'nested 3'"
+}
+],
+[
+"(track, disc) > (2, 9)",
+{
+"repr": "True"
+}
+],
+[
+"track if track else None",
+{
+"repr": "3"
+}
+],
+[
+"-track",
+{
+"repr": "-3"
+}
+],
+[
+"~track",
+{
+"repr": "-4"
+}
+],
+[
+"track << 2",
+{
+"repr": "12"
+}
+],
+[
+"2 ** 10",
+{
+"repr": "1024"
+}
+],
+[
+"7 / 2",
+{
+"repr": "3.5"
+}
+],
+[
+"-7 / 2",
+{
+"repr": "-3.5"
+}
+],
+[
+"7.5 // 2",
+{
+"repr": "3.0"
+}
+],
+[
+"-7.5 % 2",
+{
+"repr": "0.5"
+}
+],
+[
+"title * 0",
+{
+"repr": "''"
+}
+],
+[
+"'abc' < 'abd'",
+{
+"repr": "True"
+}
+],
+[
+"[] or [0]",
+{
+"repr": "[0]"
+}
+],
+[
+"'a' 'b' \"c\"",
+{
+"repr": "'abc'"
+}
+],
+[
+"r'\\d+'",
+{
+"repr": "'\\\\d+'"
+}
+],
+[
+"'tab\\there'",
+{
+"repr": "'tab\\there'"
+}
+],
+[
+"'é\\x41'",
+{
+"repr": "'éA'"
+}
+],
+[
+"3 < track < 5",
+{
+"repr": "False"
+}
+],
+[
+"track == 3.0",
+{
+"repr": "True"
+}
+],
+[
+"True + True",
+{
+"repr": "2"
+}
+],
+[
+"1e300 * 1e10",
+{
+"repr": "inf"
+}
+],
+[
+"int('0x1f', 16)",
+{
+"repr": "31"
+}
+],
+[
+"float('nan') == float('nan')",
+{
+"repr": "False"
+}
+],
+[
+"title.split(' ', 0)",
+{
+"repr": "['Hello World']"
+}
+],
+[
+"'  a  b '.split(None, 1)",
+{
+"repr": "['a', 'b ']"
+}
+],
+[
+"'a  b  '.rsplit(None, 1)",
+{
+"repr": "['a', 'b']"
+}
+],
+[
+"'a-b-c'.rsplit('-', 1)",
+{
+"repr": "['a-b', 'c']"
+}
+],
+[
+"title.removeprefix('Hello ')",
+{
+"repr": "'World'"
+}
+],
+[
+"\"it's\"",
+{
+"repr": "\"it's\""
+}
+],
+[
+"'say \"hi\"'",
+{
+"repr": "'say \"hi\"'"
+}
+],
+[
+"'both \\' and \"'",
+{
+"repr": "'both \\' and \"'"
+}
+],
+[
+"title.encode()",
+{
+"repr": "b'Hello World'"
+}
+],
+[
+"1_000",
+{
+"repr": "1000"
+}
+],
+[
+"0o17 + 0b11",
+{
+"repr": "18"
+}
+],
+[
+".5 + 5.",
+{
+"repr": "5.5"
+}
+],
+[
+"title.lower.x",
+{
+"error": [
+"AttributeError",
+"'builtin_function_or_method' object has no attribute 'x'"
+]
+}
+]
+],
+"bodies": [
+[
+"x = track * 2\nif x > 5:\n    return 'big'\nreturn 'small'",
+{
+"repr": "'big'"
+}
+],
+[
+"return track + 1",
+{
+"repr": "4"
+}
+],
+[
+"total = 0\nfor i in items:\n    total += i\nreturn total / len(items)",
+{
+"repr": "2.0"
+}
+],
+[
+"if disctotal > 1:\n    return '%02d-%02d' % (disc, track)\nelif track:\n    return '%02d' % track\nelse:\n    return ''",
+{
+"repr": "'01-03'"
+}
+],
+[
+"out = []\nfor g in genres:\n    if g == 'Pop':\n        continue\n    out.append(g.lower())\nreturn ', '.join(out)",
+{
+"repr": "'rock'"
+}
+],
+[
+"n = 0\nwhile n < 5:\n    n += 2\nreturn n",
+{
+"repr": "6"
+}
+],
+[
+"a, b = divmod(int(length), 60)\nreturn f'{a}:{b:02d}'",
+{
+"repr": "'3:07'"
+}
+],
+[
+"track = track + 1\nreturn track",
+{
+"error": [
+"UnboundLocalError",
+"cannot access local variable 'track' where it is not associated with a value"
+]
+}
+],
+[
+"x = 1\nx = x + 1\nreturn x",
+{
+"repr": "2"
+}
+],
+[
+"for i in items:\n    if i == 2:\n        break\nelse:\n    return 'none'\nreturn i",
+{
+"repr": "2"
+}
+],
+[
+"d = {'Rock': 'R'}\nreturn d.get(genres[0], '?') + d.get('x', '?')",
+{
+"repr": "'R?'"
+}
+],
+[
+"s = title\ns += '!'\nreturn s",
+{
+"repr": "'Hello World!'"
+}
+],
+[
+"l = [3, 1, 2]\nl.sort()\nl.reverse()\nreturn l",
+{
+"repr": "[3, 2, 1]"
+}
+],
+[
+"if not genres: return None\nreturn genres[-1]",
+{
+"repr": "'Pop'"
+}
+],
+[
+"pass",
+{
+"repr": "None"
+}
+],
+[
+"x = [1, 2]\nx[0] = 9\nreturn x",
+{
+"repr": "[9, 2]"
+}
+],
+[
+"return",
+{
+"repr": "None"
+}
+],
+[
+"a = b = 3\nreturn a + b",
+{
+"repr": "6"
+}
+],
+[
+"first, *rest = genres\nreturn first",
+{
+"repr": "'Rock'"
+}
+]
+]
+}

@@ -43,12 +43,14 @@ fn obj_of<'a>(
     albums: &'a HashMap<i64, Album>,
     dirs: &'a HashMap<i64, PathBuf>,
     counts: &HashMap<i64, crate::query::AlbumCounts>,
+    lib: &'a Library,
 ) -> crate::query::Obj<'a> {
     let album_id = match kind {
         Kind::Item => r.int("album_id"),
         Kind::Album => r.id.unwrap_or(0),
     };
     crate::query::Obj {
+        lib: Some(lib),
         album_counts: counts.get(&album_id).copied(),
         rec: r,
         album: match kind {
@@ -1035,12 +1037,12 @@ impl Library {
             HashMap::new()
         };
         if clause.is_none() {
-            recs.retain(|r| q.matches_obj(&obj_of(kind, r, &albums, &dirs, &counts)));
+            recs.retain(|r| q.matches_obj(&obj_of(kind, r, &albums, &dirs, &counts, self)));
         }
         if sort.is_slow() {
             let objs: Vec<_> = recs
                 .iter()
-                .map(|r| obj_of(kind, r, &albums, &dirs, &counts))
+                .map(|r| obj_of(kind, r, &albums, &dirs, &counts, self))
                 .collect();
             let order = sort.sort_slow(&objs);
             drop(objs);
