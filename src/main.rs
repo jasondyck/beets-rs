@@ -368,14 +368,29 @@ pub enum Cmd {
         #[arg(allow_hyphen_values = true)]
         query: Vec<String>,
     },
-    /// Fetch lyrics (plugin: lyrics)
+    /// Fetch song lyrics (plugin: lyrics)
     Lyrics {
-        /// Print the lyrics
+        /// Print lyrics to console
         #[arg(short = 'p', long)]
         print: bool,
-        /// Re-fetch even if the item already has lyrics
+        /// Write lyrics to given directory as ReST files
+        #[arg(short = 'r', long = "write-rest", value_name = "dir")]
+        rest_directory: Option<String>,
+        /// Always re-download lyrics
         #[arg(short = 'f', long)]
         force: bool,
+        /// Skip items that already have synced lyrics
+        #[arg(long, overrides_with = "no_keep_synced")]
+        keep_synced: bool,
+        /// Do not skip items that already have synced lyrics
+        #[arg(long, overrides_with = "keep_synced")]
+        no_keep_synced: bool,
+        /// Do not fetch missing lyrics
+        #[arg(short = 'l', long)]
+        local: bool,
+        /// Limit query results
+        #[arg(long)]
+        limit: Option<usize>,
         #[arg(allow_hyphen_values = true)]
         query: Vec<String>,
     },

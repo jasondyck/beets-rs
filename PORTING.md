@@ -54,7 +54,7 @@ config`, plugins fetchart / lyrics / embedart, release preferences.
 
 Done: fetchart (filesystem + CAA), lyrics (LRCLIB), embedart.
 
-- [ ] **5.0 lyrics plugin to beets 2.14 storage**: instrumental tracks as `lyrics=''` + `lyrics_instrumental=1`, `lyrics_backend`/`lyrics_url` flex fields (we still store `[Instrumental]` text, and new DBs mark the instrumental migration as done); back up before every unrecorded migration as beets does, not only data-changing ones
+- [x] **5.0 lyrics plugin parity with beets 2.14**: all backends 2.14 ships (lrclib, genius, tekstowo, musixmatch, google if present), `sources`, `synced`, `translate`, `keep_synced`, `dist_thresh`, `force`, `print`, `-l/-r` options; instrumental tracks as `lyrics=''` + `lyrics_instrumental=1`, `lyrics_backend`/`lyrics_url` flex fields (we still store `[Instrumental]` text, and new DBs mark the instrumental migration as done); back up before every unrecorded migration as beets does, not only data-changing ones
 - [ ] **5.1 fetchart/embedart completion**: image resizing (`maxwidth`, `quality`, `max_filesize`), `minwidth`, `enforce_ratio`, `cautious`, `cover_format`, `store_source`; more sources (itunes, amazon, albumart, wikipedia, fanarttv, lastfm); embedart `maxwidth`, `compare_threshold`
 - [ ] **5.2 lastgenre**: Last.fm genre lookup with whitelist/canonicalization tree, `count`, `source`, `fallback`, `force`, `-a/-s`
 - [ ] **5.3 chroma**: AcoustID fingerprinting via `fpcalc` (shell out), as an extra candidate source in import; `beet fingerprint`, `beet submit`
@@ -71,7 +71,7 @@ Done: fetchart (filesystem + CAA), lyrics (LRCLIB), embedart.
 - [ ] **5.14 inline**: inline fields (`item_fields`, `album_fields`) via a small built-in expression language covering common inline uses (field access, string ops, conditionals, arithmetic), as decided by the maintainer; no embedded Python (no pyo3). Python `pluginpath` plugins are out of scope
 - [ ] **5.15 smartplaylist**: m3u generation from queries, `playlist_dir`, `relative_to`, `prefix`, `auto` on db change, `beet splupdate`
 - [ ] **5.16 web**: HTTP JSON API compatible with beets' web plugin (`/item/`, `/album/`, queries, `/item/<id>/file`), plus a minimal browser UI
-- [ ] **5.17 types**: declare flex attribute types (int/float/bool/date) for queries and sorting
+- [ ] **5.17 types**: declare flex attribute types (int/float/bool/date) for queries and sorting; also a framework for plugins' own `item_types`/`album_types` (e.g. lyrics_instrumental should format as True/False)
 - [ ] **5.18 Smaller common plugins**: fromfilename, importadded, badfiles, random, permissions, hook, export, playlist, mbcollection, rewrite, substitute, bucket, ihate, filefilter, unimported, parentwork, albumtypes, advancedrewrite, mpdupdate, plexupdate, kodiupdate, subsonicupdate, listenbrainz/lastimport
 - [ ] **5.19 Metadata source plugins**: discogs, spotify, deezer, beatport (as extra candidate sources)
 - [ ] **5.20 Rarely used**: bpd, aura, play, keyfinder, autobpm, bpm, absubmit, mbsubmit, metasync, thumbnails, importfeeds, fish, loadext, fuzzy, bareasc, limit, titlecase
@@ -84,4 +84,4 @@ Done: fetchart (filesystem + CAA), lyrics (LRCLIB), embedart.
 
 ## Needs the maintainer
 
-Nothing open.
+- **Reference venv is missing plugin dependencies** (found 2026-11-11 while porting lyrics, 5.0): reference beets can't load the lyrics plugin ("error loading plugin lyrics") because `~/.cache/beets-reference/venv` has no `beautifulsoup4`, so lyrics has no diffbeets cases and upstream `test/plugins/test_lyrics.py` can't run there. Please install `beautifulsoup4` (and optionally `langdetect`) into that venv, or approve the worker doing it. Other plugins will need theirs too (e.g. `pylast` for lastgenre, `pyacoustid` for chroma, `flask` for web): installing the `beets[...]` extras for the bundled plugins at once would cover all of them. Until then the worker relies on ported unit tests and fake servers for those plugins.

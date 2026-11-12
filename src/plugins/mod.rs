@@ -5,6 +5,7 @@
 pub mod embedart;
 pub mod fetchart;
 pub mod lyrics;
+pub mod requests;
 
 use crate::config::Config;
 use crate::fileops::FileOp;
@@ -79,7 +80,7 @@ pub fn load(cfg: &Config) -> Result<Vec<Box<dyn Plugin>>> {
     for name in names {
         match name.as_str() {
             "fetchart" => out.push(Box::new(fetchart::FetchArt::new(cfg))),
-            "lyrics" => out.push(Box::new(lyrics::Lyrics::new(cfg))),
+            "lyrics" => out.push(Box::new(lyrics::LyricsPlugin::new(cfg))),
             "embedart" => out.push(Box::new(embedart::EmbedArt::new(cfg))),
             // The autotagger's metadata source, as in beets 2.14: it's
             // queried only while this plugin is enabled.

@@ -281,6 +281,15 @@ pub fn write_with(item: &Item, path: &Path, id3v23: bool) -> Result<()> {
     mf.save(id3v23)
 }
 
+/// beets' `item.try_write(tags={"synced_lyrics": ...})`: the item's tags
+/// and MP3s' SYLT frame (removed for `None`).
+pub fn write_with_sylt(item: &Item, sylt: Option<&[(String, u32)]>) -> Result<()> {
+    let mut mf = MediaFile::open(item.path())?;
+    mf.update(item);
+    mf.set_synced_lyrics(sylt.unwrap_or_default());
+    mf.save(id3v23())
+}
+
 static ID3V23: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 /// The `id3v23` option, set from the configuration at startup.

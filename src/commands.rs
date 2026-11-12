@@ -356,9 +356,36 @@ pub fn run(cli: Cli) -> Result<()> {
         Cmd::Clearart { yes, query } => clearart(&cfg, &lib, yes, &query),
         Cmd::Lyrics {
             print,
+            rest_directory,
             force,
+            keep_synced,
+            no_keep_synced,
+            local,
+            limit,
             query,
-        } => lyrics(&cfg, &lib, print, force, &query),
+        } => {
+            require_plugin(&cfg, "lyrics")?;
+            let keep_synced = if keep_synced {
+                Some(true)
+            } else if no_keep_synced {
+                Some(false)
+            } else {
+                None
+            };
+            plugins::lyrics::command(
+                &cfg,
+                &lib,
+                plugins::lyrics::CmdOpts {
+                    print,
+                    rest_directory,
+                    force,
+                    keep_synced,
+                    local,
+                    limit,
+                    query,
+                },
+            )
+        }
         Cmd::Fields => fields(&lib),
         Cmd::MigrateBeets {
             beets_config,
@@ -1797,30 +1824,6 @@ fn clearart(cfg: &Config, lib: &Library, yes: bool, q: &[String]) -> Result<()> 
         }
     }
     println!("Cleared art from {n} file(s).");
-    Ok(())
-}
-
-fn lyrics(cfg: &Config, lib: &Library, print: bool, force: bool, q: &[String]) -> Result<()> {
-    require_plugin(cfg, "lyrics")?;
-    let ly = plugins::lyrics::Lyrics::new(cfg);
-    let ctx = PluginCtx {
-        cfg,
-        lib,
-        write: cfg.bool("import.write"),
-    };
-    let t = Template::parse(&cfg.str("format_item"));
-    for mut item in lib.items(&Query::parse(Kind::Item, q)?)? {
-        if let Err(e) = ly.fetch_item(&ctx, &mut item, force) {
-            eprintln!("warning: {}: {e:#}", format_record(&t, &item, Some(lib)));
-        }
-        if print && !item.str("lyrics").is_empty() {
-            println!(
-                "\n{}\n\n{}\n",
-                format_record(&t, &item, Some(lib)),
-                item.str("lyrics")
-            );
-        }
-    }
     Ok(())
 }
 

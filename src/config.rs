@@ -184,8 +184,28 @@ embedart:
 
 lyrics:
     auto: yes
+    auto_ignore: null
+    translate:
+        api_key: null
+        from_languages: []
+        to_language: null
+    dist_thresh: 0.11
+    google_API_key: null
+    google_engine_ID: '009217259823014548361:lndtuqkycfu'
+    genius_api_key: Ryq93pUGm8bM6eUWwD_M3NOFFDAtp2yEE7W76V-uFL5jks5dNvcGCdarqFjDhP9c
+    lrcmux:
+        url: https://api.lrcmux.dev
+        sources: []
+    fallback: null
     force: no
+    keep_synced: no
+    local: no
+    print: no
+    rest_directory: null
     synced: no
+    # Musixmatch and Tekstowo are disabled by default as they currently
+    # block requests with the beets user agent.
+    sources: [lrclib, google, genius, lrcmux]
 
 musicbrainz:
     host: musicbrainz.org
@@ -305,7 +325,7 @@ fn merge(base: Y, over: Y) -> Y {
             let mut out = Mapping::new();
             let mut base = base;
             for (k, v) in over {
-                let merged = match base.remove(&k) {
+                let merged = match base.shift_remove(&k) {
                     Some(b) => merge(b, v),
                     None => v,
                 };
@@ -587,6 +607,21 @@ impl Config {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // As confuse: a section's keys from the higher source first, then the
+    // rest in the defaults' order.
+    #[test]
+    fn merge_keeps_key_order() {
+        let y = |s: &str| serde_yaml::from_str::<Y>(s).unwrap();
+        let merged = merge(y("{a: 1, b: 2, c: 3, d: 4}"), y("{b: 9}"));
+        let keys: Vec<&str> = merged
+            .as_mapping()
+            .unwrap()
+            .keys()
+            .map(|k| k.as_str().unwrap())
+            .collect();
+        assert_eq!(keys, ["b", "a", "c", "d"]);
+    }
 
     #[test]
     fn merge_user_over_defaults() {

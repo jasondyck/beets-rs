@@ -352,8 +352,7 @@ fn legacy_field_of(migration: &str) -> Option<(&'static str, &'static str)> {
 }
 
 /// Runs beets' data migrations not yet recorded in the `migrations` table,
-/// each once per table. As beets', a migration backs the database up
-/// first, but only when it has data to change.
+/// each once per table. As beets', each backs the database up first.
 pub(crate) struct Migrator<'a> {
     conn: &'a Connection,
     /// The database file to back up (None: no backups).
@@ -378,6 +377,10 @@ impl Migrator<'_> {
                     .into_iter()
                     .map(|(c, _)| c)
                     .collect();
+                // As beets' `Migration.migrate_model`: a backup before any
+                // migration not yet recorded, whether or not it has data
+                // to change (so a new database gets one per migration).
+                self.backup(t, name)?;
                 match *name {
                     "lyrics_metadata_in_flex_fields" => self.lyrics_metadata(*kind)?,
                     "relative_path" => {
@@ -392,7 +395,7 @@ impl Migrator<'_> {
                     _ => {
                         let (old, new) = legacy_field_of(name).unwrap();
                         if columns.iter().any(|c| c == old) {
-                            self.multi_value(*kind, name, old, new)?;
+                            self.multi_value(*kind, old, new)?;
                         }
                     }
                 }
@@ -414,7 +417,7 @@ impl Migrator<'_> {
 
     /// `MultiValueFieldMigration`: backfill a list field from the old
     /// single-valued column. Values with a "; ", ", " or " / " are split.
-    fn multi_value(&self, kind: Kind, name: &str, old: &str, new: &str) -> Result<()> {
+    fn multi_value(&self, kind: Kind, old: &str, new: &str) -> Result<()> {
         let t = table(kind);
         let rows: Vec<(i64, String, Option<String>)> = self
             .conn
@@ -431,7 +434,6 @@ impl Migrator<'_> {
         if todo.is_empty() {
             return Ok(());
         }
-        self.backup(t, name)?;
         let mut migrated = total - todo.len();
         println!("Migrating {new} for {total} {t}...");
         for chunk in todo.chunks(1000) {
@@ -475,7 +477,6 @@ impl Migrator<'_> {
         if todo.is_empty() {
             return Ok(());
         }
-        self.backup(t, "lyrics_metadata_in_flex_fields")?;
         let mut migrated = total - todo.len();
         println!("Migrating lyrics for {total} {t}...");
         for chunk in todo.chunks(100) {
@@ -530,7 +531,6 @@ impl Migrator<'_> {
         if todo.is_empty() {
             return Ok(());
         }
-        self.backup(t, "relative_path")?;
         println!("Migrating {field} for {total} {t}...");
         let tx = self.conn.unchecked_transaction()?;
         for (id, p) in &todo {
@@ -555,7 +555,6 @@ impl Migrator<'_> {
         if total == 0 {
             return Ok(());
         }
-        self.backup(t, "remove_inherited_artpath")?;
         println!("Removing inherited artpath from {total} {t}...");
         self.conn
             .execute(&format!("DELETE FROM {a} WHERE key == 'artpath'"), [])?;
@@ -575,7 +574,6 @@ impl Migrator<'_> {
         if ids.is_empty() {
             return Ok(());
         }
-        self.backup(t, "instrumental_lyrics_in_flex_field")?;
         let total = ids.len();
         println!("Migrating instrumental lyrics for {total} {t}...");
         let tx = self.conn.unchecked_transaction()?;
@@ -705,8 +703,8 @@ impl Library {
         Self::init(Connection::open_in_memory()?, Some(music_dir), None)
     }
 
-    /// `backup`: the database file, to back up before a migration changes
-    /// data (None: no backups).
+    /// `backup`: the database file, to back up before each migration not
+    /// yet recorded (None: no backups).
     fn init(conn: Connection, music_dir: Option<&Path>, backup: Option<&Path>) -> Result<Self> {
         conn.execute_batch("PRAGMA journal_mode=WAL;")?;
         let music_dir = music_dir.map(crate::query::normpath);
@@ -1710,8 +1708,8 @@ mod tests {
         assert!(get(2, "composers").is_empty());
         assert_eq!(get(3, "genres"), ["Kept"]);
         assert_eq!(lib.all_albums().unwrap()[0].list("genres"), ["Rock", "Pop"]);
-        // Each migration that changed data backed the database up first,
-        // as beets names it; the copy has the data from before.
+        // Each migration backed the database up first, as beets names it;
+        // the copy has the data from before.
         let bak = |table: &str, name: &str| {
             d.path()
                 .join(format!("library.db-before-{table}-{name}.bak"))
@@ -1725,8 +1723,9 @@ mod tests {
         assert_eq!((genre.as_str(), genres), ("Rock, Pop", None));
         assert!(bak("albums", "multi_genre_field").exists());
         assert!(bak("items", "multi_composer_field").exists());
-        // Nothing to migrate, no backup.
-        assert!(!bak("items", "multi_lyricist_field").exists());
+        // As beets, even a migration with nothing to change.
+        assert!(bak("items", "multi_lyricist_field").exists());
+        assert!(bak("items", "instrumental_lyrics_in_flex_field").exists());
         // Once only: a later change to the old column isn't migrated again.
         lib.conn
             .execute(

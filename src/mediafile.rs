@@ -21,8 +21,9 @@ use lofty::config::{ParseOptions, WriteOptions};
 use lofty::file::{AudioFile, FileType};
 use lofty::id3::v1::Id3v1Tag;
 use lofty::id3::v2::{
-    CommentFrame, ExtendedTextFrame, Frame, FrameId, Id3v2Tag, Id3v2Version, KeyValueFrame,
-    TextInformationFrame, TimestampFrame, UniqueFileIdentifierFrame, UnsynchronizedTextFrame,
+    BinaryFrame, CommentFrame, ExtendedTextFrame, Frame, FrameId, Id3v2Tag, Id3v2Version,
+    KeyValueFrame, SyncTextContentType, SynchronizedTextFrame, TextInformationFrame,
+    TimestampFormat, TimestampFrame, UniqueFileIdentifierFrame, UnsynchronizedTextFrame,
 };
 use lofty::mp4::{Atom, AtomData, AtomIdent, DataType, Ilst};
 use lofty::ogg::OggPictureStorage;
@@ -1894,6 +1895,8 @@ pub struct MediaFile {
     path: PathBuf,
     ft: FileType,
     tags: Tags,
+    /// A new `synced_lyrics` value (None: unchanged), stored when saving.
+    sylt: Option<Vec<(String, u32)>>,
 }
 
 /// A field's value as MediaFile returns it (`None` where it returns None).
@@ -1982,6 +1985,7 @@ impl MediaFile {
             path: path.to_path_buf(),
             ft,
             tags,
+            sylt: None,
         })
     }
 
@@ -2277,6 +2281,30 @@ impl MediaFile {
         }
     }
 
+    /// Set MediaFile's `synced_lyrics` (`MP3SYLTStorageStyle`: ID3 only):
+    /// `(text, milliseconds)` pairs, or none to remove the SYLT frames.
+    pub fn set_synced_lyrics(&mut self, lines: &[(String, u32)]) {
+        if matches!(self.tags, Tags::Id3 { .. }) {
+            self.sylt = Some(lines.to_vec());
+        }
+    }
+
+    /// `synced_lyrics`: the first SYLT frame's `(text, milliseconds)`.
+    #[cfg(test)]
+    pub fn synced_lyrics(&self) -> Option<Vec<(String, u32)>> {
+        let Tags::Id3 { tag, .. } = &self.tags else {
+            return None;
+        };
+        tag.iter().find_map(|f| match f {
+            Frame::Binary(b) if b.id().as_str() == "SYLT" => {
+                SynchronizedTextFrame::parse(&b.data, lofty::id3::v2::FrameFlags::default())
+                    .ok()
+                    .map(|s| s.content.into_iter().map(|(ms, t)| (t, ms)).collect())
+            }
+            _ => None,
+        })
+    }
+
     /// Save the tags (`id3v23`: write MP3s' ID3 tags as ID3v2.3).
     pub fn save(self, id3v23: bool) -> Result<()> {
         let path = &self.path;
@@ -2288,6 +2316,9 @@ impl MediaFile {
                 if v23 {
                     to_v23(&mut tag);
                     opts = opts.use_id3v23(true);
+                }
+                if let Some(sylt) = self.sylt {
+                    store_sylt(&mut tag, &sylt, opts)?;
                 }
                 if let Some(mut v1) = v1 {
                     update_v1(&mut v1, &tag);
@@ -2312,6 +2343,31 @@ impl MediaFile {
         }
         Ok(())
     }
+}
+
+/// `MP3SYLTStorageStyle.store`: one SYLT frame (UTF-8, language "XXX",
+/// millisecond timestamps, lyrics) replacing any others; none for no lines.
+fn store_sylt(tag: &mut Id3v2Tag, lines: &[(String, u32)], opts: WriteOptions) -> Result<()> {
+    tag.retain(|f| f.id().as_str() != "SYLT");
+    if lines.is_empty() {
+        return Ok(());
+    }
+    let frame = SynchronizedTextFrame::new(
+        TextEncoding::UTF8,
+        *b"XXX",
+        TimestampFormat::MS,
+        SyncTextContentType::Lyrics,
+        None,
+        lines.iter().map(|(t, ms)| (*ms, t.clone())).collect(),
+    );
+    let data = frame
+        .as_bytes(opts)
+        .map_err(|e| anyhow::anyhow!("encoding SYLT frame: {e}"))?;
+    tag.insert(Frame::Binary(BinaryFrame::new(
+        FrameId::Valid(Cow::Borrowed("SYLT")),
+        data,
+    )));
+    Ok(())
 }
 
 /// mutagen's ID3v2.3 save: multiple values joined with "/" (`v23_sep`).
