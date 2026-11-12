@@ -282,7 +282,8 @@ fn own_value(rec: &Record, key: &str, ty: Option<FieldType>) -> PyVal {
 
 /// Python's `shlex.split` (POSIX mode): whitespace-separated words,
 /// single quotes literal, double quotes with `\\` escaping `\\ " $ \``, a
-/// backslash outside quotes escaping the next character, `#` comments.
+/// backslash outside quotes escaping the next character (no comments:
+/// `shlex.split`'s default).
 pub fn shlex_split(s: &str) -> Result<Vec<String>> {
     let mut out = vec![];
     let mut cur = String::new();
@@ -296,7 +297,6 @@ pub fn shlex_split(s: &str) -> Result<Vec<String>> {
                     in_word = false;
                 }
             }
-            '#' if !in_word => break,
             '\\' => {
                 in_word = true;
                 match chars.next() {

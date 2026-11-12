@@ -233,9 +233,13 @@ def snapshot(root, tool, normalise):
                 low = f.lower()
                 if top == "out" and low.endswith(AUDIO_EXTS):
                     lines.append(f"{rel}: {describe_converted(full, normalise)}")
-                elif top == "out" and low.endswith((".m3u", ".m3u8")):
-                    with open(full, encoding="utf-8") as fh:
-                        lines.append(f"{rel}: {fh.read()!r}")
+                elif low.endswith((".m3u", ".m3u8")):
+                    # Playlists (convert's, smartplaylist's) byte for byte, as
+                    # text with only the case's root replaced (normalise would
+                    # drop line endings and the final newline).
+                    with open(full, "rb") as fh:
+                        body = fh.read().decode("utf-8", "backslashreplace")
+                    lines.append(f"{rel}: {body.replace(root, '<ROOT>')!r}")
                 elif low.endswith(".mp3"):
                     lines.append(f"{rel}: {describe_embedded(full)}")
                 elif low.endswith((".jpg", ".jpeg", ".png", ".webp", ".gif")):
@@ -254,7 +258,7 @@ def run_art_case(work, case, tools, normalise, url):
                                   normalise, url)
     results = []
     for i, step in enumerate(steps):
-        args, _stdin = step if isinstance(step, tuple) else (step, "")
+        args = step[0] if isinstance(step, tuple) else step
         results.append((f"art:{name}:{i + 1}", args, outs["ref"][0][i], outs["rs"][0][i]))
     results.append((f"art:{name}:state", ["(art files, embedded art)"],
                     outs["ref"][1], outs["rs"][1]))
@@ -290,13 +294,18 @@ def run_one(work, name, music, images, extra, steps, tool, normalise, url):
 
     results = []
     for step in steps:
-        args, stdin = step if isinstance(step, tuple) else (step, "")
+        # A step: arguments, or (arguments, stdin[, sort_err]); with
+        # sort_err, stderr's lines are compared sorted (beets logs some
+        # things in set order, e.g. smartplaylist's playlists).
+        args, stdin, *opts = step if isinstance(step, tuple) else (step, "")
         argv = [a.format(**fill) for a in args]
         p = subprocess.run([tool.beet, *argv], env=env, cwd=root, input=stdin,
                            capture_output=True, text=True, timeout=120)
         err = norm(p.stderr)
         if "Traceback (most recent call last)" in err:
             err = "CRASH: " + err.strip().splitlines()[-1]
+        elif opts and opts[0]:
+            err = "\n".join(sorted(err.splitlines())) + ("\n" if err else "")
         results.append({"code": 0 if p.returncode == 0 else 1, "out": norm(p.stdout),
                         "err": err})
     state = {"code": 0, "out": snapshot(root, tool, norm), "err": ""}

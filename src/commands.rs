@@ -682,6 +682,38 @@ pub fn run(cli: Cli) -> Result<()> {
             require_plugin(&cfg, "web")?;
             plugins::web::command(&cfg, &lib, plugins::web::CmdOpts { debug, args })
         }
+        Cmd::Splupdate {
+            pretend,
+            format,
+            playlist_dir,
+            dest_regen,
+            relative_to,
+            prefix,
+            forward_slash,
+            urlencode,
+            uri_format,
+            output,
+            names,
+        } => {
+            require_plugin(&cfg, "smartplaylist")?;
+            plugins::smartplaylist::command(
+                &cfg,
+                &lib,
+                plugins::smartplaylist::CmdOpts {
+                    pretend,
+                    format,
+                    playlist_dir,
+                    dest_regen,
+                    relative_to,
+                    prefix,
+                    forward_slash,
+                    urlencode,
+                    uri_format,
+                    output,
+                    names,
+                },
+            )
+        }
         Cmd::Missing {
             count,
             total,

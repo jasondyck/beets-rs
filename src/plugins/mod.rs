@@ -18,6 +18,7 @@ pub mod missing;
 pub mod replaygain;
 pub mod requests;
 pub mod scrub;
+pub mod smartplaylist;
 pub mod the;
 pub mod types;
 pub mod web;
@@ -133,6 +134,7 @@ pub const AVAILABLE: &[&str] = &[
     "replaygain",
     "convert",
     "scrub",
+    "smartplaylist",
     "the",
     "zero",
     "types",
@@ -174,6 +176,10 @@ pub fn load(cfg: &Config) -> Result<Vec<Box<dyn Plugin>>> {
             "ftintitle" => out.push(Box::new(ftintitle::FtInTitle::new(cfg))),
             "duplicates" => out.push(Box::new(duplicates::DuplicatesPlugin)),
             "scrub" => out.push(Box::new(scrub::Scrub::new(cfg))),
+            "smartplaylist" => match smartplaylist::SmartPlaylist::new(cfg) {
+                Ok(p) => out.push(Box::new(p)),
+                Err(e) => crate::logging::emit(format!("** error loading plugin {name}\n{e:#}")),
+            },
             "convert" => out.push(Box::new(convert::ConvertPlugin::new())),
             "edit" => out.push(Box::new(edit::EditPlugin::new(cfg))),
             "missing" => out.push(Box::new(missing::MissingPlugin)),
