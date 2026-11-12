@@ -17,8 +17,14 @@ pub mod mbsync;
 pub mod missing;
 pub mod replaygain;
 pub mod requests;
+pub mod rewrite;
+// 5.18a: template and path plugins.
+pub mod albumtypes;
+pub mod bucket;
+pub mod fromfilename;
 pub mod scrub;
 pub mod smartplaylist;
+pub mod substitute;
 pub mod the;
 pub mod types;
 pub mod web;
@@ -140,6 +146,12 @@ pub const AVAILABLE: &[&str] = &[
     "zero",
     "types",
     "web",
+    "rewrite",
+    "advancedrewrite",
+    "substitute",
+    "bucket",
+    "albumtypes",
+    "fromfilename",
 ];
 
 /// The plugins to load: `plugins` (or `-p`) minus `disabled_plugins` (`-P`),
@@ -175,6 +187,26 @@ pub fn load(cfg: &Config) -> Result<Vec<Box<dyn Plugin>>> {
             "embedart" => out.push(Box::new(embedart::EmbedArt::new(cfg))),
             "info" => out.push(Box::new(info::InfoPlugin)),
             "inline" => out.push(Box::new(crate::inline::load(cfg))),
+            "rewrite" => match rewrite::Rewriter::rewrite(cfg) {
+                Ok(_) => out.push(Box::new(rewrite::RewritePlugin("rewrite"))),
+                Err(e) => crate::logging::emit(format!("** error loading plugin {name}\n{e:#}")),
+            },
+            "substitute" => match substitute::Substitute::new(cfg) {
+                Ok(_) => out.push(Box::new(substitute::SubstitutePlugin)),
+                Err(e) => crate::logging::emit(format!("** error loading plugin {name}\n{e:#}")),
+            },
+            "bucket" => match bucket::Bucket::new(cfg) {
+                Ok(_) => out.push(Box::new(bucket::BucketPlugin)),
+                Err(e) => crate::logging::emit(format!("** error loading plugin {name}\n{e:#}")),
+            },
+            "albumtypes" => out.push(Box::new(albumtypes::AlbumTypesPlugin)),
+            "fromfilename" => out.push(Box::new(fromfilename::FromFilenamePlugin)),
+            // Its rules are read on `pluginload`, where an error ends the
+            // command.
+            "advancedrewrite" => {
+                rewrite::Rewriter::advanced(cfg)?;
+                out.push(Box::new(rewrite::RewritePlugin("advancedrewrite")));
+            }
             "ftintitle" => out.push(Box::new(ftintitle::FtInTitle::new(cfg))),
             "duplicates" => out.push(Box::new(duplicates::DuplicatesPlugin)),
             "scrub" => out.push(Box::new(scrub::Scrub::new(cfg))),

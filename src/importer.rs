@@ -342,12 +342,17 @@ impl CandidateSource for MbSource {
         // beets' `import_task_start` event, sent as the task's lookup
         // begins (chroma's fingerprinting, with `auto`).
         plugins::chroma::fingerprint_task(&self.cfg, items);
-        autotag::album_candidates(&self.cfg, &self.mb, items, None, &self.ids)
+        // fromfilename's titles (the importer applies them to its items too).
+        let mut items = items.to_vec();
+        plugins::fromfilename::task_start(&self.cfg, &mut items, false);
+        autotag::album_candidates(&self.cfg, &self.mb, &items, None, &self.ids)
     }
 
     fn item(&self, item: &Item) -> Result<(Vec<TrackMatch>, Recommendation)> {
         plugins::chroma::fingerprint_task(&self.cfg, std::slice::from_ref(item));
-        autotag::item_candidates(&self.cfg, &self.mb, item, None, &self.ids)
+        let mut item = item.clone();
+        plugins::fromfilename::task_start(&self.cfg, std::slice::from_mut(&mut item), false);
+        autotag::item_candidates(&self.cfg, &self.mb, &item, None, &self.ids)
     }
 }
 
@@ -1337,6 +1342,10 @@ impl<'a> Importer<'a> {
         }
 
         let mut retag: Option<Vec<Item>> = None;
+        // beets' `import_task_start`, as the lookup starts (fromfilename).
+        if self.opts.autotag {
+            plugins::fromfilename::task_start(self.cfg, &mut items, true);
+        }
         let decision = if self.opts.autotag {
             let d = self.choose_album(&items, rescan)?;
             self.log_choice(&d, paths);
@@ -2223,6 +2232,9 @@ impl<'a> Importer<'a> {
             eprintln!("{}", item.path().display());
         }
         let paths = [item.path().to_path_buf()];
+        if self.opts.autotag {
+            plugins::fromfilename::task_start(self.cfg, std::slice::from_mut(&mut item), true);
+        }
         let decision = if self.opts.autotag {
             let d = self.choose_item(&item)?;
             self.log_choice(&d, &paths);

@@ -237,9 +237,19 @@ fn in_other_db(kind: Kind, f: &str) -> bool {
 
 /// Computed fields (`_getters`).
 fn is_getter(kind: Kind, f: &str) -> bool {
-    match kind {
+    let builtin = match kind {
         Kind::Item => matches!(f, "singleton" | "filesize" | "has_cover_art"),
         Kind::Album => matches!(f, "path" | "albumtotal"),
+    };
+    // Plugins' template fields (rewritten fixed fields among them).
+    builtin || {
+        let env = crate::formatted::env();
+        env.rewriters.iter().any(|r| r.defines(kind, f))
+            || env
+                .inline
+                .as_ref()
+                .is_some_and(|i| i.field(kind, f).is_some())
+            || (kind == Kind::Album && env.album_template_fields.contains(&f))
     }
 }
 
@@ -374,6 +384,21 @@ impl<'a> Obj<'a> {
     pub fn get(&self, key: &str) -> Option<PyVal> {
         if let Some(v) = self.inline(key) {
             return Some(v);
+        }
+        // rewrite/advancedrewrite's getters for fixed fields.
+        let env = crate::formatted::env();
+        if let Some(r) = env
+            .rewriters
+            .iter()
+            .rev()
+            .find(|r| r.defines(self.rec.kind, key))
+            && let Some(v) = r.value(self.rec, self.album, key)
+        {
+            use crate::plugins::rewrite::Repl;
+            return Some(match v {
+                Repl::List(l) => PyVal::List(l),
+                Repl::Str(s) => PyVal::Str(s),
+            });
         }
         let rec = self.rec;
         match rec.kind {
