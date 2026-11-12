@@ -7,6 +7,8 @@ pub mod embedart;
 pub mod fetchart;
 pub mod lyrics;
 pub mod requests;
+pub mod the;
+pub mod zero;
 
 use crate::config::Config;
 use crate::fileops::FileOp;
@@ -53,9 +55,20 @@ pub trait Plugin {
     fn item_imported(&self, _ctx: &PluginCtx, _item: &mut Item) -> Result<()> {
         Ok(())
     }
+
+    /// beets' `import_task_choice`: the user (or `-q`) chose what to do
+    /// with a task while autotagging; `asis` for "Use as-is".
+    fn import_task_choice(&self, _asis: bool) {}
 }
 
-pub const AVAILABLE: &[&str] = &["embedart", "fetchart", "lyrics", "musicbrainz"];
+pub const AVAILABLE: &[&str] = &[
+    "embedart",
+    "fetchart",
+    "lyrics",
+    "musicbrainz",
+    "the",
+    "zero",
+];
 
 /// The plugins to load: `plugins` (or `-p`) minus `disabled_plugins` (`-P`),
 /// as beets' `get_plugin_names`.
@@ -84,6 +97,13 @@ pub fn load(cfg: &Config) -> Result<Vec<Box<dyn Plugin>>> {
             },
             "lyrics" => out.push(Box::new(lyrics::LyricsPlugin::new(cfg))),
             "embedart" => out.push(Box::new(embedart::EmbedArt::new(cfg))),
+            // `%the{}` lives in the template environment (`FormatEnv`);
+            // loading only logs the config warnings.
+            "the" => out.push(Box::new(the::The::load(cfg))),
+            "zero" => match zero::Zero::new(cfg) {
+                Ok(p) => out.push(Box::new(p)),
+                Err(e) => crate::logging::emit(format!("** error loading plugin {name}\n{e:#}")),
+            },
             // The autotagger's metadata source, as in beets 2.14: it's
             // queried only while this plugin is enabled.
             "musicbrainz" => crate::mb::warn_deprecated_config(cfg),

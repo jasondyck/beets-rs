@@ -2100,17 +2100,32 @@ impl MediaFile {
     }
 
     /// `MediaFile.update` with an item's media fields (beets' `Item.write`).
-    pub fn update(&mut self, item: &Item) {
+    /// `MediaFile.update` with the item's media fields, the ones in `nulls`
+    /// set to None (deleted), as beets' `Item.write` with a `write` listener
+    /// (zero) setting tags to None. `nulls` may name MediaFile fields that
+    /// aren't item fields: `catalognums` and `languages` delete their single
+    /// fields' tags; `genre`, `composer`, `arranger`, `lyricist`, `date` and
+    /// `original_date` are deleted and then written again from the item
+    /// fields that sort after them, as in MediaFile. (`url`, `copyright`
+    /// and pictures are left to the caller.)
+    pub fn update_with(&mut self, item: &Item, nulls: &std::collections::BTreeSet<String>) {
         for field in FIELDS {
             match field.ty {
-                Date(year_styles) => self.update_date(field, year_styles, item),
-                _ => self.update_field(field, item),
+                Date(year_styles) => self.update_date(field, year_styles, item, nulls),
+                _ => self.update_field(field, item, nulls.contains(field.name)),
+            }
+        }
+        for (list, single) in [("catalognums", "catalognum"), ("languages", "language")] {
+            if nulls.contains(list)
+                && let Some(field) = FIELDS.iter().find(|f| f.name == single)
+            {
+                self.update_field(field, item, true);
             }
         }
     }
 
-    fn update_field(&mut self, field: &Field, item: &Item) {
-        let value = item.get(field.name);
+    fn update_field(&mut self, field: &Field, item: &Item, null: bool) {
+        let value = if null { None } else { item.get(field.name) };
         let styles: Vec<&'static S> = self.styles(field).collect();
         // None: `delattr`, every style (read-only ones too).
         if matches!(value, Some(Value::Null) | None) {
@@ -2162,17 +2177,27 @@ impl MediaFile {
 
     /// `DateField._set_date_tuple` for the item's year, month and day (the
     /// three `DateItemField` writes end there).
-    fn update_date(&mut self, field: &Field, year_styles: &'static [S], item: &Item) {
+    fn update_date(
+        &mut self,
+        field: &Field,
+        year_styles: &'static [S],
+        item: &Item,
+        nulls: &std::collections::BTreeSet<String>,
+    ) {
         let prefix = if field.name == "original_date" {
             "original_"
         } else {
             ""
         };
-        let (y, m, d) = (
-            item.int(&format!("{prefix}year")),
-            item.int(&format!("{prefix}month")),
-            item.int(&format!("{prefix}day")),
-        );
+        let part = |p: &str| {
+            let name = format!("{prefix}{p}");
+            if nulls.contains(&name) {
+                0
+            } else {
+                item.int(&name)
+            }
+        };
+        let (y, m, d) = (part("year"), part("month"), part("day"));
         let styles: Vec<&'static S> = self.styles(field).collect();
         let fam = self.tags.family();
         let year: Vec<&'static S> = year_styles.iter().filter(|s| s.k.family() == fam).collect();

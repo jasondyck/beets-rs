@@ -1926,7 +1926,16 @@ impl<'a> Importer<'a> {
     }
 
     /// beets' `log_choice` for a prompt decision: skips and as-is imports.
+    /// Also sends beets' `import_task_choice` event (not for an abort,
+    /// which ends the import first).
     fn log_choice<M>(&mut self, d: &Decision<M>, paths: &[PathBuf]) {
+        if !matches!(d, Decision::Abort) {
+            let asis = matches!(d, Decision::AsIs);
+            plugins::each(self.plugins, |p| {
+                p.import_task_choice(asis);
+                Ok(())
+            });
+        }
         match d {
             Decision::Skip => self.tag_log("skip", paths),
             Decision::AsIs => self.tag_log("asis", paths),
@@ -2023,7 +2032,7 @@ impl<'a> Importer<'a> {
         }
         if self.opts.write
             && tagged
-            && let Err(e) = media::write(item)
+            && let Err(e) = media::write_mut(item)
         {
             eprintln!("warning: {e:#}");
         }

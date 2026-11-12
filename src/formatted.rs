@@ -36,6 +36,8 @@ pub struct FormatEnv {
     pub aunique: UniqueCfg,
     pub sunique: UniqueCfg,
     pub tunique: UniqueCfg,
+    /// The `the` plugin's `%the{}`, when it's enabled.
+    pub the: Option<Rc<crate::plugins::the::The>>,
 }
 
 /// beets' `CHAR_REPLACE`: the replacements used when the configured ones
@@ -124,6 +126,8 @@ impl FormatEnv {
             aunique: unique("aunique"),
             sunique: unique("sunique"),
             tunique: unique("tunique"),
+            the: crate::plugins::enabled(cfg, "the")
+                .then(|| Rc::new(crate::plugins::the::The::new(cfg))),
         })
     }
 
@@ -716,6 +720,7 @@ impl Context for Formatted<'_> {
             "aunique" => Some(Ok(self.aunique(args))),
             "sunique" => Some(self.sunique(args)),
             "tunique" => Some(self.tunique(args)),
+            "the" => self.env.the.as_ref().map(|t| t.call(args)),
             _ => None,
         }
     }

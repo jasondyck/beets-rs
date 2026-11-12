@@ -7,6 +7,7 @@ use lofty::file::{AudioFile, FileType, TaggedFileExt};
 #[cfg(test)]
 use lofty::picture::MimeType;
 use lofty::picture::{Picture, PictureType};
+use std::collections::BTreeSet;
 use std::path::Path;
 
 pub const AUDIO_EXTENSIONS: &[&str] = &[
@@ -203,9 +204,234 @@ pub fn read(path: &Path) -> Result<Item> {
 /// Write tags and refresh the item's stored mtime so `update` doesn't
 /// mistake our own write for an external change.
 pub fn write_item(item: &mut Item) -> Result<()> {
-    write(item)?;
+    write_mut(item)?;
     refresh_mtime(item);
     Ok(())
+}
+
+/// `write`, then the item changes `write` listeners made (zero's
+/// `update_database`).
+pub fn write_mut(item: &mut Item) -> Result<()> {
+    let changed = write_event(item, item.path(), id3v23(), Extra::None, &BTreeSet::new())?;
+    apply_item_nulls(item, &changed);
+    Ok(())
+}
+
+/// beets' `item.write(tags=tags)` where `tags` sets `nulls` to None
+/// (removed from the file); then the item changes `write` listeners made.
+pub fn write_nulls(item: &mut Item, nulls: &BTreeSet<String>) -> Result<()> {
+    let changed = write_event(item, item.path(), id3v23(), Extra::None, nulls)?;
+    apply_item_nulls(item, &changed);
+    refresh_mtime(item);
+    Ok(())
+}
+
+/// `item[field] = None` for each field (fixed fields take their null
+/// value). Fields the item doesn't have (`images`, `date`, ...) are left
+/// out.
+pub fn apply_item_nulls(item: &mut Item, fields: &[String]) {
+    for f in fields {
+        if item.field_type(f).is_some() {
+            item.set(f, Value::Null);
+        }
+    }
+}
+
+// ------------------------------------------------------------ write event
+
+/// beets' `write` event: the tags `Item.write` is about to write (the
+/// item's media fields plus any extra tags of the write), which listeners
+/// may set to None.
+pub struct WriteTags<'a> {
+    item: &'a Item,
+    /// Extra tags of this write (`images`, `synced_lyrics`) with Python's
+    /// `str()` of their values.
+    extra: Vec<(&'static str, String)>,
+    /// Tags set to None: removed from the file.
+    nulls: BTreeSet<String>,
+    /// Fields set to None on the item itself.
+    item_nulls: Vec<String>,
+}
+
+impl<'a> WriteTags<'a> {
+    /// The tags of a plain `item.write()`.
+    pub fn for_item(item: &'a Item) -> Self {
+        WriteTags {
+            item,
+            extra: vec![],
+            nulls: BTreeSet::new(),
+            item_nulls: vec![],
+        }
+    }
+
+    /// The tags set to None, and the fields set to None on the item.
+    pub fn into_parts(self) -> (BTreeSet<String>, Vec<String>) {
+        (self.nulls, self.item_nulls)
+    }
+
+    pub fn item(&self) -> &Item {
+        self.item
+    }
+
+    /// `field in tags`.
+    pub fn contains(&self, field: &str) -> bool {
+        TAG_FIELDS.contains(&field)
+            || self.extra.iter().any(|(k, _)| *k == field)
+            || self.nulls.contains(field)
+    }
+
+    /// Python's `str()` of `tags[field]`.
+    pub fn value_str(&self, field: &str) -> String {
+        if self.nulls.contains(field) {
+            return "None".into();
+        }
+        if let Some((_, v)) = self.extra.iter().find(|(k, _)| *k == field) {
+            return v.clone();
+        }
+        py_value_str(self.item, field)
+    }
+
+    /// `tags[field] = None`.
+    pub fn set_null(&mut self, field: &str) {
+        self.nulls.insert(field.to_string());
+    }
+
+    /// `item[field] = None`.
+    pub fn set_item_null(&mut self, field: &str) {
+        if !self.item_nulls.iter().any(|f| f == field) {
+            self.item_nulls.push(field.to_string());
+        }
+    }
+}
+
+/// Python's `str()` of an item field's value, as beets holds it.
+pub fn py_value_str(item: &Item, field: &str) -> String {
+    use crate::hooks::{py_float, py_repr};
+    use crate::model::FieldType as T;
+    let Some(v) = item.get(field) else {
+        return "None".into();
+    };
+    match (item.field_type(field), v) {
+        (_, Value::Null) => "None".into(),
+        (Some(T::List(_)), _) => format!(
+            "[{}]",
+            item.list(field)
+                .iter()
+                .map(|s| py_repr(s))
+                .collect::<Vec<_>>()
+                .join(", ")
+        ),
+        (_, Value::Bool(b)) => if b { "True" } else { "False" }.into(),
+        (_, Value::Float(f)) => py_float(f),
+        (_, v) => v.raw(),
+    }
+}
+
+/// A listener for the `write` event.
+pub trait WriteListener: Send + Sync {
+    fn write(&self, tags: &mut WriteTags);
+}
+
+type Listeners = Vec<std::sync::Arc<dyn WriteListener>>;
+
+#[cfg(not(test))]
+static LISTENERS: std::sync::RwLock<Listeners> = std::sync::RwLock::new(Vec::new());
+
+// Tests run in parallel: each test thread has its own listeners.
+#[cfg(test)]
+thread_local! {
+    static LISTENERS: std::cell::RefCell<Listeners> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
+/// Register a `write` listener (a plugin, when it loads).
+pub fn add_write_listener(l: std::sync::Arc<dyn WriteListener>) {
+    #[cfg(not(test))]
+    LISTENERS.write().unwrap().push(l);
+    #[cfg(test)]
+    LISTENERS.with(|v| v.borrow_mut().push(l));
+}
+
+fn listeners() -> Listeners {
+    #[cfg(not(test))]
+    return LISTENERS.read().unwrap().clone();
+    #[cfg(test)]
+    LISTENERS.with(|v| v.borrow().clone())
+}
+
+#[cfg(test)]
+pub fn clear_write_listeners() {
+    LISTENERS.with(|v| v.borrow_mut().clear());
+}
+
+/// Extra tags of a write besides the item's fields.
+enum Extra<'a> {
+    None,
+    /// `images`: the one front cover, or none.
+    Images(Option<Picture>),
+    /// `synced_lyrics` (MP3s' SYLT frame).
+    Sylt(Option<&'a [(String, u32)]>),
+}
+
+/// beets' `Item.write`: send the `write` event, then write the item's
+/// tags (and the extra ones) with the tags listeners set to None removed.
+/// Returns the fields listeners set to None on the item.
+fn write_event(
+    item: &Item,
+    path: &Path,
+    id3v23: bool,
+    extra: Extra,
+    nulls: &BTreeSet<String>,
+) -> Result<Vec<String>> {
+    let extra_tags = match &extra {
+        Extra::None => vec![],
+        Extra::Images(p) => vec![(
+            "images",
+            if p.is_some() { "[<Image>]" } else { "None" }.to_string(),
+        )],
+        Extra::Sylt(s) => vec![(
+            "synced_lyrics",
+            if s.is_some() {
+                "<synced lyrics>"
+            } else {
+                "None"
+            }
+            .to_string(),
+        )],
+    };
+    let mut tags = WriteTags {
+        item,
+        extra: extra_tags,
+        nulls: nulls.clone(),
+        item_nulls: vec![],
+    };
+    for l in listeners() {
+        l.write(&mut tags);
+    }
+    let nulls = tags.nulls;
+    let mut mf = MediaFile::open(path)?;
+    mf.update_with(item, &nulls);
+    match extra {
+        Extra::None => {}
+        Extra::Images(pic) => {
+            mf.clear_pictures();
+            if let Some(pic) = pic {
+                mf.set_front_cover(pic);
+            }
+        }
+        Extra::Sylt(s) => mf.set_synced_lyrics(s.unwrap_or_default()),
+    }
+    // `art` sorts before `images`: an `images` tag of the write wins.
+    if nulls.contains("images")
+        || nulls.contains("art")
+            && !matches!(tags.extra.first(), Some(("images", v)) if v != "None")
+    {
+        mf.clear_pictures();
+    }
+    if nulls.contains("synced_lyrics") {
+        mf.set_synced_lyrics(&[]);
+    }
+    mf.save(id3v23)?;
+    Ok(tags.item_nulls)
 }
 
 /// Record the file's current mtime on the item.
@@ -268,13 +494,14 @@ pub fn write_with_images(item: &Item, image: Option<&[u8]>) -> Result<()> {
         ),
         None => None,
     };
-    let mut mf = MediaFile::open(item.path())?;
-    mf.update(item);
-    mf.clear_pictures();
-    if let Some(pic) = pic {
-        mf.set_front_cover(pic);
-    }
-    mf.save(id3v23())
+    write_event(
+        item,
+        item.path(),
+        id3v23(),
+        Extra::Images(pic),
+        &BTreeSet::new(),
+    )?;
+    Ok(())
 }
 
 /// The embedded pictures' data (MediaFile's `art`: the front cover, else
@@ -301,29 +528,35 @@ pub fn clear_art(path: &Path) -> Result<bool> {
 }
 
 /// Write an item's metadata into its file.
+#[cfg(test)]
 pub fn write(item: &Item) -> Result<()> {
     write_to(item, item.path())
 }
 
+#[cfg(test)]
 pub fn write_to(item: &Item, path: &Path) -> Result<()> {
     write_with(item, path, id3v23())
 }
 
 /// beets' `Item.write`: every media field into the file's tags, MP3s'
 /// ID3 tags as ID3v2.3 with `id3v23`.
+#[cfg(test)]
 pub fn write_with(item: &Item, path: &Path, id3v23: bool) -> Result<()> {
-    let mut mf = MediaFile::open(path)?;
-    mf.update(item);
-    mf.save(id3v23)
+    write_event(item, path, id3v23, Extra::None, &BTreeSet::new())?;
+    Ok(())
 }
 
 /// beets' `item.try_write(tags={"synced_lyrics": ...})`: the item's tags
 /// and MP3s' SYLT frame (removed for `None`).
 pub fn write_with_sylt(item: &Item, sylt: Option<&[(String, u32)]>) -> Result<()> {
-    let mut mf = MediaFile::open(item.path())?;
-    mf.update(item);
-    mf.set_synced_lyrics(sylt.unwrap_or_default());
-    mf.save(id3v23())
+    write_event(
+        item,
+        item.path(),
+        id3v23(),
+        Extra::Sylt(sylt),
+        &BTreeSet::new(),
+    )?;
+    Ok(())
 }
 
 static ID3V23: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);

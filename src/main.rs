@@ -413,6 +413,14 @@ pub enum Cmd {
         #[arg(allow_hyphen_values = true)]
         query: Vec<String>,
     },
+    /// Set fields to null (plugin: zero)
+    Zero {
+        /// Limit query results
+        #[arg(short = 'l', long)]
+        limit: Option<usize>,
+        #[arg(allow_hyphen_values = true)]
+        query: Vec<String>,
+    },
     /// Output version information
     Version,
     /// Give detailed help on a specific sub-command
