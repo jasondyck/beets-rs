@@ -811,6 +811,9 @@ STATS = [[], ["-e"], ["Hit"], ["-e", "Hit"], ["-l", "3"], ["-e", "-l", "3"],
 # are compared as MediaFile reads them; then both tools import the files
 # reference beets wrote and list every tag field.
 TAG_WRITES = [("write", ["write"]), ("write id3v23", ["-c", f"{ROOT}/id3v23.yaml", "write", "-f"])]
+# scrub: every tag removed (FLAC pictures, AIFF and WAV kept, as Mutagen), then
+# the library's tags written back.
+TAG_WRITES += [("scrub -W", ["-p", "scrub", "scrub", "-W"]), ("scrub", ["-p", "scrub", "scrub"])]
 TAG_FIELDS = [
     "acoustid_fingerprint", "acoustid_id", "album", "albumartist", "albumartist_credit",
     "albumartist_sort", "albumartists", "albumartists_credit", "albumartists_sort",
@@ -1366,6 +1369,25 @@ ART_CASES += [
       ["modify", "-y", "artist=Art Artist ft. Dee"], ["ftintitle"], _FT_LS, ["fields"]]),
     ("ftintitle-no-write", "tracks", {}, "{{plugins: [ftintitle]}}",
      [*_FT_SETUP, ["ftintitle"], ["write", "-p"]]),
+]
+
+# scrub: on import (beets' import_task_files, when tags are written) and its
+# command; the files' tags as `write -p` shows them against the library.
+_SCRUB = "{{plugins: [scrub], import: {{write: yes}}}}"
+ART_CASES += [
+    ("scrub-import", "tracks-art", {}, _SCRUB,
+     [_IMP, ["write", "-p"], ["scrub", "-W", "nomatch"]]),
+    ("scrub-import-nowrite", "tracks-art", {}, "{{plugins: [scrub]}}", [_IMP, ["write", "-p"]]),
+    ("scrub-import-W", "tracks-art", {}, _SCRUB, [["import", "-A", "-q", "-W", "{music}"]]),
+    ("scrub-auto-off", "tracks-art", {}, "{{plugins: [scrub], import: {{write: yes}}, "
+     "scrub: {{auto: no}}}}", [_IMP]),
+    ("scrub-cmd-W", "tracks-art", {}, "{{plugins: [scrub]}}",
+     [_IMP, ["scrub", "-W", "title:One"], ["write", "-p"]]),
+    ("scrub-cmd", "tracks-art", {}, "{{plugins: [scrub]}}",
+     [_IMP, ["modify", "-y", "-W", "title=New"], ["scrub", "--limit=1"], ["write", "-p"],
+      ["scrub", "--nowrite", "-l", "1"], ["scrub"], ["write", "-p"]]),
+    ("scrub-zero", "tracks-art", {}, "{{plugins: [scrub, zero], zero: {{fields: [title]}}}}",
+     [_IMP, ["scrub", "title:Two"], ["write", "-p"]]),
 ]
 
 _PLUGIN_LOAD = ("a plugin that fails to set up (bad `fetchart.sources`): beets logs \"** error "

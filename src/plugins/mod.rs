@@ -14,6 +14,7 @@ pub mod lyrics;
 pub mod missing;
 pub mod replaygain;
 pub mod requests;
+pub mod scrub;
 pub mod the;
 pub mod zero;
 
@@ -110,6 +111,7 @@ pub const AVAILABLE: &[&str] = &[
     "missing",
     "musicbrainz",
     "replaygain",
+    "scrub",
     "the",
     "zero",
 ];
@@ -148,6 +150,7 @@ pub fn load(cfg: &Config) -> Result<Vec<Box<dyn Plugin>>> {
             "info" => out.push(Box::new(info::InfoPlugin)),
             "ftintitle" => out.push(Box::new(ftintitle::FtInTitle::new(cfg))),
             "duplicates" => out.push(Box::new(duplicates::DuplicatesPlugin)),
+            "scrub" => out.push(Box::new(scrub::Scrub::new(cfg))),
             "missing" => out.push(Box::new(missing::MissingPlugin)),
             "replaygain" => match replaygain::ReplayGain::new(cfg) {
                 Ok(p) => out.push(Box::new(p)),

@@ -583,6 +583,17 @@ pub enum Cmd {
         #[arg(allow_hyphen_values = true)]
         query: Vec<String>,
     },
+    /// Clean audio tags (plugin: scrub)
+    Scrub {
+        /// Leave tags empty
+        #[arg(short = 'W', long = "nowrite")]
+        nowrite: bool,
+        /// Limit query results
+        #[arg(short = 'l', long)]
+        limit: Option<usize>,
+        #[arg(allow_hyphen_values = true)]
+        query: Vec<String>,
+    },
     /// Set fields to null (plugin: zero)
     Zero {
         /// Limit query results

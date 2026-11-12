@@ -326,6 +326,9 @@ ftintitle:
     - version
     - vip
 
+scrub:
+    auto: yes
+
 musicbrainz:
     host: musicbrainz.org
     https: no
@@ -402,6 +405,7 @@ const PLUGIN_SECTIONS: &[&str] = &[
     "ftintitle",
     "replaygain",
     "duplicates",
+    "scrub",
 ];
 
 /// `DEFAULT_CONFIG` parsed, with the defaults computed at run time
