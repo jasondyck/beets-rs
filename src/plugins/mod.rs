@@ -4,6 +4,7 @@
 
 pub mod art;
 pub mod chroma;
+pub mod duplicates;
 pub mod embedart;
 pub mod fetchart;
 pub mod ftintitle;
@@ -99,6 +100,7 @@ pub trait Plugin {
 
 pub const AVAILABLE: &[&str] = &[
     "chroma",
+    "duplicates",
     "embedart",
     "fetchart",
     "ftintitle",
@@ -145,6 +147,7 @@ pub fn load(cfg: &Config) -> Result<Vec<Box<dyn Plugin>>> {
             "embedart" => out.push(Box::new(embedart::EmbedArt::new(cfg))),
             "info" => out.push(Box::new(info::InfoPlugin)),
             "ftintitle" => out.push(Box::new(ftintitle::FtInTitle::new(cfg))),
+            "duplicates" => out.push(Box::new(duplicates::DuplicatesPlugin)),
             "missing" => out.push(Box::new(missing::MissingPlugin)),
             "replaygain" => match replaygain::ReplayGain::new(cfg) {
                 Ok(p) => out.push(Box::new(p)),

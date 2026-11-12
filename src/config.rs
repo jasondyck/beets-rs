@@ -243,6 +243,23 @@ lastgenre:
     ignorelist: {}
     aliases: yes
 
+duplicates:
+    album: no
+    checksum: ''
+    copy: ''
+    count: no
+    delete: no
+    format: ''
+    full: no
+    keys: []
+    merge: no
+    move: ''
+    path: no
+    tiebreak: {}
+    strict: no
+    tag: ''
+    remove: no
+
 missing:
     count: no
     total: no
@@ -384,6 +401,7 @@ const PLUGIN_SECTIONS: &[&str] = &[
     "chroma",
     "ftintitle",
     "replaygain",
+    "duplicates",
 ];
 
 /// `DEFAULT_CONFIG` parsed, with the defaults computed at run time
