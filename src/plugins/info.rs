@@ -131,16 +131,16 @@ pub fn tag_fields() -> Vec<&'static str> {
 
 /// One thing to show: its data and the model to format (`-f`) and take
 /// the path from.
-struct Entry {
-    data: Data,
-    model: Record,
+pub(crate) struct Entry {
+    pub data: Data,
+    pub model: Record,
     /// The path line (None for a summary).
-    path: Option<String>,
+    pub path: Option<String>,
 }
 
 /// `tag_data_emitter`: the file's tags (`fields`: all of them, or the
 /// `-i` keys).
-fn tag_entry(path: &Path, keys: Option<&[String]>) -> Result<Entry> {
+pub(crate) fn tag_entry(path: &Path, keys: Option<&[String]>) -> Result<Entry> {
     let owned: Vec<String>;
     let fields: &[String] = match keys {
         Some(k) => k,
@@ -192,7 +192,7 @@ fn tag_entry(path: &Path, keys: Option<&[String]>) -> Result<Entry> {
 }
 
 /// `library_data_emitter`: the model's formatted values.
-fn library_entry(lib: &Library, model: Record, keys: Option<&[String]>) -> Entry {
+pub(crate) fn library_entry(lib: &Library, model: Record, keys: Option<&[String]>) -> Entry {
     let f = Formatted::new(&model, Some(lib));
     let keys = match keys {
         Some(k) => k.to_vec(),
@@ -271,6 +271,48 @@ pub fn render_keys(data: &Data, path: Option<&str>) -> Vec<String> {
     out
 }
 
+/// The entries `tag_data` (paths first, then the query's items) or
+/// `library_data` would yield, in order.
+pub(crate) fn collect_entries(
+    lib: &Library,
+    album: bool,
+    library: bool,
+    args: &[String],
+    limit: Option<usize>,
+    keys: Option<&[String]>,
+) -> Result<Vec<Result<Entry>>> {
+    let mut entries: Vec<Result<Entry>> = vec![];
+    if library || album {
+        let kind = if album { Kind::Album } else { Kind::Item };
+        let q = Query::parse(kind, args)?;
+        let mut models = if album {
+            lib.albums(&q)?
+        } else {
+            lib.items(&q)?
+        };
+        models.truncate(limit.unwrap_or(usize::MAX));
+        entries.extend(models.into_iter().map(|m| Ok(library_entry(lib, m, keys))));
+    } else {
+        let mut query = vec![];
+        let mut files: Vec<PathBuf> = vec![];
+        for arg in args {
+            let p = crate::query::normpath(Path::new(arg));
+            if p.is_file() {
+                files.push(p);
+            } else {
+                query.push(arg.clone());
+            }
+        }
+        entries.extend(files.iter().map(|p| tag_entry(p, keys)));
+        if !query.is_empty() {
+            let mut items = lib.items(&Query::parse(Kind::Item, &query)?)?;
+            items.truncate(limit.unwrap_or(usize::MAX));
+            entries.extend(items.iter().map(|i| tag_entry(i.path(), keys)));
+        }
+    }
+    Ok(entries)
+}
+
 /// `InfoPlugin.run`, printing to stdout.
 pub fn command(lib: &Library, opts: CmdOpts) -> Result<()> {
     run(lib, opts, &mut std::io::stdout().lock())
@@ -288,36 +330,7 @@ pub fn run(lib: &Library, opts: CmdOpts, out: &mut impl Write) -> Result<()> {
     let keys = (!keys.is_empty()).then_some(keys);
     let keys = keys.as_deref();
 
-    // Paths first, as `tag_data` yields them while collecting the query.
-    let mut entries: Vec<Result<Entry>> = vec![];
-    if opts.library || opts.album {
-        let kind = if opts.album { Kind::Album } else { Kind::Item };
-        let q = Query::parse(kind, &opts.args)?;
-        let mut models = if opts.album {
-            lib.albums(&q)?
-        } else {
-            lib.items(&q)?
-        };
-        models.truncate(opts.limit.unwrap_or(usize::MAX));
-        entries.extend(models.into_iter().map(|m| Ok(library_entry(lib, m, keys))));
-    } else {
-        let mut query = vec![];
-        let mut files: Vec<PathBuf> = vec![];
-        for arg in &opts.args {
-            let p = crate::query::normpath(Path::new(arg));
-            if p.is_file() {
-                files.push(p);
-            } else {
-                query.push(arg.clone());
-            }
-        }
-        entries.extend(files.iter().map(|p| tag_entry(p, keys)));
-        if !query.is_empty() {
-            let mut items = lib.items(&Query::parse(Kind::Item, &query)?)?;
-            items.truncate(opts.limit.unwrap_or(usize::MAX));
-            entries.extend(items.iter().map(|i| tag_entry(i.path(), keys)));
-        }
-    }
+    let entries = collect_entries(lib, opts.album, opts.library, &opts.args, opts.limit, keys)?;
 
     let template = opts.format.as_deref().map(Template::parse);
     let mut first = true;

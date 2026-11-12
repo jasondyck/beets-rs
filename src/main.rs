@@ -777,6 +777,72 @@ pub enum Cmd {
         #[arg(allow_hyphen_values = true)]
         query: Vec<String>,
     },
+    /// Fetch parent works, composers and dates (plugin: parentwork)
+    Parentwork {
+        /// Re-fetch when parent work is already present
+        #[arg(short = 'f', long)]
+        force: bool,
+        /// Limit query results
+        #[arg(short = 'l', long)]
+        limit: Option<usize>,
+        #[arg(allow_hyphen_values = true)]
+        query: Vec<String>,
+    },
+    /// Export data from beets (plugin: export)
+    Export {
+        /// Export albums instead of tracks
+        #[arg(short = 'a', long)]
+        album: bool,
+        /// Show library fields instead of tags
+        #[arg(short = 'l', long)]
+        library: bool,
+        /// Append data to the file
+        #[arg(long)]
+        append: bool,
+        /// Comma separated list of keys to show
+        #[arg(short = 'i', long = "include-keys", value_name = "KEYS")]
+        included_keys: Vec<String>,
+        /// Path for the output file; without it, print the data
+        #[arg(short = 'o', long, value_name = "PATH")]
+        output: Option<String>,
+        /// The output format: json|jsonlines|csv|xml
+        #[arg(short = 'f', long, value_parser = ["json", "jsonlines", "csv", "xml"])]
+        format: Option<String>,
+        /// Limit query results
+        #[arg(long)]
+        limit: Option<usize>,
+        #[arg(allow_hyphen_values = true)]
+        query: Vec<String>,
+    },
+    /// Choose a random track or album (plugin: random)
+    Random {
+        /// Show matching albums instead of tracks
+        #[arg(short = 'a', long)]
+        album: bool,
+        /// Each field has the same chance
+        #[arg(short = 'e', long = "equal-chance")]
+        equal_chance: bool,
+        /// Field to use for equal chance sampling (default: albumartist)
+        #[arg(long, default_value = "albumartist")]
+        field: String,
+        /// Number of objects to choose
+        #[arg(short = 'n', long, default_value_t = 1)]
+        number: i64,
+        /// Total length in minutes of objects to choose
+        #[arg(short = 't', long)]
+        time: Option<f64>,
+        /// Print paths for matched items or albums
+        #[arg(short = 'p', long)]
+        path: bool,
+        /// Print with a custom format template
+        #[arg(short = 'f', long)]
+        format: Option<String>,
+        /// Limit query results
+        #[arg(short = 'l', long)]
+        limit: Option<usize>,
+        #[arg(allow_hyphen_values = true)]
+        query: Vec<String>,
+    },
     /// Output version information
     Version,
     /// Give detailed help on a specific sub-command

@@ -115,7 +115,7 @@ pub fn run(cli: Cli) -> Result<()> {
         }
         return Err(e);
     }
-    match cmd {
+    let result = match cmd {
         Cmd::Import {
             copy,
             nocopy,
@@ -772,6 +772,74 @@ pub fn run(cli: Cli) -> Result<()> {
                 },
             )
         }
+        Cmd::Parentwork {
+            force,
+            limit,
+            query,
+        } => {
+            require_plugin(&cfg, "parentwork")?;
+            plugins::parentwork::command(
+                &cfg,
+                &lib,
+                plugins::parentwork::CmdOpts {
+                    force: force.then_some(true),
+                    limit,
+                    query,
+                },
+            )
+        }
+        Cmd::Export {
+            album,
+            library,
+            append,
+            included_keys,
+            output,
+            format,
+            limit,
+            query,
+        } => {
+            require_plugin(&cfg, "export")?;
+            plugins::export::command(
+                &cfg,
+                &lib,
+                plugins::export::CmdOpts {
+                    album,
+                    library,
+                    append,
+                    included_keys,
+                    limit,
+                    output,
+                    format,
+                    query,
+                },
+            )
+        }
+        Cmd::Random {
+            album,
+            equal_chance,
+            field,
+            number,
+            time,
+            path: _,
+            format: _,
+            limit,
+            query,
+        } => {
+            require_plugin(&cfg, "random")?;
+            plugins::random::command(
+                &cfg,
+                &lib,
+                plugins::random::CmdOpts {
+                    album,
+                    equal_chance,
+                    field,
+                    limit,
+                    number,
+                    time,
+                    query,
+                },
+            )
+        }
         Cmd::Fields => fields(&lib),
         Cmd::MigrateBeets {
             beets_config,
@@ -787,7 +855,12 @@ pub fn run(cli: Cli) -> Result<()> {
             force,
         ),
         Cmd::Config { .. } | Cmd::Version | Cmd::Help { .. } => unreachable!(),
+    };
+    // beets' `cli_exit` event, after a command that succeeded.
+    if result.is_ok() {
+        crate::plugins::playlist::cli_exit(&cfg, &lib);
     }
+    result
 }
 
 /// `beet help [COMMAND]`: the main help, or a command's (by name or alias),
@@ -1440,6 +1513,8 @@ pub(crate) fn remove_item(
     with_album: bool,
 ) -> Result<()> {
     lib.remove(item)?;
+    // beets' `item_removed` event, before `rm -d` deletes the file.
+    crate::plugins::playlist::item_removed(cfg, item.path());
     let id = item.int("album_id");
     if with_album
         && id != 0
@@ -1776,6 +1851,9 @@ pub(crate) fn move_item_file(
         return Ok(true);
     }
     fileops::transfer(op, &src, &dest)?;
+    if op == FileOp::Move {
+        crate::plugins::playlist::item_moved(cfg, &src, &dest);
+    }
     item.set_path(dest);
     if op == FileOp::Move
         && let Some(p) = src.parent()
