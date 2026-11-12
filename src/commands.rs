@@ -475,6 +475,31 @@ pub fn run(cli: Cli) -> Result<()> {
                 },
             )
         }
+        Cmd::Info {
+            album,
+            library,
+            summarize,
+            included_keys,
+            keys_only,
+            format,
+            limit,
+            args,
+        } => {
+            require_plugin(&cfg, "info")?;
+            plugins::info::command(
+                &lib,
+                plugins::info::CmdOpts {
+                    album,
+                    library,
+                    summarize,
+                    included_keys,
+                    keys_only,
+                    format,
+                    limit,
+                    args,
+                },
+            )
+        }
         Cmd::Fields => fields(&lib),
         Cmd::MigrateBeets {
             beets_config,

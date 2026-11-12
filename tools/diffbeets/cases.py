@@ -862,7 +862,33 @@ def cases():
             args = _query_args(q)
             out.append((f"-c {name} ls:{q}", ["-c", f"{ROOT}/{name}", "ls", *args]))
             out.append((f"-c {name} ls -a:{q}", ["-c", f"{ROOT}/{name}", "ls", "-a", *args]))
+    for args in INFO_ARGS:
+        out.append((f"info:{' '.join(args)}", ["-p", "info", "info", *args]))
     return out
+
+
+# info plugin: tags read from files (paths or queries), library values (-l,
+# -a), summaries, keys and formats. No added/mtime: they differ per tool.
+INFO_ARGS = [
+    [],
+    ["album:Every Format"],
+    ["album:Tag Zoo"],
+    ["-s", "album:Tag Zoo"],
+    ["-s", "album:Every Format"],
+    ["-k", "album:Tag Zoo"],
+    ["-i", "title,art,genre,genres,date,nope,images", "-i", "year,path", "album:Tag Zoo"],
+    ["-f", "$title $length $format $bitrate", "album:Every Format"],
+    ["--limit", "2", "album:Every Format"],
+    ["Format Artist/Every Format/01 Fmt mp3.mp3", "album:Tag Zoo"],
+    ["no-such-thing"],
+    ["-l", "-k", "album:Tag Zoo"],
+    ["-l", "-i", "title,artist,album,nope,format,length,path", "album:Every Format"],
+    ["-l", "-s", "-i", "title,album,albumartist,year,genres"],
+    ["-l", "-f", "$track. $title - $artist ($length)", "album:Every Format"],
+    ["-a", "-i", "album,albumartist,albumtotal,year,path,nope"],
+    ["-a", "-k", "album:Tag Zoo"],
+    ["-a", "-s", "-i", "albumartist,year"],
+]
 
 
 # ---------------------------------------------------------------------------

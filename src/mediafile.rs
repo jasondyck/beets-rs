@@ -49,6 +49,9 @@ enum K {
     Comm(&'static str),
     /// `MP3DescStorageStyle(key="USLT", multispec=False)`.
     Uslt,
+    /// `MP3DescStorageStyle(key="WXXX", attr="url", multispec=False)`
+    /// (read only here: `url` isn't an item field).
+    Wxxx,
     /// `MP3UFIDStorageStyle(owner)`.
     Ufid(&'static str),
     /// `MP3ListPeopleStorageStyle(frame, involvement)`.
@@ -87,6 +90,7 @@ impl K {
             | K::TxxxList(..)
             | K::Comm(_)
             | K::Uslt
+            | K::Wxxx
             | K::Ufid(_)
             | K::People(..)
             | K::SlashPack(..)
@@ -244,6 +248,18 @@ const LANGUAGES: &[S] = &[
     s(Atom(itunes!("LANGUAGE"))),
     s(Key("LANGUAGE")),
 ];
+const ARRANGERS: &[S] = &[
+    s(People("TIPL", "arranger")),
+    s(Atom(itunes!("Arranger"))),
+    s(Key("ARRANGER")),
+];
+const COMPOSERS: &[S] = &[s(Frame("TCOM")), s(Atom("\u{a9}wrt")), s(Key("COMPOSER"))];
+const GENRE_STYLES: &[S] = &[s(Frame("TCON")), s(Atom("\u{a9}gen")), s(Key("GENRE"))];
+const LYRICISTS: &[S] = &[
+    s(Frame("TEXT")),
+    s(Atom(itunes!("LYRICIST"))),
+    s(Key("LYRICIST")),
+];
 const MB_ARTISTIDS: &[S] = &[
     s(TxxxList("MusicBrainz Artist Id", true)),
     s(Atom(itunes!("MusicBrainz Artist Id"))),
@@ -343,15 +359,7 @@ const FIELDS: &[Field] = &[
     ),
     f("albumtype", Str, ALBUMTYPES),
     f("albumtypes", List, ALBUMTYPES),
-    f(
-        "arrangers",
-        List,
-        &[
-            s(People("TIPL", "arranger")),
-            s(Atom(itunes!("Arranger"))),
-            s(Key("ARRANGER")),
-        ],
-    ),
+    f("arrangers", List, ARRANGERS),
     f(
         "artist",
         Str,
@@ -406,11 +414,7 @@ const FIELDS: &[Field] = &[
         Str,
         &[s(Frame("TSOC")), s(Atom("soco")), s(Key("COMPOSERSORT"))],
     ),
-    f(
-        "composers",
-        List,
-        &[s(Frame("TCOM")), s(Atom("\u{a9}wrt")), s(Key("COMPOSER"))],
-    ),
+    f("composers", List, COMPOSERS),
     desc_field!(
         "country",
         Str,
@@ -459,11 +463,7 @@ const FIELDS: &[Field] = &[
             s(Key("ENCODER")),
         ],
     ),
-    f(
-        "genres",
-        List,
-        &[s(Frame("TCON")), s(Atom("\u{a9}gen")), s(Key("GENRE"))],
-    ),
+    f("genres", List, GENRE_STYLES),
     f(
         "grouping",
         Str,
@@ -497,15 +497,7 @@ const FIELDS: &[Field] = &[
         ],
     ),
     f("language", Str, LANGUAGES),
-    f(
-        "lyricists",
-        List,
-        &[
-            s(Frame("TEXT")),
-            s(Atom(itunes!("LYRICIST"))),
-            s(Key("LYRICIST")),
-        ],
-    ),
+    f("lyricists", List, LYRICISTS),
     f(
         "lyrics",
         Str,
@@ -662,6 +654,31 @@ const FIELDS: &[Field] = &[
         ],
     ),
 ];
+
+/// MediaFile's other readable tag fields, which beets doesn't store on
+/// items (read for `beet info`, never written): the single-value views of
+/// list fields (`single_field()`), the lists behind `catalognum` and
+/// `language`, `copyright` and `url`. (`date`, `original_date`, `art`,
+/// `images` and `synced_lyrics` have their own accessors.)
+const EXTRA_FIELDS: &[Field] = &[
+    f("arranger", Str, ARRANGERS),
+    f("catalognums", List, CATALOGNUMS),
+    f("composer", Str, COMPOSERS),
+    f(
+        "copyright",
+        Str,
+        &[s(Frame("TCOP")), s(Atom("cprt")), s(Key("COPYRIGHT"))],
+    ),
+    f("genre", Str, GENRE_STYLES),
+    f("languages", List, LANGUAGES),
+    f("lyricist", Str, LYRICISTS),
+    f("url", Str, &[s(Wxxx), s(Atom("\u{a9}url")), s(Key("URL"))]),
+];
+
+/// The names of [`EXTRA_FIELDS`].
+pub fn extra_field_names() -> impl Iterator<Item = &'static str> {
+    EXTRA_FIELDS.iter().map(|f| f.name)
+}
 
 /// Item fields stored in tags (beets' `Item._media_tag_fields`), sorted.
 pub const TAG_FIELDS: &[&str] = &[
@@ -1362,6 +1379,9 @@ impl Tags {
                 {
                     Some(t.content.to_string())
                 }
+                Frame::UserUrl(t) if key == "WXXX" && t.description.to_lowercase() == lower => {
+                    Some(t.content.to_string())
+                }
                 _ => None,
             })
             .collect()
@@ -1679,6 +1699,10 @@ impl Tags {
                 .id3_desc_frames("USLT", "")
                 .first()
                 .map(|t| vec![Raw::S(t.clone())]),
+            Wxxx => self
+                .id3_desc_frames("WXXX", "")
+                .first()
+                .map(|t| vec![Raw::S(t.clone())]),
             Ufid(owner) => self.id3_ufid(owner).map(|s| vec![Raw::S(s)]),
             People(frame, inv) => {
                 let inv = inv.to_lowercase();
@@ -1822,6 +1846,8 @@ impl Tags {
             Txxx(desc) => self.id3_store_desc("TXXX", desc, *b"XXX", v.serialize(st)),
             Comm(desc) => self.id3_store_desc("COMM", desc, *b"XXX", v.serialize(st)),
             Uslt => self.id3_store_desc("USLT", "", *b"XXX", v.serialize(st)),
+            // Only in EXTRA_FIELDS, which are never written.
+            Wxxx => {}
             Ufid(owner) => self.id3_set_ufid(owner, Some(&v.serialize(st))),
             // `set_list` adds the suffix.
             Frame(_) | TxxxList(..) | People(..) | Atom(_) | Key(_) => {
@@ -1872,6 +1898,7 @@ impl Tags {
             Txxx(desc) | TxxxList(desc, _) => self.id3_delete_desc("TXXX", desc),
             Comm(desc) => self.id3_delete_desc("COMM", desc),
             Uslt => self.id3_delete_desc("USLT", ""),
+            Wxxx => {}
             Id3Sc(_) => self.id3_delete_desc("COMM", "iTunNORM"),
             Ufid(owner) => self.id3_set_ufid(owner, None),
             People(frame, inv) => self.id3_store_people(frame, inv, &[]),
@@ -2072,7 +2099,10 @@ impl MediaFile {
                     .iter()
                     .position(|p| *p == name),
             ),
-            _ => (FIELDS.iter().find(|f| f.name == name)?, None),
+            _ => (
+                FIELDS.iter().chain(EXTRA_FIELDS).find(|f| f.name == name)?,
+                None,
+            ),
         };
         if let Some(i) = part {
             return Some(Got::Int(self.date_tuple(field)[i]));
@@ -2097,6 +2127,40 @@ impl MediaFile {
             }
             Date(_) => return None,
         })
+    }
+
+    /// `DateField.__get__` for `date` or `original_date`: Python's
+    /// `str(datetime.date(year, month or 1, day or 1))`, None without a
+    /// year or for an impossible date.
+    pub fn date(&self, name: &str) -> Option<String> {
+        let field = FIELDS.iter().find(|f| f.name == name)?;
+        if !matches!(field.ty, Date(_)) {
+            return None;
+        }
+        let [y, m, d] = self.date_tuple(field);
+        let y = y.filter(|&y| y != 0)?;
+        let m = m.filter(|&m| m != 0).unwrap_or(1);
+        let d = d.filter(|&d| d != 0).unwrap_or(1);
+        let leap = (y % 4 == 0 && y % 100 != 0) || y % 400 == 0;
+        let mdays = [
+            31,
+            if leap { 29 } else { 28 },
+            31,
+            30,
+            31,
+            30,
+            31,
+            31,
+            30,
+            31,
+            30,
+            31,
+        ];
+        if !(1..=9999).contains(&y) || !(1..=12).contains(&m) || d < 1 || d > mdays[m as usize - 1]
+        {
+            return None;
+        }
+        Some(format!("{y:04}-{m:02}-{d:02}"))
     }
 
     /// `MediaFile.update` with an item's media fields (beets' `Item.write`).
@@ -2290,7 +2354,6 @@ impl MediaFile {
     }
 
     /// `synced_lyrics`: the first SYLT frame's `(text, milliseconds)`.
-    #[cfg(test)]
     pub fn synced_lyrics(&self) -> Option<Vec<(String, u32)>> {
         let Tags::Id3 { tag, .. } = &self.tags else {
             return None;

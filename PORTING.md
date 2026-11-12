@@ -66,7 +66,7 @@ Done: fetchart (filesystem + CAA), lyrics (LRCLIB), embedart.
 - [ ] **5.7 duplicates**: `beet duplicates [-a] [-c] [-k KEY] [-f FMT] [-d] [-m DEST] [-s] [-t TAG] [-p] [-F]`
 - [ ] **5.8 ftintitle**: move "feat. X" from artist to title, `drop`, `format`, `auto`
 - [ ] **5.9 edit**: edit metadata as YAML in `$EDITOR`, `--all`, `-f field`, `-e`; import prompt choices "edit" and "edit Candidates"
-- [ ] **5.10 info**: `beet info [-l] [-k] [-i field] PATH|QUERY`
+- [x] **5.10 info**: `beet info [-l] [-k] [-i field] PATH|QUERY`
 - [ ] **5.11 missing**: `beet missing [-c] [-t] [-a] [-f FMT]`
 - [ ] **5.12 mbsync**: `beet mbsync [-p] [-M] [-W] [-f]` re-fetching MusicBrainz metadata by ID
 - [ ] **5.13 the, zero**: `the` template function (`%the{}`, a/an options); `zero` (`fields`, `keep_fields`, per-field patterns, `update_database`, `beet zero`)
