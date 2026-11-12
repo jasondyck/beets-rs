@@ -12,6 +12,7 @@ pub mod lastgenre;
 pub mod lyrics;
 pub mod missing;
 pub mod requests;
+pub mod scrub;
 pub mod the;
 pub mod zero;
 
@@ -106,6 +107,7 @@ pub const AVAILABLE: &[&str] = &[
     "lyrics",
     "missing",
     "musicbrainz",
+    "scrub",
     "the",
     "zero",
 ];
@@ -143,6 +145,7 @@ pub fn load(cfg: &Config) -> Result<Vec<Box<dyn Plugin>>> {
             "embedart" => out.push(Box::new(embedart::EmbedArt::new(cfg))),
             "info" => out.push(Box::new(info::InfoPlugin)),
             "ftintitle" => out.push(Box::new(ftintitle::FtInTitle::new(cfg))),
+            "scrub" => out.push(Box::new(scrub::Scrub::new(cfg))),
             "missing" => out.push(Box::new(missing::MissingPlugin)),
             // Also a metadata source: its lookups and candidates are wired
             // into `MbSource` and `autotag` (see the module docs).

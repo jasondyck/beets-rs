@@ -297,6 +297,9 @@ ftintitle:
     - version
     - vip
 
+scrub:
+    auto: yes
+
 musicbrainz:
     host: musicbrainz.org
     https: no
@@ -371,6 +374,7 @@ const PLUGIN_SECTIONS: &[&str] = &[
     "zero",
     "chroma",
     "ftintitle",
+    "scrub",
 ];
 
 /// confuse's `ConfigReadError`: "PATH could not be read: REASON".

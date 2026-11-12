@@ -2340,6 +2340,34 @@ impl MediaFile {
         }
     }
 
+    /// MediaFile's `images = pictures`: every picture replaced by these,
+    /// their types kept.
+    pub fn set_pictures(&mut self, pictures: &[Picture]) {
+        self.clear_pictures();
+        for pic in pictures.iter().cloned() {
+            match &mut self.tags {
+                Tags::Id3 { tag, .. } => {
+                    tag.insert(Frame::Picture(lofty::id3::v2::AttachedPictureFrame::new(
+                        TextEncoding::UTF8,
+                        pic,
+                    )));
+                }
+                Tags::Mp4(ilst) => ilst.insert_picture(pic),
+                Tags::Vorbis(vc) => {
+                    let _ = vc.insert_picture(pic, None);
+                }
+                Tags::Ape(ape) => {
+                    if let Some(key) = pic.pic_type().as_ape_key()
+                        && let Ok(item) =
+                            ApeItem::new(key.to_string(), ItemValue::Binary(pic.as_ape_bytes()))
+                    {
+                        ape.insert(item);
+                    }
+                }
+            };
+        }
+    }
+
     /// Remove every picture (MediaFile's `images = []`). Whether there
     /// were any.
     pub fn clear_pictures(&mut self) -> bool {
