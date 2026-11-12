@@ -35,21 +35,9 @@ use translate::Translator;
 
 // ------------------------------------------------------------ utilities
 
-/// beets' `plugins.feat_tokens`: a pattern matching "feat."-like words
-/// that separate a main artist (or title) from secondary artists.
+/// beets' `plugins.feat_tokens` (without custom words).
 pub fn feat_tokens(for_artist: bool) -> String {
-    let mut words = vec!["ft", "featuring", "feat", "feat.", "ft."];
-    if for_artist {
-        words.extend(["with", "vs", "and", "con", "&"]);
-    }
-    let tokens: Vec<String> = words
-        .iter()
-        .map(|w| fancy_regex::escape(w).into_owned())
-        .collect();
-    let tokens = tokens.join("|");
-    let bracketed = format!(r"(?:(?<=\s)|^)(?:\(|\[)(?:{tokens})(?=\s)");
-    let plain = format!(r"(?<=[\s(\[])(?:{tokens})(?=\s)");
-    format!("(?:{bracketed}|{plain})")
+    crate::plugins::feat_tokens(for_artist, &[])
 }
 
 /// `generate_alternatives`: the string, then the first group of each

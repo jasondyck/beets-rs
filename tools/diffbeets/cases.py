@@ -1070,6 +1070,18 @@ IMPORT_CASES = [
      "    update_database: yes\n", ["a"]),
     ("zero-asis", "fx", ["-t", "-C"],
      "plugins: [musicbrainz, zero]\nimport:\n    write: yes\nzero:\n    fields: title\n", ["u"]),
+    # ftintitle: on fetched releases and recordings, and as an import stage
+    # (before the files are placed, so the titles reach the paths).
+    ("ftintitle-t", "sampler", ["-t"], "plugins: [musicbrainz, ftintitle]\n", ["a"]),
+    ("ftintitle-s", "sampler", ["-t", "-s"], "plugins: [musicbrainz, ftintitle]\n",
+     ["a", "a", "a", "a"]),
+    ("ftintitle-A", "sampler", ["-A"],
+     "plugins: [musicbrainz, ftintitle]\nimport:\n    write: yes\n", []),
+    ("ftintitle-A-options", "sampler", ["-A"],
+     "plugins: [musicbrainz, ftintitle]\nftintitle:\n    format: 'with {}'\n"
+     "    keep_in_artist: yes\n", []),
+    ("ftintitle-auto-off", "sampler", ["-t"],
+     "plugins: [musicbrainz, ftintitle]\nftintitle:\n    auto: no\n", ["a"]),
     ("zero-q-asis", "fx", ["-q", "-C", "--quiet-fallback=asis"],
      "plugins: [musicbrainz, zero]\nzero:\n    fields: title\n", []),
 ]
@@ -1318,6 +1330,40 @@ ART_CASES += [
      [_IMP, ["zero", "--limit=1", "album:Art"], _ZERO_LS, ["zero", "nomatch"]]),
     ("zero-cmd-images", "tracks-art", {}, _zero("{{fields: [images], auto: no}}"),
      [_IMP, ["zero", "title:One"]]),
+]
+
+# ftintitle's command and `album_artist_no_feat`.
+_FT_LS = ["ls", "-f", "$title|$artist|$artist_sort|$album_artist_no_feat"]
+_FT_SETUP = [_IMP, ["modify", "-y", "artist=Art Artist feat. Bob", "title:One"],
+             ["modify", "-y", "artist=Bob & Art Artist", "artist_sort=Bob & Art Artist",
+              "title=Two (Club Mix)", "title:Two"]]
+
+
+def _ft(cfg=""):
+    return "{{plugins: [ftintitle], import: {{write: yes}}" + cfg + "}}"
+
+
+ART_CASES += [
+    ("ftintitle-cmd", "tracks", {}, _ft(),
+     [*_FT_SETUP, ["ftintitle"], _FT_LS, ["write", "-p"], ["ftintitle"]]),
+    ("ftintitle-drop", "tracks", {}, _ft(), [*_FT_SETUP, ["ftintitle", "-d"], _FT_LS]),
+    ("ftintitle-limit", "tracks", {}, _ft(),
+     [*_FT_SETUP, ["ftintitle", "--limit=1"], _FT_LS, ["ftintitle", "-l", "1", "title:Two"],
+      _FT_LS]),
+    ("ftintitle-options", "tracks", {},
+     _ft(", ftintitle: {{format: 'ft. {{0}}', keep_in_artist: yes, bracket_keywords: [club], "
+         "custom_words: [x]}}"),
+     [*_FT_SETUP, ["modify", "-y", "artist=Art Artist x Carol", "title:One"], ["ftintitle"],
+      _FT_LS]),
+    ("ftintitle-preserve", "tracks", {}, _ft(", ftintitle: {{preserve_album_artist: no}}"),
+     [_IMP, ["modify", "-y", "-a", "albumartist=Art Artist ft. Dee"],
+      ["modify", "-y", "artist=Art Artist ft. Dee"], ["ftintitle"], _FT_LS,
+      ["ls", "-a", "-f", "$albumartist|$album_artist_no_feat"]]),
+    ("ftintitle-keep-preserve", "tracks", {}, _ft(),
+     [_IMP, ["modify", "-y", "-a", "albumartist=Art Artist ft. Dee"],
+      ["modify", "-y", "artist=Art Artist ft. Dee"], ["ftintitle"], _FT_LS, ["fields"]]),
+    ("ftintitle-no-write", "tracks", {}, "{{plugins: [ftintitle]}}",
+     [*_FT_SETUP, ["ftintitle"], ["write", "-p"]]),
 ]
 
 _PLUGIN_LOAD = ("a plugin that fails to set up (bad `fetchart.sources`): beets logs \"** error "
