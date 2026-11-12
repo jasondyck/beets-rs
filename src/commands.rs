@@ -2049,29 +2049,40 @@ fn fields(lib: &Library) -> Result<()> {
 /// `SELECT DISTINCT` gives them). Plugins' album template fields count as
 /// computed album fields.
 fn fields_lines(lib: &Library) -> Result<Vec<String>> {
-    let names = |fields: &[(&str, FieldType)], computed: &[&'static str]| {
-        let mut v: Vec<&str> = fields
+    let env = crate::formatted::env();
+    // The inline plugin's fields are template fields too.
+    let inline = |kind: Kind| -> Vec<String> {
+        env.inline.as_ref().map_or_else(Vec::new, |i| {
+            let f = if kind == Kind::Item {
+                &i.item_fields
+            } else {
+                &i.album_fields
+            };
+            f.iter().map(|f| f.name.clone()).collect()
+        })
+    };
+    let names = |fields: &[(&str, FieldType)], computed: &[String]| {
+        let mut v: Vec<String> = fields
             .iter()
-            .map(|(n, _)| *n)
-            .chain(std::iter::once("id"))
-            .chain(computed.iter().copied())
+            .map(|(n, _)| n.to_string())
+            .chain(std::iter::once("id".to_string()))
+            .chain(computed.iter().cloned())
             .collect();
         v.sort_unstable();
+        v.dedup();
         v.into_iter().map(|n| format!("  {n}")).collect::<Vec<_>>()
     };
     let mut out = vec!["Item fields:".to_string()];
-    out.extend(names(
-        ITEM_FIELDS,
-        &["singleton", "filesize", "has_cover_art"],
-    ));
+    let mut item_computed: Vec<String> = ["singleton", "filesize", "has_cover_art"]
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+    item_computed.extend(inline(Kind::Item));
+    out.extend(names(ITEM_FIELDS, &item_computed));
     out.push("Album fields:".into());
-    let mut album_computed = vec!["path", "albumtotal"];
-    album_computed.extend(
-        crate::formatted::env()
-            .album_template_fields
-            .iter()
-            .copied(),
-    );
+    let mut album_computed: Vec<String> = vec!["path".into(), "albumtotal".into()];
+    album_computed.extend(env.album_template_fields.iter().map(|s| s.to_string()));
+    album_computed.extend(inline(Kind::Album));
     out.extend(names(ALBUM_FIELDS, &album_computed));
     for (title, kind) in [("Item", Kind::Item), ("Album", Kind::Album)] {
         out.push(format!("{title} flexible attributes:"));

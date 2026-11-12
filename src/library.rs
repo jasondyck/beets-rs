@@ -42,8 +42,10 @@ fn obj_of<'a>(
     r: &'a Record,
     albums: &'a HashMap<i64, Album>,
     dirs: &'a HashMap<i64, PathBuf>,
+    lib: &'a Library,
 ) -> crate::query::Obj<'a> {
     crate::query::Obj {
+        lib: Some(lib),
         rec: r,
         album: match kind {
             Kind::Item => albums.get(&r.int("album_id")),
@@ -1022,12 +1024,12 @@ impl Library {
             Kind::Item => HashMap::new(),
         };
         if clause.is_none() {
-            recs.retain(|r| q.matches_obj(&obj_of(kind, r, &albums, &dirs)));
+            recs.retain(|r| q.matches_obj(&obj_of(kind, r, &albums, &dirs, self)));
         }
         if sort.is_slow() {
             let objs: Vec<_> = recs
                 .iter()
-                .map(|r| obj_of(kind, r, &albums, &dirs))
+                .map(|r| obj_of(kind, r, &albums, &dirs, self))
                 .collect();
             let order = sort.sort_slow(&objs);
             drop(objs);

@@ -305,6 +305,10 @@ edit:
     itemfields: track title artist album
     ignore_fields: id path
 
+pathfields: {}
+item_fields: {}
+album_fields: {}
+
 musicbrainz:
     host: musicbrainz.org
     https: no
@@ -382,6 +386,10 @@ const PLUGIN_SECTIONS: &[&str] = &[
     "scrub",
     "edit",
 ];
+
+/// Plugins whose defaults are top-level keys (beets' `config.add`).
+const PLUGIN_TOP_KEYS: &[(&str, &[&str])] =
+    &[("inline", &["pathfields", "item_fields", "album_fields"])];
 
 /// confuse's `ConfigReadError`: "PATH could not be read: REASON".
 fn read_yaml(file: &Path) -> Result<Y> {
@@ -586,6 +594,14 @@ impl Config {
             for p in PLUGIN_SECTIONS.iter().filter(|p| enabled(p)) {
                 if let Some(v) = defaults.get(*p) {
                     base.insert(Y::String(p.to_string()), v.clone());
+                }
+            }
+            for (p, keys) in PLUGIN_TOP_KEYS.iter().filter(|(p, _)| enabled(p)) {
+                let _ = p;
+                for k in *keys {
+                    if let Some(v) = defaults.get(*k) {
+                        base.insert(Y::String(k.to_string()), v.clone());
+                    }
                 }
             }
             // The user's keys first, then the plugin defaults they leave
