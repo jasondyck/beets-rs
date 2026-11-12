@@ -300,6 +300,11 @@ ftintitle:
 scrub:
     auto: yes
 
+edit:
+    albumfields: album albumartist
+    itemfields: track title artist album
+    ignore_fields: id path
+
 musicbrainz:
     host: musicbrainz.org
     https: no
@@ -375,6 +380,7 @@ const PLUGIN_SECTIONS: &[&str] = &[
     "chroma",
     "ftintitle",
     "scrub",
+    "edit",
 ];
 
 /// confuse's `ConfigReadError`: "PATH could not be read: REASON".

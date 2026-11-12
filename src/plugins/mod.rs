@@ -4,6 +4,7 @@
 
 pub mod art;
 pub mod chroma;
+pub mod edit;
 pub mod embedart;
 pub mod fetchart;
 pub mod ftintitle;
@@ -90,6 +91,19 @@ pub trait Plugin {
     /// with a task while autotagging; `asis` for "Use as-is".
     fn import_task_choice(&self, _asis: bool) {}
 
+    /// beets' `before_choose_candidate`: extra choices for the importer's
+    /// prompt (after the built-in ones).
+    fn prompt_choices(&self, _task: &ChoiceTask) -> Vec<PromptChoice> {
+        vec![]
+    }
+
+    /// One of this plugin's prompt choices was picked. True for beets'
+    /// `Action.RETAG` (import the task's items, as the callback left them,
+    /// as tagged); false goes back to the prompt.
+    fn run_prompt_choice(&self, _short: char, _task: &mut ChoiceTask) -> Result<bool> {
+        Ok(false)
+    }
+
     /// beets' `import_task_apply`: a match was applied to the task's items
     /// (before they're added to the library).
     fn import_task_apply(&self, _ctx: &PluginCtx, _task: &mut ImportTask) -> Result<()> {
@@ -99,6 +113,7 @@ pub trait Plugin {
 
 pub const AVAILABLE: &[&str] = &[
     "chroma",
+    "edit",
     "embedart",
     "fetchart",
     "ftintitle",
@@ -146,6 +161,7 @@ pub fn load(cfg: &Config) -> Result<Vec<Box<dyn Plugin>>> {
             "info" => out.push(Box::new(info::InfoPlugin)),
             "ftintitle" => out.push(Box::new(ftintitle::FtInTitle::new(cfg))),
             "scrub" => out.push(Box::new(scrub::Scrub::new(cfg))),
+            "edit" => out.push(Box::new(edit::EditPlugin::new(cfg))),
             "missing" => out.push(Box::new(missing::MissingPlugin)),
             // Also a metadata source: its lookups and candidates are wired
             // into `MbSource` and `autotag` (see the module docs).
@@ -272,4 +288,61 @@ pub fn feat_tokens(for_artist: bool, custom_words: &[String]) -> String {
     let bracketed = format!(r"(?:(?<=\s)|^)(?:\(|\[)(?:{tokens})(?=\s)");
     let plain = format!(r"(?<=[\s(\[])(?:{tokens})(?=\s)");
     format!("(?:{bracketed}|{plain})")
+}
+
+/// A plugin's choice at the importer prompt (beets' `PromptChoice`).
+#[derive(Debug, Clone, PartialEq)]
+pub struct PromptChoice {
+    pub short: char,
+    pub long: &'static str,
+}
+
+/// What a prompt choice's callback sees of the import task.
+pub struct ChoiceTask<'t> {
+    pub cfg: &'t Config,
+    pub is_album: bool,
+    /// The task's items, which the callback may change.
+    pub items: &'t mut Vec<Item>,
+    /// How many candidates there are.
+    pub candidates: usize,
+    /// The candidate on screen (beets' `task.selected_match`), 0-based.
+    pub selected: Option<usize>,
+    /// beets' `task.match = candidates[n]; task.apply_metadata()`.
+    pub apply_candidate: &'t dyn Fn(usize, &mut Vec<Item>),
+}
+
+/// beets' `_get_choices`: the plugins' prompt choices, each with the index
+/// of its plugin; those whose letter is taken (by a built-in choice, given
+/// by its long name in `builtin`, or an earlier plugin's) are dropped with
+/// beets' warning.
+pub fn prompt_choices(
+    plugins: &[Box<dyn Plugin>],
+    task: &ChoiceTask,
+    builtin: &[&'static str],
+) -> Vec<(usize, PromptChoice)> {
+    let letter = |long: &str| {
+        long.chars()
+            .find(|c| c.is_uppercase())
+            .unwrap_or_else(|| long.chars().next().unwrap_or(' '))
+            .to_ascii_lowercase()
+    };
+    let mut taken: Vec<(char, &str)> = std::iter::once("Apply")
+        .chain(builtin.iter().copied())
+        .map(|l| (letter(l), l))
+        .collect();
+    let mut out = vec![];
+    for (i, p) in plugins.iter().enumerate() {
+        for c in p.prompt_choices(task) {
+            if let Some((_, first)) = taken.iter().find(|(l, _)| *l == c.short) {
+                crate::logging::emit(format!(
+                    "Prompt choice '{}' removed due to conflict with '{first}' (short letter: '{}')",
+                    c.long, c.short
+                ));
+                continue;
+            }
+            taken.push((c.short, c.long));
+            out.push((i, c));
+        }
+    }
+    out
 }

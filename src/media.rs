@@ -439,7 +439,8 @@ pub fn refresh_mtime(item: &mut Item) {
     if let Ok(m) = std::fs::metadata(item.path()).and_then(|m| m.modified()) {
         let ts = m
             .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_secs_f64())
+            // beets' `current_mtime`: whole seconds.
+            .map(|d| d.as_secs() as f64)
             .unwrap_or(0.0);
         item.set("mtime", Value::Float(ts));
     }

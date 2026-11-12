@@ -1,0 +1,3161 @@
+{
+"dump": [
+[
+[
+{
+"map": [
+[
+{
+"str": "title"
+},
+{
+"str": ""
+}
+],
+[
+{
+"str": "id"
+},
+{
+"int": "1"
+}
+]
+]
+}
+],
+"id: 1\ntitle: ''\n"
+],
+[
+[
+{
+"map": [
+[
+{
+"str": "title"
+},
+{
+"str": "plain"
+}
+],
+[
+{
+"str": "id"
+},
+{
+"int": "1"
+}
+]
+]
+}
+],
+"id: 1\ntitle: plain\n"
+],
+[
+[
+{
+"map": [
+[
+{
+"str": "title"
+},
+{
+"str": "yes"
+}
+],
+[
+{
+"str": "id"
+},
+{
+"int": "1"
+}
+]
+]
+}
+],
+"id: 1\ntitle: 'yes'\n"
+],
+[
+[
+{
+"map": [
+[
+{
+"str": "title"
+},
+{
+"str": "No"
+}
+],
+[
+{
+"str": "id"
+},
+{
+"int": "1"
+}
+]
+]
+}
+],
+"id: 1\ntitle: 'No'\n"
+],
+[
+[
+{
+"map": [
+[
+{
+"str": "title"
+},
+{
+"str": "on"
+}
+],
+[
+{
+"str": "id"
+},
+{
+"int": "1"
+}
+]
+]
+}
+],
+"id: 1\ntitle: 'on'\n"
+],
+[
+[
+{
+"map": [
+[
+{
+"str": "title"
+},
+{
+"str": "null"
+}
+],
+[
+{
+"str": "id"
+},
+{
+"int": "1"
+}
+]
+]
+}
+],
+"id: 1\ntitle: 'null'\n"
+],
+[
+[
+{
+"map": [
+[
+{
+"str": "title"
+},
+{
+"str": "~"
+}
+],
+[
+{
+"str": "id"
+},
+{
+"int": "1"
+}
+]
+]
+}
+],
+"id: 1\ntitle: '~'\n"
+],
+[
+[
+{
+"map": [
+[
+{
+"str": "title"
+},
+{
+"str": "123"
+}
+],
+[
+{
+"str": "id"
+},
+{
+"int": "1"
+}
+]
+]
+}
+],
+"id: 1\ntitle: '123'\n"
+],
+[
+[
+{
+"map": [
+[
+{
+"str": "title"
+},
+{
+"str": "1.5"
+}
+],
+[
+{
+"str": "id"
+},
+{
+"int": "1"
+}
+]
+]
+}
+],
+"id: 1\ntitle: '1.5'\n"
+],
+[
+[
+{
+"map": [
+[
+{
+"str": "title"
+},
+{
+"str": "0x1f"
+}
+],
+[
+{
+"str": "id"
+},
+{
+"int": "1"
+}
+]
+]
+}
+],
+"id: 1\ntitle: '0x1f'\n"
+],
+[
+[
+{
+"map": [
+[
+{
+"str": "title"
+},
+{
+"str": "017"
+}
+],
+[
+{
+"str": "id"
+},
+{
+"int": "1"
+}
+]
+]
+}
+],
+"id: 1\ntitle: '017'\n"
+],
+[
+[
+{
+"map": [
+[
+{
+"str": "title"
+},
+{
+"str": "1_000"
+}
+],
+[
+{
+"str": "id"
+},
+{
+"int": "1"
+}
+]
+]
+}
+],
+"id: 1\ntitle: '1_000'\n"
+],
+[
+[
+{
+"map": [
+[
+{
+"str": "title"
+},
+{
+"str": "2020-01-01"
+}
+],
+[
+{
+"str": "id"
+},
+{
+"int": "1"
+}
+]
+]
+}
+],
+"id: 1\ntitle: '2020-01-01'\n"
+],
+[
+[
+{
+"map": [
+[
+{
+"str": "title"
+},
+{
+"str": "2020-01-01 10:00:00"
+}
+],
+[
+{
+"str": "id"
+},
+{
+"int": "1"
+}
+]
+]
+}
+],
+"id: 1\ntitle: '2020-01-01 10:00:00'\n"
+],
+[
+[
+{
+"map": [
+[
+{
+"str": "title"
+},
+{
+"str": "-"
+}
+],
+[
+{
+"str": "id"
+},
+{
+"int": "1"
+}
+]
+]
+}
+],
+"id: 1\ntitle: '-'\n"
+],
+[
+[
+{
+"map": [
+[
+{
+"str": "title"
+},
+{
+"str": "- x"
+}
+],
+[
+{
+"str": "id"
+},
+{
+"int": "1"
+}
+]
+]
+}
+],
+"id: 1\ntitle: '- x'\n"
+],
+[
+[
+{
+"map": [
+[
+{
+"str": "title"
+},
+{
+"str": "a: b"
+}
+],
+[
+{
+"str": "id"
+},
+{
+"int": "1"
+}
+]
+]
+}
+],
+"id: 1\ntitle: 'a: b'\n"
+],
+[
+[
+{
+"map": [
+[
+{
+"str": "title"
+},
+{
+"str": "a #b"
+}
+],
+[
+{
+"str": "id"
+},
+{
+"int": "1"
+}
+]
+]
+}
+],
+"id: 1\ntitle: 'a #b'\n"
+],
+[
+[
+{
+"map": [
+[
+{
+"str": "title"
+},
+{
+"str": "#c"
+}
+],
+[
+{
+"str": "id"
+},
+{
+"int": "1"
+}
+]
+]
+}
+],
+"id: 1\ntitle: '#c'\n"
+],
+[
+[
+{
+"map": [
+[
+{
+"str": "title"
+},
+{
+"str": "x:"
+}
+],
+[
+{
+"str": "id"
+},
+{
+"int": "1"
+}
+]
+]
+}
+],
+"id: 1\ntitle: 'x:'\n"
+],
+[
+[
+{
+"map": [
+[
+{
+"str": "title"
+},
+{
+"str": ":x"
+}
+],
+[
+{
+"str": "id"
+},
+{
+"int": "1"
+}
+]
+]
+}
+],
+"id: 1\ntitle: :x\n"
+],
+[
+[
+{
+"map": [
+[
+{
+"str": "title"
+},
+{
+"str": "'quoted'"
+}
+],
+[
+{
+"str": "id"
+},
+{
+"int": "1"
+}
+]
+]
+}
+],
+"id: 1\ntitle: '''quoted'''\n"
+],
+[
+[
+{
+"map": [
+[
+{
+"str": "title"
+},
+{
+"str": "\"dq\""
+}
+],
+[
+{
+"str": "id"
+},
+{
+"int": "1"
+}
+]
+]
+}
+],
+"id: 1\ntitle: '\"dq\"'\n"
+],
+[
+[
+{
+"map": [
+[
+{
+"str": "title"
+},
+{
+"str": "trailing "
+}
+],
+[
+{
+"str": "id"
+},
+{
+"int": "1"
+}
+]
+]
+}
+],
+"id: 1\ntitle: 'trailing '\n"
+],
+[
+[
+{
+"map": [
+[
+{
+"str": "title"
+},
+{
+"str": " leading"
+}
+],
+[
+{
+"str": "id"
+},
+{
+"int": "1"
+}
+]
+]
+}
+],
+"id: 1\ntitle: ' leading'\n"
+],
+[
+[
+{
+"map": [
+[
+{
+"str": "title"
+},
+{
+"str": "multi\nline"
+}
+],
+[
+{
+"str": "id"
+},
+{
+"int": "1"
+}
+]
+]
+}
+],
+"id: 1\ntitle: 'multi\n\n  line'\n"
+],
+[
+[
+{
+"map": [
+[
+{
+"str": "title"
+},
+{
+"str": "ends\n"
+}
+],
+[
+{
+"str": "id"
+},
+{
+"int": "1"
+}
+]
+]
+}
+],
+"id: 1\ntitle: 'ends\n\n  '\n"
+],
+[
+[
+{
+"map": [
+[
+{
+"str": "title"
+},
+{
+"str": "\ttab"
+}
+],
+[
+{
+"str": "id"
+},
+{
+"int": "1"
+}
+]
+]
+}
+],
+"id: 1\ntitle: \"\\ttab\"\n"
+],
+[
+[
+{
+"map": [
+[
+{
+"str": "title"
+},
+{
+"str": "tab\tin"
+}
+],
+[
+{
+"str": "id"
+},
+{
+"int": "1"
+}
+]
+]
+}
+],
+"id: 1\ntitle: \"tab\\tin\"\n"
+],
+[
+[
+{
+"map": [
+[
+{
+"str": "title"
+},
+{
+"str": "café ½ Ünïcödé"
+}
+],
+[
+{
+"str": "id"
+},
+{
+"int": "1"
+}
+]
+]
+}
+],
+"id: 1\ntitle: café ½ Ünïcödé\n"
+],
+[
+[
+{
+"map": [
+[
+{
+"str": "title"
+},
+{
+"str": "日本語"
+}
+],
+[
+{
+"str": "id"
+},
+{
+"int": "1"
+}
+]
+]
+}
+],
+"id: 1\ntitle: 日本語\n"
+],
+[
+[
+{
+"map": [
+[
+{
+"str": "title"
+},
+{
+"str": "emoji 🎵"
+}
+],
+[
+{
+"str": "id"
+},
+{
+"int": "1"
+}
+]
+]
+}
+],
+"id: 1\ntitle: emoji 🎵\n"
+],
+[
+[
+{
+"map": [
+[
+{
+"str": "title"
+},
+{
+"str": "\u0007bell"
+}
+],
+[
+{
+"str": "id"
+},
+{
+"int": "1"
+}
+]
+]
+}
+],
+"id: 1\ntitle: \"\\abell\"\n"
+],
+[
+[
+{
+"map": [
+[
+{
+"str": "title"
+},
+{
+"str": " nbsp"
+}
+],
+[
+{
+"str": "id"
+},
+{
+"int": "1"
+}
+]
+]
+}
+],
+"id: 1\ntitle:  nbsp\n"
+],
+[
+[
+{
+"map": [
+[
+{
+"str": "title"
+},
+{
+"str": "a b"
+}
+],
+[
+{
+"str": "id"
+},
+{
+"int": "1"
+}
+]
+]
+}
+],
+"id: 1\ntitle: 'a   b'\n"
+],
+[
+[
+{
+"map": [
+[
+{
+"str": "title"
+},
+{
+"str": "{brace}"
+}
+],
+[
+{
+"str": "id"
+},
+{
+"int": "1"
+}
+]
+]
+}
+],
+"id: 1\ntitle: '{brace}'\n"
+],
+[
+[
+{
+"map": [
+[
+{
+"str": "title"
+},
+{
+"str": "[bracket]"
+}
+],
+[
+{
+"str": "id"
+},
+{
+"int": "1"
+}
+]
+]
+}
+],
+"id: 1\ntitle: '[bracket]'\n"
+],
+[
+[
+{
+"map": [
+[
+{
+"str": "title"
+},
+{
+"str": "a,b"
+}
+],
+[
+{
+"str": "id"
+},
+{
+"int": "1"
+}
+]
+]
+}
+],
+"id: 1\ntitle: a,b\n"
+],
+[
+[
+{
+"map": [
+[
+{
+"str": "title"
+},
+{
+"str": "!bang"
+}
+],
+[
+{
+"str": "id"
+},
+{
+"int": "1"
+}
+]
+]
+}
+],
+"id: 1\ntitle: '!bang'\n"
+],
+[
+[
+{
+"map": [
+[
+{
+"str": "title"
+},
+{
+"str": "&amp"
+}
+],
+[
+{
+"str": "id"
+},
+{
+"int": "1"
+}
+]
+]
+}
+],
+"id: 1\ntitle: '&amp'\n"
+],
+[
+[
+{
+"map": [
+[
+{
+"str": "title"
+},
+{
+"str": "*star"
+}
+],
+[
+{
+"str": "id"
+},
+{
+"int": "1"
+}
+]
+]
+}
+],
+"id: 1\ntitle: '*star'\n"
+],
+[
+[
+{
+"map": [
+[
+{
+"str": "title"
+},
+{
+"str": "|pipe"
+}
+],
+[
+{
+"str": "id"
+},
+{
+"int": "1"
+}
+]
+]
+}
+],
+"id: 1\ntitle: '|pipe'\n"
+],
+[
+[
+{
+"map": [
+[
+{
+"str": "title"
+},
+{
+"str": ">gt"
+}
+],
+[
+{
+"str": "id"
+},
+{
+"int": "1"
+}
+]
+]
+}
+],
+"id: 1\ntitle: '>gt'\n"
+],
+[
+[
+{
+"map": [
+[
+{
+"str": "title"
+},
+{
+"str": "%pct"
+}
+],
+[
+{
+"str": "id"
+},
+{
+"int": "1"
+}
+]
+]
+}
+],
+"id: 1\ntitle: '%pct'\n"
+],
+[
+[
+{
+"map": [
+[
+{
+"str": "title"
+},
+{
+"str": "@at"
+}
+],
+[
+{
+"str": "id"
+},
+{
+"int": "1"
+}
+]
+]
+}
+],
+"id: 1\ntitle: '@at'\n"
+],
+[
+[
+{
+"map": [
+[
+{
+"str": "title"
+},
+{
+"str": "`tick"
+}
+],
+[
+{
+"str": "id"
+},
+{
+"int": "1"
+}
+]
+]
+}
+],
+"id: 1\ntitle: '`tick'\n"
+],
+[
+[
+{
+"map": [
+[
+{
+"str": "title"
+},
+{
+"str": "?q"
+}
+],
+[
+{
+"str": "id"
+},
+{
+"int": "1"
+}
+]
+]
+}
+],
+"id: 1\ntitle: ?q\n"
+],
+[
+[
+{
+"map": [
+[
+{
+"str": "title"
+},
+{
+"str": "? q"
+}
+],
+[
+{
+"str": "id"
+},
+{
+"int": "1"
+}
+]
+]
+}
+],
+"id: 1\ntitle: '? q'\n"
+],
+[
+[
+{
+"map": [
+[
+{
+"str": "title"
+},
+{
+"str": "="
+}
+],
+[
+{
+"str": "id"
+},
+{
+"int": "1"
+}
+]
+]
+}
+],
+"id: 1\ntitle: '='\n"
+],
+[
+[
+{
+"map": [
+[
+{
+"str": "title"
+},
+{
+"str": "<<"
+}
+],
+[
+{
+"str": "id"
+},
+{
+"int": "1"
+}
+]
+]
+}
+],
+"id: 1\ntitle: '<<'\n"
+],
+[
+[
+{
+"map": [
+[
+{
+"str": "title"
+},
+{
+"str": "back\\slash"
+}
+],
+[
+{
+"str": "id"
+},
+{
+"int": "1"
+}
+]
+]
+}
+],
+"id: 1\ntitle: back\\slash\n"
+],
+[
+[
+{
+"map": [
+[
+{
+"str": "title"
+},
+{
+"str": "100% pure $dollar"
+}
+],
+[
+{
+"str": "id"
+},
+{
+"int": "1"
+}
+]
+]
+}
+],
+"id: 1\ntitle: 100% pure $dollar\n"
+],
+[
+[
+{
+"map": [
+[
+{
+"str": "title"
+},
+{
+"str": "a,comma {brace}"
+}
+],
+[
+{
+"str": "id"
+},
+{
+"int": "1"
+}
+]
+]
+}
+],
+"id: 1\ntitle: a,comma {brace}\n"
+],
+[
+[
+{
+"map": [
+[
+{
+"str": "title"
+},
+{
+"str": "What? Now: <yes> | *star*"
+}
+],
+[
+{
+"str": "id"
+},
+{
+"int": "1"
+}
+]
+]
+}
+],
+"id: 1\ntitle: 'What? Now: <yes> | *star*'\n"
+],
+[
+[
+{
+"map": [
+[
+{
+"str": "title"
+},
+{
+"str": ".dotfile"
+}
+],
+[
+{
+"str": "id"
+},
+{
+"int": "1"
+}
+]
+]
+}
+],
+"id: 1\ntitle: .dotfile\n"
+],
+[
+[
+{
+"map": [
+[
+{
+"str": "title"
+},
+{
+"str": "..."
+}
+],
+[
+{
+"str": "id"
+},
+{
+"int": "1"
+}
+]
+]
+}
+],
+"id: 1\ntitle: '...'\n"
+],
+[
+[
+{
+"map": [
+[
+{
+"str": "title"
+},
+{
+"str": "---"
+}
+],
+[
+{
+"str": "id"
+},
+{
+"int": "1"
+}
+]
+]
+}
+],
+"id: 1\ntitle: '---'\n"
+],
+[
+[
+{
+"map": [
+[
+{
+"str": "title"
+},
+{
+"str": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+}
+],
+[
+{
+"str": "id"
+},
+{
+"int": "1"
+}
+]
+]
+}
+],
+"id: 1\ntitle: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n"
+],
+[
+[
+{
+"map": [
+[
+{
+"str": "title"
+},
+{
+"str": "word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word "
+}
+],
+[
+{
+"str": "id"
+},
+{
+"int": "1"
+}
+]
+]
+}
+],
+"id: 1\ntitle: 'word word word word word word word word word word word word word word word\n  word word word word word word word word word word word word word word word '\n"
+],
+[
+[
+{
+"map": [
+[
+{
+"str": "title"
+},
+{
+"str": "long yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy end"
+}
+],
+[
+{
+"str": "id"
+},
+{
+"int": "1"
+}
+]
+]
+}
+],
+"id: 1\ntitle: long yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy\n  end\n"
+],
+[
+[
+{
+"map": [
+[
+{
+"str": "title"
+},
+{
+"str": "Supercalifragilisticexpialidocious Supercalifragilisticexpialidocious Supercalifragilisticexpialidocious Supercalifragilisticexpialidocious Supercalifragilisticexpialidocious Supercalifragilisticexpialidocious Supercalifragilisticexpialidocious "
+}
+],
+[
+{
+"str": "id"
+},
+{
+"int": "1"
+}
+]
+]
+}
+],
+"id: 1\ntitle: 'Supercalifragilisticexpialidocious Supercalifragilisticexpialidocious Supercalifragilisticexpialidocious\n  Supercalifragilisticexpialidocious Supercalifragilisticexpialidocious Supercalifragilisticexpialidocious\n  Supercalifragilisticexpialidocious '\n"
+],
+[
+[
+{
+"map": [
+[
+{
+"str": "title"
+},
+{
+"str": "spaces  inside"
+}
+],
+[
+{
+"str": "id"
+},
+{
+"int": "1"
+}
+]
+]
+}
+],
+"id: 1\ntitle: spaces  inside\n"
+],
+[
+[
+{
+"map": [
+[
+{
+"str": "title"
+},
+{
+"str": "sp \n nl"
+}
+],
+[
+{
+"str": "id"
+},
+{
+"int": "1"
+}
+]
+]
+}
+],
+"id: 1\ntitle: \"sp \\n nl\"\n"
+],
+[
+[
+{
+"map": [
+[
+{
+"str": "title"
+},
+{
+"str": "\r\n"
+}
+],
+[
+{
+"str": "id"
+},
+{
+"int": "1"
+}
+]
+]
+}
+],
+"id: 1\ntitle: \"\\r\\n\"\n"
+],
+[
+[
+{
+"map": [
+[
+{
+"str": "title"
+},
+{
+"str": ""
+}
+],
+[
+{
+"str": "id"
+},
+{
+"int": "1"
+}
+]
+]
+}
+],
+"id: 1\ntitle: '  '\n"
+],
+[
+[
+{
+"map": [
+[
+{
+"str": "title"
+},
+{
+"str": "﻿bom"
+}
+],
+[
+{
+"str": "id"
+},
+{
+"int": "1"
+}
+]
+]
+}
+],
+"id: 1\ntitle: \"\\uFEFFbom\"\n"
+],
+[
+[
+{
+"map": [
+[
+{
+"str": "title"
+},
+{
+"str": "a\u0000b"
+}
+],
+[
+{
+"str": "id"
+},
+{
+"int": "1"
+}
+]
+]
+}
+],
+"id: 1\ntitle: \"a\\0b\"\n"
+],
+[
+[
+{
+"map": [
+[
+{
+"str": "v"
+},
+{
+"int": "0"
+}
+],
+[
+{
+"str": "id"
+},
+{
+"int": "2"
+}
+]
+]
+}
+],
+"id: 2\nv: 0\n"
+],
+[
+[
+{
+"map": [
+[
+{
+"str": "v"
+},
+{
+"int": "1"
+}
+],
+[
+{
+"str": "id"
+},
+{
+"int": "2"
+}
+]
+]
+}
+],
+"id: 2\nv: 1\n"
+],
+[
+[
+{
+"map": [
+[
+{
+"str": "v"
+},
+{
+"int": "-5"
+}
+],
+[
+{
+"str": "id"
+},
+{
+"int": "2"
+}
+]
+]
+}
+],
+"id: 2\nv: -5\n"
+],
+[
+[
+{
+"map": [
+[
+{
+"str": "v"
+},
+{
+"int": "2016"
+}
+],
+[
+{
+"str": "id"
+},
+{
+"int": "2"
+}
+]
+]
+}
+],
+"id: 2\nv: 2016\n"
+],
+[
+[
+{
+"map": [
+[
+{
+"str": "v"
+},
+{
+"int": "100000000000000000000"
+}
+],
+[
+{
+"str": "id"
+},
+{
+"int": "2"
+}
+]
+]
+}
+],
+"id: 2\nv: 100000000000000000000\n"
+],
+[
+[
+{
+"map": [
+[
+{
+"str": "v"
+},
+{
+"float": "0.0"
+}
+],
+[
+{
+"str": "id"
+},
+{
+"int": "2"
+}
+]
+]
+}
+],
+"id: 2\nv: 0.0\n"
+],
+[
+[
+{
+"map": [
+[
+{
+"str": "v"
+},
+{
+"float": "1.0"
+}
+],
+[
+{
+"str": "id"
+},
+{
+"int": "2"
+}
+]
+]
+}
+],
+"id: 2\nv: 1.0\n"
+],
+[
+[
+{
+"map": [
+[
+{
+"str": "v"
+},
+{
+"float": "-1.5"
+}
+],
+[
+{
+"str": "id"
+},
+{
+"int": "2"
+}
+]
+]
+}
+],
+"id: 2\nv: -1.5\n"
+],
+[
+[
+{
+"map": [
+[
+{
+"str": "v"
+},
+{
+"float": "3.14159"
+}
+],
+[
+{
+"str": "id"
+},
+{
+"int": "2"
+}
+]
+]
+}
+],
+"id: 2\nv: 3.14159\n"
+],
+[
+[
+{
+"map": [
+[
+{
+"str": "v"
+},
+{
+"float": "1e+16"
+}
+],
+[
+{
+"str": "id"
+},
+{
+"int": "2"
+}
+]
+]
+}
+],
+"id: 2\nv: 1.0e+16\n"
+],
+[
+[
+{
+"map": [
+[
+{
+"str": "v"
+},
+{
+"float": "1e-05"
+}
+],
+[
+{
+"str": "id"
+},
+{
+"int": "2"
+}
+]
+]
+}
+],
+"id: 2\nv: 1.0e-05\n"
+],
+[
+[
+{
+"map": [
+[
+{
+"str": "v"
+},
+{
+"float": "123456.789"
+}
+],
+[
+{
+"str": "id"
+},
+{
+"int": "2"
+}
+]
+]
+}
+],
+"id: 2\nv: 123456.789\n"
+],
+[
+[
+{
+"map": [
+[
+{
+"str": "v"
+},
+{
+"float": "1730000000.123456"
+}
+],
+[
+{
+"str": "id"
+},
+{
+"int": "2"
+}
+]
+]
+}
+],
+"id: 2\nv: 1730000000.123456\n"
+],
+[
+[
+{
+"map": [
+[
+{
+"str": "v"
+},
+{
+"float": "inf"
+}
+],
+[
+{
+"str": "id"
+},
+{
+"int": "2"
+}
+]
+]
+}
+],
+"id: 2\nv: .inf\n"
+],
+[
+[
+{
+"map": [
+[
+{
+"str": "v"
+},
+{
+"float": "-inf"
+}
+],
+[
+{
+"str": "id"
+},
+{
+"int": "2"
+}
+]
+]
+}
+],
+"id: 2\nv: -.inf\n"
+],
+[
+[
+{
+"map": [
+[
+{
+"str": "v"
+},
+{
+"bool": true
+}
+],
+[
+{
+"str": "id"
+},
+{
+"int": "2"
+}
+]
+]
+}
+],
+"id: 2\nv: true\n"
+],
+[
+[
+{
+"map": [
+[
+{
+"str": "v"
+},
+{
+"bool": false
+}
+],
+[
+{
+"str": "id"
+},
+{
+"int": "2"
+}
+]
+]
+}
+],
+"id: 2\nv: false\n"
+],
+[
+[
+{
+"map": [
+[
+{
+"str": "v"
+},
+{
+"none": 1
+}
+],
+[
+{
+"str": "id"
+},
+{
+"int": "2"
+}
+]
+]
+}
+],
+"id: 2\nv: null\n"
+],
+[
+[
+{
+"map": [
+[
+{
+"str": "v"
+},
+{
+"list": []
+}
+],
+[
+{
+"str": "id"
+},
+{
+"int": "2"
+}
+]
+]
+}
+],
+"id: 2\nv: []\n"
+],
+[
+[
+{
+"map": [
+[
+{
+"str": "v"
+},
+{
+"list": [
+{
+"str": "Rock"
+}
+]
+}
+],
+[
+{
+"str": "id"
+},
+{
+"int": "2"
+}
+]
+]
+}
+],
+"id: 2\nv:\n- Rock\n"
+],
+[
+[
+{
+"map": [
+[
+{
+"str": "v"
+},
+{
+"list": [
+{
+"str": "a"
+},
+{
+"str": "b; c"
+},
+{
+"str": "yes"
+}
+]
+}
+],
+[
+{
+"str": "id"
+},
+{
+"int": "2"
+}
+]
+]
+}
+],
+"id: 2\nv:\n- a\n- b; c\n- 'yes'\n"
+],
+[
+[
+{
+"map": [
+[
+{
+"str": "id"
+},
+{
+"int": "1"
+}
+],
+[
+{
+"str": "title"
+},
+{
+"str": "One"
+}
+],
+[
+{
+"str": "track"
+},
+{
+"int": "1"
+}
+],
+[
+{
+"str": "genres"
+},
+{
+"list": [
+{
+"str": "Rock"
+},
+{
+"str": "Pop"
+}
+]
+}
+]
+]
+},
+{
+"map": [
+[
+{
+"str": "id"
+},
+{
+"int": "2"
+}
+],
+[
+{
+"str": "title"
+},
+{
+"str": "Two"
+}
+],
+[
+{
+"str": "artist"
+},
+{
+"str": "B"
+}
+],
+[
+{
+"str": "album"
+},
+{
+"none": 1
+}
+]
+]
+},
+{
+"map": [
+[
+{
+"str": "album"
+},
+{
+"str": "Hdr"
+}
+]
+]
+}
+],
+"genres:\n- Rock\n- Pop\nid: 1\ntitle: One\ntrack: 1\n---\nalbum: null\nartist: B\nid: 2\ntitle: Two\n---\nalbum: Hdr\n"
+],
+[
+[
+{
+"map": [
+[
+{
+"str": "b"
+},
+{
+"int": "1"
+}
+],
+[
+{
+"str": "a"
+},
+{
+"int": "1"
+}
+],
+[
+{
+"str": "yes"
+},
+{
+"int": "1"
+}
+],
+[
+{
+"str": "1"
+},
+{
+"int": "1"
+}
+],
+[
+{
+"str": "B"
+},
+{
+"int": "1"
+}
+]
+]
+}
+],
+"'1': 1\nB: 1\na: 1\nb: 1\n'yes': 1\n"
+]
+],
+"load": [
+[
+"id: 1\ntitle: x\n",
+{
+"docs": [
+{
+"map": [
+[
+{
+"str": "id"
+},
+{
+"int": "1"
+}
+],
+[
+{
+"str": "title"
+},
+{
+"str": "x"
+}
+]
+]
+}
+]
+}
+],
+[
+"a: yes\nb: No\nc: on\nd: OFF\n",
+{
+"docs": [
+{
+"map": [
+[
+{
+"str": "a"
+},
+{
+"bool": true
+}
+],
+[
+{
+"str": "b"
+},
+{
+"bool": false
+}
+],
+[
+{
+"str": "c"
+},
+{
+"bool": true
+}
+],
+[
+{
+"str": "d"
+},
+{
+"bool": false
+}
+]
+]
+}
+]
+}
+],
+[
+"a: 0x1F\nb: 017\nc: 1_000\nd: 0b101\ne: 1:30\n",
+{
+"docs": [
+{
+"map": [
+[
+{
+"str": "a"
+},
+{
+"int": "31"
+}
+],
+[
+{
+"str": "b"
+},
+{
+"int": "15"
+}
+],
+[
+{
+"str": "c"
+},
+{
+"int": "1000"
+}
+],
+[
+{
+"str": "d"
+},
+{
+"int": "5"
+}
+],
+[
+{
+"str": "e"
+},
+{
+"int": "90"
+}
+]
+]
+}
+]
+}
+],
+[
+"a: 1.5\nb: .inf\nc: -.Inf\nd: 1e5\ne: 1.0e+5\nf: 1_0.5\n",
+{
+"docs": [
+{
+"map": [
+[
+{
+"str": "a"
+},
+{
+"float": "1.5"
+}
+],
+[
+{
+"str": "b"
+},
+{
+"float": "inf"
+}
+],
+[
+{
+"str": "c"
+},
+{
+"float": "-inf"
+}
+],
+[
+{
+"str": "d"
+},
+{
+"str": "1e5"
+}
+],
+[
+{
+"str": "e"
+},
+{
+"float": "100000.0"
+}
+],
+[
+{
+"str": "f"
+},
+{
+"float": "10.5"
+}
+]
+]
+}
+]
+}
+],
+[
+"a: ~\nb: null\nc:\n",
+{
+"docs": [
+{
+"map": [
+[
+{
+"str": "a"
+},
+{
+"none": 1
+}
+],
+[
+{
+"str": "b"
+},
+{
+"none": 1
+}
+],
+[
+{
+"str": "c"
+},
+{
+"none": 1
+}
+]
+]
+}
+]
+}
+],
+[
+"a: 2020-01-01\nb: 2020-01-01 10:00:00\nc: 2020-1-2T03:04:05.5Z\nd: 2001-12-14 21:59:43.10 -5\n",
+{
+"docs": [
+{
+"map": [
+[
+{
+"str": "a"
+},
+{
+"ts": "2020-01-01"
+}
+],
+[
+{
+"str": "b"
+},
+{
+"ts": "2020-01-01 10:00:00"
+}
+],
+[
+{
+"str": "c"
+},
+{
+"ts": "2020-01-02 03:04:05.500000+00:00"
+}
+],
+[
+{
+"str": "d"
+},
+{
+"ts": "2001-12-14 21:59:43.100000-05:00"
+}
+]
+]
+}
+]
+}
+],
+[
+"a: '123'\nb: \"yes\"\nc: !!str 12\nd: !!int '7'\n",
+{
+"docs": [
+{
+"map": [
+[
+{
+"str": "a"
+},
+{
+"str": "123"
+}
+],
+[
+{
+"str": "b"
+},
+{
+"str": "yes"
+}
+],
+[
+{
+"str": "c"
+},
+{
+"str": "12"
+}
+],
+[
+{
+"str": "d"
+},
+{
+"int": "7"
+}
+]
+]
+}
+]
+}
+],
+[
+"a: [1, two, 'three']\nb: {x: 1}\n",
+{
+"docs": [
+{
+"map": [
+[
+{
+"str": "a"
+},
+{
+"list": [
+{
+"int": "1"
+},
+{
+"str": "two"
+},
+{
+"str": "three"
+}
+]
+}
+],
+[
+{
+"str": "b"
+},
+{
+"map": [
+[
+{
+"str": "x"
+},
+{
+"int": "1"
+}
+]
+]
+}
+]
+]
+}
+]
+}
+],
+[
+"- 1\n- 2\n",
+{
+"docs": [
+{
+"list": [
+{
+"int": "1"
+},
+{
+"int": "2"
+}
+]
+}
+]
+}
+],
+[
+"just a string\n",
+{
+"docs": [
+{
+"str": "just a string"
+}
+]
+}
+],
+[
+"",
+{
+"docs": []
+}
+],
+[
+"---\n",
+{
+"docs": [
+{
+"none": 1
+}
+]
+}
+],
+[
+"a: 1\n---\nb: 2\n",
+{
+"docs": [
+{
+"map": [
+[
+{
+"str": "a"
+},
+{
+"int": "1"
+}
+]
+]
+},
+{
+"map": [
+[
+{
+"str": "b"
+},
+{
+"int": "2"
+}
+]
+]
+}
+]
+}
+],
+[
+"a: &x 5\nb: *x\n",
+{
+"docs": [
+{
+"map": [
+[
+{
+"str": "a"
+},
+{
+"int": "5"
+}
+],
+[
+{
+"str": "b"
+},
+{
+"int": "5"
+}
+]
+]
+}
+]
+}
+],
+[
+"!MALFORMED",
+{
+"error": "could not determine a constructor for the tag '!MALFORMED'\n  in \"<unicode string>\", line 1, column 1:\n    !MALFORMED\n    ^"
+}
+],
+[
+"wellformed: yes, but invalid",
+{
+"docs": [
+{
+"map": [
+[
+{
+"str": "wellformed"
+},
+{
+"str": "yes, but invalid"
+}
+]
+]
+}
+]
+}
+],
+[
+"a: [1, 2\n",
+{
+"error": "while parsing a flow sequence\n  in \"<unicode string>\", line 1, column 4:\n    a: [1, 2\n       ^\nexpected ',' or ']', but got '<stream end>'\n  in \"<unicode string>\", line 2, column 1:\n    \n    ^"
+}
+],
+[
+"a: b: c\n",
+{
+"error": "mapping values are not allowed here\n  in \"<unicode string>\", line 1, column 5:\n    a: b: c\n        ^"
+}
+],
+[
+"a:\n  - x\n - y\n",
+{
+"error": "while parsing a block mapping\n  in \"<unicode string>\", line 1, column 1:\n    a:\n    ^\nexpected <block end>, but found '<block sequence start>'\n  in \"<unicode string>\", line 3, column 2:\n     - y\n     ^"
+}
+],
+[
+"\"unterminated\n",
+{
+"error": "while scanning a quoted scalar\n  in \"<unicode string>\", line 1, column 1:\n    \"unterminated\n    ^\nfound unexpected end of stream\n  in \"<unicode string>\", line 2, column 1:\n    \n    ^"
+}
+],
+[
+"a: 1\na: 2\n",
+{
+"docs": [
+{
+"map": [
+[
+{
+"str": "a"
+},
+{
+"int": "2"
+}
+]
+]
+}
+]
+}
+],
+[
+"1: x\ntrue: y\n~: z\n",
+{
+"docs": [
+{
+"map": [
+[
+{
+"int": "1"
+},
+{
+"str": "y"
+}
+],
+[
+{
+"none": 1
+},
+{
+"str": "z"
+}
+]
+]
+}
+]
+}
+],
+[
+"a: !!binary aGVsbG8=\n",
+{
+"docs": [
+{
+"map": [
+[
+{
+"str": "a"
+},
+{
+"bytes": "68656c6c6f"
+}
+]
+]
+}
+]
+}
+],
+[
+"a: !foo bar\n",
+{
+"error": "could not determine a constructor for the tag '!foo'\n  in \"<unicode string>\", line 1, column 4:\n    a: !foo bar\n       ^"
+}
+],
+[
+"a: *nope\n",
+{
+"error": "found undefined alias 'nope'\n  in \"<unicode string>\", line 1, column 4:\n    a: *nope\n       ^"
+}
+],
+[
+"{a: 1}: x\n",
+{
+"error": "while constructing a mapping\nfound unhashable key\n  in \"<unicode string>\", line 1, column 1:\n    {a: 1}: x\n    ^"
+}
+],
+[
+"x: |\n  lit\n  block\n",
+{
+"docs": [
+{
+"map": [
+[
+{
+"str": "x"
+},
+{
+"str": "lit\nblock\n"
+}
+]
+]
+}
+]
+}
+],
+[
+"x: >\n  folded\n  text\n",
+{
+"docs": [
+{
+"map": [
+[
+{
+"str": "x"
+},
+{
+"str": "folded text\n"
+}
+]
+]
+}
+]
+}
+],
+[
+"title: 'it''s'\n",
+{
+"docs": [
+{
+"map": [
+[
+{
+"str": "title"
+},
+{
+"str": "it's"
+}
+]
+]
+}
+]
+}
+],
+[
+"x: \"\\u00e9\\n\"\n",
+{
+"docs": [
+{
+"map": [
+[
+{
+"str": "x"
+},
+{
+"str": "é\n"
+}
+]
+]
+}
+]
+}
+],
+[
+"a\tb: 1\n",
+{
+"error": "while scanning for the next token\nfound character '\\t' that cannot start any token\n  in \"<unicode string>\", line 1, column 2:\n    a\tb: 1\n     ^"
+}
+],
+[
+"- [a, b]\n- {c: d}\n",
+{
+"docs": [
+{
+"list": [
+{
+"list": [
+{
+"str": "a"
+},
+{
+"str": "b"
+}
+]
+},
+{
+"map": [
+[
+{
+"str": "c"
+},
+{
+"str": "d"
+}
+]
+]
+}
+]
+}
+]
+}
+],
+[
+"key: value # comment\n",
+{
+"docs": [
+{
+"map": [
+[
+{
+"str": "key"
+},
+{
+"str": "value"
+}
+]
+]
+}
+]
+}
+],
+[
+"x: -\n",
+{
+"error": "sequence entries are not allowed here\n  in \"<unicode string>\", line 1, column 4:\n    x: -\n       ^"
+}
+],
+[
+"x: 1.0.0\n",
+{
+"docs": [
+{
+"map": [
+[
+{
+"str": "x"
+},
+{
+"str": "1.0.0"
+}
+]
+]
+}
+]
+}
+],
+[
+"x: 12:30:00\n",
+{
+"docs": [
+{
+"map": [
+[
+{
+"str": "x"
+},
+{
+"int": "45000"
+}
+]
+]
+}
+]
+}
+],
+[
+"x: +12\n",
+{
+"docs": [
+{
+"map": [
+[
+{
+"str": "x"
+},
+{
+"int": "12"
+}
+]
+]
+}
+]
+}
+],
+[
+"x: -0\n",
+{
+"docs": [
+{
+"map": [
+[
+{
+"str": "x"
+},
+{
+"int": "0"
+}
+]
+]
+}
+]
+}
+]
+]
+}
