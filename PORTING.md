@@ -56,8 +56,9 @@ config`, plugins fetchart / lyrics / embedart, release preferences.
 Done: fetchart (filesystem + CAA), lyrics (LRCLIB), embedart.
 
 - [x] **5.0 lyrics plugin parity with beets 2.14**: all backends 2.14 ships (lrclib, genius, tekstowo, musixmatch, google if present), `sources`, `synced`, `translate`, `keep_synced`, `dist_thresh`, `force`, `print`, `-l/-r` options; instrumental tracks as `lyrics=''` + `lyrics_instrumental=1`, `lyrics_backend`/`lyrics_url` flex fields (we still store `[Instrumental]` text, and new DBs mark the instrumental migration as done); back up before every unrecorded migration as beets does, not only data-changing ones
+- [x] **5.P Plugin import stages before file placement**: beets runs `early_import_stages` and `import_stages` (lastgenre, ftintitle, fetchart's fetch, zero...) before `manipulate_files` (beets/importer/session.py), so plugin changes affect destination paths and the first tag write; ours run after placement and re-write. Port the stage order and move existing plugins onto it
 - [x] **5.1 fetchart/embedart completion**: image resizing (`maxwidth`, `quality`, `max_filesize`), `minwidth`, `enforce_ratio`, `cautious`, `cover_format`, `store_source`; more sources (itunes, amazon, albumart, wikipedia, fanarttv, lastfm); embedart `maxwidth`, `compare_threshold`
-- [ ] **5.2 lastgenre**: Last.fm genre lookup with whitelist/canonicalization tree, `count`, `source`, `fallback`, `force`, `-a/-s`
+- [x] **5.2 lastgenre**: Last.fm genre lookup with whitelist/canonicalization tree, `count`, `source`, `fallback`, `force`, `-a/-s`
 - [ ] **5.3 chroma**: AcoustID fingerprinting via `fpcalc` (shell out), as an extra candidate source in import; `beet fingerprint`, `beet submit`
 - [ ] **5.4 replaygain**: ffmpeg backend (track + album gain, R128 for Opus), `beet replaygain [-a] [-f]`, `auto`, `targetlevel`, `overwrite`
 - [ ] **5.5 convert**: ffmpeg transcoding with `formats`, `format`, `dest`, `-k` keep new, `-t` threads, `-y`, `-p`, `no_convert`, `max_bitrate`, `auto` on import, `embed`, copy album art
@@ -65,7 +66,7 @@ Done: fetchart (filesystem + CAA), lyrics (LRCLIB), embedart.
 - [ ] **5.7 duplicates**: `beet duplicates [-a] [-c] [-k KEY] [-f FMT] [-d] [-m DEST] [-s] [-t TAG] [-p] [-F]`
 - [ ] **5.8 ftintitle**: move "feat. X" from artist to title, `drop`, `format`, `auto`
 - [ ] **5.9 edit**: edit metadata as YAML in `$EDITOR`, `--all`, `-f field`, `-e`; import prompt choices "edit" and "edit Candidates"
-- [ ] **5.10 info**: `beet info [-l] [-k] [-i field] PATH|QUERY`
+- [x] **5.10 info**: `beet info [-l] [-k] [-i field] PATH|QUERY`
 - [ ] **5.11 missing**: `beet missing [-c] [-t] [-a] [-f FMT]`
 - [ ] **5.12 mbsync**: `beet mbsync [-p] [-M] [-W] [-f]` re-fetching MusicBrainz metadata by ID
 - [ ] **5.13 the, zero**: `the` template function (`%the{}`, a/an options); `zero` (`fields`, `keep_fields`, per-field patterns, `update_database`, `beet zero`)

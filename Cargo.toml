@@ -23,6 +23,7 @@ lofty = "0.25.5"
 pathfinding = "4.16.0"
 reflink-copy = "0.1.32"
 regex = "1.13.1"
+roxmltree = "0.21"
 rusqlite = { version = "0.41.1", features = ["bundled", "functions"] }
 scraper = "0.29.0"
 serde = { version = "1.0.229", features = ["derive"] }

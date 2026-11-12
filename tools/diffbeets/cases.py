@@ -881,7 +881,33 @@ def cases():
             args = _query_args(q)
             out.append((f"-c {name} ls:{q}", ["-c", f"{ROOT}/{name}", "ls", *args]))
             out.append((f"-c {name} ls -a:{q}", ["-c", f"{ROOT}/{name}", "ls", "-a", *args]))
+    for args in INFO_ARGS:
+        out.append((f"info:{' '.join(args)}", ["-p", "info", "info", *args]))
     return out
+
+
+# info plugin: tags read from files (paths or queries), library values (-l,
+# -a), summaries, keys and formats. No added/mtime: they differ per tool.
+INFO_ARGS = [
+    [],
+    ["album:Every Format"],
+    ["album:Tag Zoo"],
+    ["-s", "album:Tag Zoo"],
+    ["-s", "album:Every Format"],
+    ["-k", "album:Tag Zoo"],
+    ["-i", "title,art,genre,genres,date,nope,images", "-i", "year,path", "album:Tag Zoo"],
+    ["-f", "$title $length $format $bitrate", "album:Every Format"],
+    ["--limit", "2", "album:Every Format"],
+    ["Format Artist/Every Format/01 Fmt mp3.mp3", "album:Tag Zoo"],
+    ["no-such-thing"],
+    ["-l", "-k", "album:Tag Zoo"],
+    ["-l", "-i", "title,artist,album,nope,format,length,path", "album:Every Format"],
+    ["-l", "-s", "-i", "title,album,albumartist,year,genres"],
+    ["-l", "-f", "$track. $title - $artist ($length)", "album:Every Format"],
+    ["-a", "-i", "album,albumartist,albumtotal,year,path,nope"],
+    ["-a", "-k", "album:Tag Zoo"],
+    ["-a", "-s", "-i", "albumartist,year"],
+]
 
 
 # ---------------------------------------------------------------------------
@@ -1118,6 +1144,24 @@ ART_CASES = [
      "{{fetchart: {{sources: [filesystem, cover_art_url], cautious: yes, "
      "fetch_for_asis: yes}}}}",
      [["import", "-A", "-q", "--set", "cover_art_url={url}/img/sq300.png", "{music}"], _LSA]),
+    # the import hooks: fetch_art is an import stage (albums only), assign_art
+    # and clearart_on_import listen to import_task_files, in plugin order
+    ("stage-singleton", "tracks", {"cover.jpg": "sq300.jpg"}, "",
+     [["import", "-A", "-q", "-s", "{music}"], ["ls"], _LSA]),
+    ("stage-reimport-has-art", "tracks", {"cover.jpg": "sq300.jpg", "front.png": "wide.png"}, "",
+     [_IMP, ["import", "-A", "-q", "-L"], _LSA]),
+    ("stage-reimport-art-gone", "tracks", {"cover.jpg": "sq300.jpg"},
+     "{{import: {{copy: no, move: yes}}}}",
+     [_IMP, ["import", "-A", "-q", "-L"], _LSA]),
+    ("files-fetchart-then-clearart", "tracks-art", {"cover.jpg": "sq300.jpg"},
+     "{{plugins: [fetchart, embedart], import: {{write: yes}}, "
+     "embedart: {{clearart_on_import: yes}}}}", [_IMP, _LSA]),
+    ("files-clearart-then-fetchart", "tracks-art", {"cover.jpg": "sq300.jpg"},
+     "{{plugins: [embedart, fetchart], import: {{write: yes}}, "
+     "embedart: {{clearart_on_import: yes}}}}", [_IMP, _LSA]),
+    ("files-move-clearart", "tracks-art", {"cover.jpg": "sq300.jpg"},
+     "{{plugins: [fetchart, embedart], import: {{write: yes, copy: no, move: yes}}, "
+     "embedart: {{clearart_on_import: yes}}}}", [_IMP, _LSA]),
     # embedart: automatic, on art_set
     ("embed-auto", "tracks", {"cover.jpg": "sq300.jpg"}, _EMBED, [_IMP]),
     ("embed-auto-nowrite", "tracks", {"cover.jpg": "sq300.jpg"},

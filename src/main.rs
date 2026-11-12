@@ -413,6 +413,61 @@ pub enum Cmd {
         #[arg(allow_hyphen_values = true)]
         query: Vec<String>,
     },
+    /// Fetch genres (plugin: lastgenre)
+    Lastgenre {
+        /// Show actions but do nothing
+        #[arg(short = 'p', long)]
+        pretend: bool,
+        /// Modify existing genres
+        #[arg(short = 'f', long, overrides_with = "no_force")]
+        force: bool,
+        /// Don't modify existing genres
+        #[arg(short = 'F', long, overrides_with = "force")]
+        no_force: bool,
+        /// Combine with existing genres when modifying
+        #[arg(short = 'k', long, overrides_with = "no_keep_existing")]
+        keep_existing: bool,
+        /// Don't combine with existing genres when modifying
+        #[arg(short = 'K', long, overrides_with = "keep_existing")]
+        no_keep_existing: bool,
+        /// Genre source: artist, album, or track
+        #[arg(short = 's', long, value_name = "SOURCE")]
+        source: Option<String>,
+        /// Match items instead of albums
+        #[arg(short = 'A', long, overrides_with = "albums")]
+        items: bool,
+        /// Match albums instead of items (default)
+        #[arg(short = 'a', long, overrides_with = "items")]
+        albums: bool,
+        #[arg(allow_hyphen_values = true)]
+        query: Vec<String>,
+    },
+    /// Show file metadata (plugin: info)
+    Info {
+        /// Match albums instead of tracks
+        #[arg(short = 'a', long)]
+        album: bool,
+        /// Show library fields instead of tags
+        #[arg(short = 'l', long)]
+        library: bool,
+        /// Summarize the tags of all files
+        #[arg(short = 's', long)]
+        summarize: bool,
+        /// Comma separated list of keys to show
+        #[arg(short = 'i', long = "include-keys", value_name = "INCLUDED_KEYS")]
+        included_keys: Vec<String>,
+        /// Show only the keys
+        #[arg(short = 'k', long = "keys-only")]
+        keys_only: bool,
+        /// Print with custom format
+        #[arg(short = 'f', long)]
+        format: Option<String>,
+        /// Limit query results
+        #[arg(long)]
+        limit: Option<usize>,
+        #[arg(allow_hyphen_values = true)]
+        args: Vec<String>,
+    },
     /// Set fields to null (plugin: zero)
     Zero {
         /// Limit query results
@@ -489,6 +544,10 @@ fn main() {
         // As beets: `invalid query: 'QUERY': EXPLANATION`.
         if let Some(q) = e.downcast_ref::<query::InvalidQueryError>() {
             eprintln!("invalid query: {q}");
+            std::process::exit(1);
+        }
+        if let Some(c) = e.downcast_ref::<config::ConfigError>() {
+            eprintln!("configuration error: {c}");
             std::process::exit(1);
         }
         eprintln!("error: {e:#}");

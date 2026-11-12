@@ -3,9 +3,8 @@
 //! the `embedart`, `extractart` and `clearart` commands.
 
 use super::art::{self, EmbedOpts};
-use super::{INFO, Plugin, PluginCtx, PluginLog, WARNING};
+use super::{INFO, ImportTask, Plugin, PluginCtx, PluginLog, WARNING};
 use crate::config::Config;
-use crate::fileops::FileOp;
 use crate::library::Library;
 use crate::model::Kind;
 use crate::model::{Album, Item, Value};
@@ -93,21 +92,9 @@ impl Plugin for EmbedArt {
         "embedart"
     }
 
-    fn album_imported(
-        &self,
-        ctx: &PluginCtx,
-        _album: &mut Album,
-        items: &mut [Item],
-        _source_dir: &Path,
-        _op: FileOp,
-        _asis: bool,
-    ) -> Result<()> {
-        self.clear_imported(ctx, items);
-        Ok(())
-    }
-
-    fn item_imported(&self, ctx: &PluginCtx, item: &mut Item) -> Result<()> {
-        self.clear_imported(ctx, std::slice::from_mut(item));
+    /// beets' `import_task_files` listener (with `clearart_on_import`).
+    fn import_task_files(&self, ctx: &PluginCtx, task: &mut ImportTask) -> Result<()> {
+        self.clear_imported(ctx, task.items);
         Ok(())
     }
 }
@@ -715,15 +702,14 @@ mod tests {
             env.embed(Some(&img), true);
             let ea = EmbedArt::new(&env.cfg);
             let mut items = env.items();
-            ea.album_imported(
-                &env.ctx(),
-                &mut album,
-                &mut items,
-                Path::new("/"),
-                FileOp::Copy,
-                false,
-            )
-            .unwrap();
+            let mut task = ImportTask {
+                album: Some(&mut album),
+                items: &mut items,
+                paths: &[],
+                asis: false,
+                op: crate::fileops::FileOp::Copy,
+            };
+            ea.import_task_files(&env.ctx(), &mut task).unwrap();
             assert_eq!(env.art(0).is_none(), on);
         }
     }

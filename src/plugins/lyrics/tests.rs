@@ -397,15 +397,15 @@ fn imported_skips_auto_ignored_items() {
         lib: &lib,
         write: false,
     };
-    p.album_imported(
-        &ctx,
-        &mut Album::new_album(),
-        &mut items,
-        Path::new("/"),
-        FileOp::Copy,
-        false,
-    )
-    .unwrap();
+    let mut album = Item::new_album();
+    let mut task = crate::plugins::ImportTask {
+        album: Some(&mut album),
+        items: &mut items,
+        paths: &[],
+        asis: false,
+        op: crate::fileops::FileOp::Copy,
+    };
+    p.import_stage(&ctx, &mut task).unwrap();
     assert_eq!(items[0].str("lyrics"), "");
     assert_eq!(items[1].str("lyrics"), "found");
     let searched: Vec<String> = s.requests().iter().map(|r| r.target.clone()).collect();

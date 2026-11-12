@@ -322,6 +322,31 @@ impl<'a> Formatted<'a> {
             .as_ref()
     }
 
+    /// The mapping's keys, sorted: the record's fields (fixed and
+    /// flexible) and computed fields and, for an item, its album's keys
+    /// (beets' `FormattedItemMapping.all_keys`).
+    pub fn all_keys(&self) -> Vec<String> {
+        let computed = |kind| match kind {
+            Kind::Item => ["singleton", "filesize", "has_cover_art"].as_slice(),
+            Kind::Album => ["path", "albumtotal"].as_slice(),
+        };
+        let with_computed = |rec: &Record| {
+            let mut keys = rec.keys();
+            keys.extend(computed(rec.kind).iter().map(|k| k.to_string()));
+            keys
+        };
+        let mut keys: std::collections::BTreeSet<String> =
+            with_computed(self.rec).into_iter().collect();
+        if let Some(a) = self.the_album() {
+            keys.extend(
+                with_computed(a)
+                    .into_iter()
+                    .filter(|k| self.album_key(a, k)),
+            );
+        }
+        keys.into_iter().collect()
+    }
+
     /// An album's items (for its computed fields).
     fn album_items(&self) -> &[Item] {
         self.items.get_or_init(|| match (self.lib, self.rec.id) {

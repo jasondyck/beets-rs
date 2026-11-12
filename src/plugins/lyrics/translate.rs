@@ -49,6 +49,7 @@ impl Translator {
                 headers: &[("Ocp-Apim-Subscription-Key", &self.api_key)],
                 json: Some(&body),
                 allow_redirects: true,
+                ..Default::default()
             },
         )?;
         let data: J = resp.json()?;

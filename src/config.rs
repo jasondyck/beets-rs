@@ -226,6 +226,23 @@ lyrics:
     # block requests with the beets user agent.
     sources: [lrclib, google, genius, lrcmux]
 
+lastgenre:
+    whitelist: yes
+    min_weight: 10
+    count: 1
+    fallback: null
+    canonical: no
+    cleanup_existing: no
+    source: album
+    force: no
+    keep_existing: no
+    auto: yes
+    prefer_specific: no
+    title_case: yes
+    pretend: no
+    ignorelist: {}
+    aliases: yes
+
 the:
     the: yes
     a: yes
@@ -260,6 +277,19 @@ musicbrainz:
     aliases_as_credits: no
 "#;
 
+/// confuse's `ConfigError`: a bad setting, reported as
+/// "configuration error: MESSAGE".
+#[derive(Debug)]
+pub struct ConfigError(pub String);
+
+impl std::fmt::Display for ConfigError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl std::error::Error for ConfigError {}
+
 #[derive(Debug, Clone)]
 pub struct Config {
     /// The effective configuration: defaults, then every source over them.
@@ -290,7 +320,7 @@ pub const REDACTED_KEYS: &[(&str, &str)] = &[
 /// Plugins whose default settings are in `DEFAULT_CONFIG`: beets adds a
 /// plugin's defaults when it loads, so `beet config` shows them for the
 /// enabled ones.
-const PLUGIN_SECTIONS: &[&str] = &["fetchart", "embedart", "lyrics", "the", "zero"];
+const PLUGIN_SECTIONS: &[&str] = &["fetchart", "embedart", "lyrics", "lastgenre", "the", "zero"];
 
 /// confuse's `ConfigReadError`: "PATH could not be read: REASON".
 fn read_yaml(file: &Path) -> Result<Y> {
