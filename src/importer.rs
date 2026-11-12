@@ -1839,7 +1839,7 @@ impl<'a> Importer<'a> {
         let lib = self.lib;
         let mut moved_in_library = false;
         let mut copied = vec![];
-        let mut album = lib.transaction(|lib| {
+        let added = lib.transaction(|lib| {
             let replaced = self.record_replaced(&items)?;
             self.remove_replaced(&replaced)?;
             let mut album = match graft {
@@ -1873,13 +1873,24 @@ impl<'a> Importer<'a> {
                 self.apply_set_fields(Some(&mut album), &mut items);
             }
             lib.store(&album)?;
+            for item in &items {
+                lib.store(item)?;
+            }
+            Ok((album, replaced))
+        })?;
+        let (mut album, replaced) = added;
+        let paths = [source_dir.to_path_buf()];
+        let op = self.opts.op;
+        self.run_plugin_stages(Some(&mut album), &mut items, &paths, !tagged)?;
+        // beets' `manipulate_files`.
+        lib.transaction(|lib| {
             for (item, dups) in items.iter_mut().zip(&replaced.items) {
                 let op = self.file_op(item, !dups.is_empty());
                 moved_in_library |= op == FileOp::Move && !dups.is_empty();
                 copied.extend(self.place_and_write(item, Some(&album), tagged, op)?);
                 lib.store(item)?;
             }
-            Ok(album)
+            Ok(())
         })?;
         if moved_in_library {
             // Kept art follows its reimported album, as beets' `Item.move`.
@@ -1889,18 +1900,70 @@ impl<'a> Importer<'a> {
             }
         }
         let ctx = self.plugin_ctx();
-        let op = self.opts.op;
-        plugins::each(self.plugins, |p| {
-            p.album_imported(&ctx, &mut album, &mut items, source_dir, op, !tagged)
-        });
+        let mut task = plugins::ImportTask {
+            album: Some(&mut album),
+            items: &mut items,
+            paths: &paths,
+            asis: !tagged,
+            op,
+        };
+        plugins::each(self.plugins, |p| p.import_task_files(&ctx, &mut task));
         self.delete_originals(&copied);
         if op == FileOp::Move
             && let Some(root) = self.roots.last()
         {
             prune_dirs(source_dir, root, &self.clutter);
         }
+        plugins::each(self.plugins, |p| p.album_imported(&ctx, &album));
         self.stats.albums += 1;
         self.stats.items += n;
+        Ok(())
+    }
+
+    /// beets' plugin stages (`plugin_stage`): every plugin's early import
+    /// stage, then every import stage, in the order the plugins are
+    /// listed, each followed by reloading the task from the library (as
+    /// `task.reload()`); between adding the task and placing its files.
+    fn run_plugin_stages(
+        &self,
+        mut album: Option<&mut Album>,
+        items: &mut [Item],
+        paths: &[PathBuf],
+        asis: bool,
+    ) -> Result<()> {
+        if self.plugins.is_empty() {
+            return Ok(());
+        }
+        let ctx = self.plugin_ctx();
+        for early in [true, false] {
+            for p in self.plugins {
+                let mut task = plugins::ImportTask {
+                    album: album.as_deref_mut(),
+                    items,
+                    paths,
+                    asis,
+                    op: self.opts.op,
+                };
+                let r = if early {
+                    p.early_import_stage(&ctx, &mut task)
+                } else {
+                    p.import_stage(&ctx, &mut task)
+                };
+                if let Err(e) = r {
+                    eprintln!("warning: {}: {e:#}", p.name());
+                }
+                for item in items.iter_mut() {
+                    if let Some(fresh) = self.lib.get_item(item.id.unwrap_or_default())? {
+                        *item = fresh;
+                    }
+                }
+                if let Some(a) = album.as_deref_mut()
+                    && let Some(fresh) = self.lib.get_album(a.id.unwrap_or_default())?
+                {
+                    *a = fresh;
+                }
+            }
+        }
         Ok(())
     }
 
@@ -2106,22 +2169,34 @@ impl<'a> Importer<'a> {
         }
         item.set_int("album_id", 0);
         let lib = self.lib;
-        let copied = lib.transaction(|lib| {
+        let replaced = lib.transaction(|lib| {
             let replaced = self.record_replaced(std::slice::from_ref(&item))?;
             self.remove_replaced(&replaced)?;
             self.reimport_metadata(None, std::slice::from_mut(&mut item), &replaced);
             self.apply_set_fields(None, std::slice::from_mut(&mut item));
-            let op = self.file_op(&item, !replaced.items[0].is_empty());
             // As beets: added before its files are placed, so the path
             // format sees the item's id (`%sunique`).
             lib.add(&mut item)?;
+            Ok(replaced)
+        })?;
+        let op = self.file_op(&item, !replaced.items[0].is_empty());
+        self.run_plugin_stages(None, std::slice::from_mut(&mut item), &paths, !tagged)?;
+        let copied = lib.transaction(|lib| {
             let copied = self.place_and_write(&mut item, None, tagged, op)?;
             lib.store(&item)?;
             Ok(copied)
         })?;
         let ctx = self.plugin_ctx();
-        plugins::each(self.plugins, |p| p.item_imported(&ctx, &mut item));
+        let mut task = plugins::ImportTask {
+            album: None,
+            items: std::slice::from_mut(&mut item),
+            paths: &paths,
+            asis: !tagged,
+            op: self.opts.op,
+        };
+        plugins::each(self.plugins, |p| p.import_task_files(&ctx, &mut task));
         self.delete_originals(copied.as_slice());
+        plugins::each(self.plugins, |p| p.item_imported(&ctx, &item));
         self.stats.items += 1;
         Ok(Outcome::Done)
     }
@@ -2855,6 +2930,156 @@ mod tests {
             }
         }
         Some(d)
+    }
+
+    /// A plugin recording when its hooks run and what they see.
+    struct Recorder {
+        seen: std::rc::Rc<std::cell::RefCell<Vec<String>>>,
+        name: &'static str,
+    }
+
+    impl Recorder {
+        fn log(&self, hook: &str, task: &plugins::ImportTask) {
+            let where_ = match task.items.first() {
+                Some(i) if i.path().components().any(|c| c.as_os_str() == "lib") => "lib",
+                Some(_) => "src",
+                None => "-",
+            };
+            let comment = task.items.first().map(|i| i.str("comments").to_string());
+            self.seen.borrow_mut().push(format!(
+                "{} {hook} {where_} {}",
+                self.name,
+                comment.unwrap_or_default()
+            ));
+        }
+    }
+
+    impl Plugin for Recorder {
+        fn name(&self) -> &'static str {
+            self.name
+        }
+        fn early_import_stage(&self, _: &PluginCtx, task: &mut plugins::ImportTask) -> Result<()> {
+            self.log("early", task);
+            Ok(())
+        }
+        fn import_stage(&self, ctx: &PluginCtx, task: &mut plugins::ImportTask) -> Result<()> {
+            self.log("stage", task);
+            if self.name == "first" {
+                // Stored changes survive the reload; unstored ones don't.
+                for item in task.items.iter_mut() {
+                    item.set_str("comments", "staged");
+                    ctx.lib.store(item)?;
+                    item.set_str("title", "lost");
+                }
+            }
+            Ok(())
+        }
+        fn import_task_files(&self, _: &PluginCtx, task: &mut plugins::ImportTask) -> Result<()> {
+            self.log("files", task);
+            Ok(())
+        }
+        fn album_imported(&self, _: &PluginCtx, _: &Album) -> Result<()> {
+            self.seen
+                .borrow_mut()
+                .push(format!("{} album_imported", self.name));
+            Ok(())
+        }
+        fn item_imported(&self, _: &PluginCtx, _: &Item) -> Result<()> {
+            self.seen
+                .borrow_mut()
+                .push(format!("{} item_imported", self.name));
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn plugin_stages_run_before_files_are_placed() {
+        for (singletons, threaded) in [(false, false), (false, true), (true, false), (true, true)] {
+            let (_d, mut cfg, lib, src) = setup(&[]);
+            if !make_mp3(&src.join("a"), "1.mp3", &[("title", "T")], 128) {
+                return;
+            }
+            cfg.set(
+                "paths",
+                serde_yaml::from_str(
+                    "{default: '$comments/$title', singleton: '$comments/$title'}",
+                )
+                .unwrap(),
+            );
+            let seen = std::rc::Rc::new(std::cell::RefCell::new(vec![]));
+            let plugins: Vec<Box<dyn Plugin>> = ["first", "second"]
+                .iter()
+                .map(|name| {
+                    Box::new(Recorder {
+                        seen: seen.clone(),
+                        name,
+                    }) as Box<dyn Plugin>
+                })
+                .collect();
+            let mut o = opts(&cfg);
+            o.op = FileOp::Copy;
+            o.singletons = singletons;
+            o.threaded = threaded;
+            let mut imp = Importer::new(&cfg, &lib, o, &plugins).unwrap();
+            imp.run(std::slice::from_ref(&src)).unwrap();
+            let event = if singletons {
+                "item_imported"
+            } else {
+                "album_imported"
+            };
+            assert_eq!(
+                *seen.borrow(),
+                [
+                    "first early src ",
+                    "second early src ",
+                    "first stage src ",
+                    "second stage src staged",
+                    "first files lib staged",
+                    "second files lib staged",
+                    &format!("first {event}"),
+                    &format!("second {event}"),
+                ]
+            );
+            let items = all_items(&lib);
+            assert_eq!(items[0].str("title"), "T");
+            assert!(
+                items[0].path().ends_with("lib/staged/T.mp3"),
+                "{}",
+                items[0].path().display()
+            );
+            assert!(items[0].path().is_file());
+        }
+    }
+
+    /// beets' lastgenre import stage runs before the files are placed, so
+    /// its genre is in the destination path.
+    #[test]
+    fn lastgenre_genre_is_in_the_destination() {
+        let (_d, mut cfg, lib, src) = setup(&[]);
+        // No artist or album: lastgenre looks nothing up and falls back.
+        if !make_mp3(&src.join("a"), "1.mp3", &[("title", "T")], 128) {
+            return;
+        }
+        cfg.set(
+            "paths",
+            serde_yaml::from_str("{default: '$genres/$title'}").unwrap(),
+        );
+        cfg.set("plugins", serde_yaml::from_str("[lastgenre]").unwrap());
+        cfg.set("lastgenre.fallback", "Fallback Genre".into());
+        let plugins = plugins::load(&cfg).unwrap();
+        let mut o = opts(&cfg);
+        o.op = FileOp::Copy;
+        let mut imp = Importer::new(&cfg, &lib, o, &plugins).unwrap();
+        imp.run(std::slice::from_ref(&src)).unwrap();
+        let items = all_items(&lib);
+        assert_eq!(items[0].list("genres"), ["Fallback Genre"]);
+        assert!(
+            items[0].path().ends_with("lib/Fallback Genre/T.mp3"),
+            "{}",
+            items[0].path().display()
+        );
+        let album = &lib.all_albums().unwrap()[0];
+        assert_eq!(album.list("genres"), ["Fallback Genre"]);
     }
 
     #[test]

@@ -1293,6 +1293,17 @@ fn items_mode_and_no_force() {
     );
 }
 
+fn stage(p: &LastGenre, ctx: &PluginCtx, a: &mut Album, items: &mut [Item]) {
+    let mut task = ImportTask {
+        album: Some(a),
+        items,
+        paths: &[],
+        asis: true,
+        op: crate::fileops::FileOp::Copy,
+    };
+    p.import_stage(ctx, &mut task).unwrap();
+}
+
 #[test]
 fn import_stage_updates_album_and_items() {
     let e = env();
@@ -1306,17 +1317,9 @@ fn import_stage_updates_album_and_items() {
     };
     let mut a = album.clone();
     let mut items = e.lib.album_items(album.id.unwrap()).unwrap();
-    p.album_imported(
-        &ctx,
-        &mut a,
-        &mut items,
-        Path::new("/x"),
-        FileOp::Copy,
-        false,
-    )
-    .unwrap();
+    stage(&p, &ctx, &mut a, &mut items);
     assert_eq!(a.list("genres"), ["Jazz"]);
-    assert_eq!(items[0].list("genres"), ["Jazz"]);
+    // The items are changed in the library; the importer reloads them.
     assert_eq!(
         e.lib.album_items(album.id.unwrap()).unwrap()[0].list("genres"),
         ["Jazz"]
@@ -1325,15 +1328,7 @@ fn import_stage_updates_album_and_items() {
     // `auto: no` turns the stage off.
     let mut p = served_plugin("{whitelist: no, auto: no, force: yes}");
     p.fetch_override = Some(Box::new(|_, _, _| s(&["Pop"])));
-    p.album_imported(
-        &ctx,
-        &mut a,
-        &mut items,
-        Path::new("/x"),
-        FileOp::Copy,
-        false,
-    )
-    .unwrap();
+    stage(&p, &ctx, &mut a, &mut items);
     assert_eq!(a.list("genres"), ["Jazz"]);
 }
 

@@ -1090,6 +1090,24 @@ ART_CASES = [
      "{{fetchart: {{sources: [filesystem, cover_art_url], cautious: yes, "
      "fetch_for_asis: yes}}}}",
      [["import", "-A", "-q", "--set", "cover_art_url={url}/img/sq300.png", "{music}"], _LSA]),
+    # the import hooks: fetch_art is an import stage (albums only), assign_art
+    # and clearart_on_import listen to import_task_files, in plugin order
+    ("stage-singleton", "tracks", {"cover.jpg": "sq300.jpg"}, "",
+     [["import", "-A", "-q", "-s", "{music}"], ["ls"], _LSA]),
+    ("stage-reimport-has-art", "tracks", {"cover.jpg": "sq300.jpg", "front.png": "wide.png"}, "",
+     [_IMP, ["import", "-A", "-q", "-L"], _LSA]),
+    ("stage-reimport-art-gone", "tracks", {"cover.jpg": "sq300.jpg"},
+     "{{import: {{copy: no, move: yes}}}}",
+     [_IMP, ["import", "-A", "-q", "-L"], _LSA]),
+    ("files-fetchart-then-clearart", "tracks-art", {"cover.jpg": "sq300.jpg"},
+     "{{plugins: [fetchart, embedart], import: {{write: yes}}, "
+     "embedart: {{clearart_on_import: yes}}}}", [_IMP, _LSA]),
+    ("files-clearart-then-fetchart", "tracks-art", {"cover.jpg": "sq300.jpg"},
+     "{{plugins: [embedart, fetchart], import: {{write: yes}}, "
+     "embedart: {{clearart_on_import: yes}}}}", [_IMP, _LSA]),
+    ("files-move-clearart", "tracks-art", {"cover.jpg": "sq300.jpg"},
+     "{{plugins: [fetchart, embedart], import: {{write: yes, copy: no, move: yes}}, "
+     "embedart: {{clearart_on_import: yes}}}}", [_IMP, _LSA]),
     # embedart: automatic, on art_set
     ("embed-auto", "tracks", {"cover.jpg": "sq300.jpg"}, _EMBED, [_IMP]),
     ("embed-auto-nowrite", "tracks", {"cover.jpg": "sq300.jpg"},

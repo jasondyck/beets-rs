@@ -8,7 +8,7 @@
 
 use super::art::{self, image_mime_type};
 use super::requests::{HttpError, Request, Response, Session, format_url};
-use super::{INFO, Plugin, PluginCtx, PluginLog, WARNING};
+use super::{INFO, ImportTask, Plugin, PluginCtx, PluginLog, WARNING};
 use crate::artresizer;
 use crate::config::Config;
 use crate::fileops::{FileOp, WalkFilter};
@@ -18,6 +18,8 @@ use crate::model::{Album, Item, Value};
 use crate::query::Query;
 use anyhow::{Result, bail};
 use serde_json::Value as J;
+use std::cell::RefCell;
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 /// `CONTENT_TYPES`: the image types fetchart accepts, with extensions.
@@ -645,6 +647,8 @@ pub struct FetchArt {
     pub sources: Vec<Source>,
     pub log: PluginLog,
     session: Session,
+    /// Art found by the import stage, by album id, for `assign_art`.
+    art_candidates: RefCell<HashMap<i64, Candidate>>,
 }
 
 impl FetchArt {
@@ -674,6 +678,7 @@ impl FetchArt {
             sources,
             log,
             session: Session::plain("beets"),
+            art_candidates: RefCell::new(HashMap::new()),
         })
     }
 
@@ -1741,24 +1746,35 @@ impl Plugin for FetchArt {
         "fetchart"
     }
 
-    fn album_imported(
-        &self,
-        ctx: &PluginCtx,
-        album: &mut Album,
-        _items: &mut [Item],
-        source_dir: &Path,
-        op: FileOp,
-        asis: bool,
-    ) -> Result<()> {
+    /// beets' `fetch_art` import stage: find art for an imported album.
+    fn import_stage(&self, ctx: &PluginCtx, task: &mut ImportTask) -> Result<()> {
         if !self.conf.auto {
             return Ok(());
         }
-        self.log.at_level(WARNING, || {
-            let paths = [source_dir.to_path_buf()];
-            if let Some(c) = self.fetch_art(ctx, album, &paths, asis) {
-                self.assign_art(ctx, album, &c, op);
-            }
+        let Some(album) = task.album.as_deref() else {
+            return Ok(());
+        };
+        let found = self.log.at_level(WARNING, || {
+            self.fetch_art(ctx, album, task.paths, task.asis)
         });
+        if let (Some(c), Some(id)) = (found, album.id) {
+            self.art_candidates.borrow_mut().insert(id, c);
+        }
+        Ok(())
+    }
+
+    /// beets' `assign_art`, on `import_task_files`: place the art found.
+    fn import_task_files(&self, ctx: &PluginCtx, task: &mut ImportTask) -> Result<()> {
+        let Some(album) = task.album.as_deref_mut() else {
+            return Ok(());
+        };
+        let found = album
+            .id
+            .and_then(|id| self.art_candidates.borrow_mut().remove(&id));
+        if let Some(c) = found {
+            self.log
+                .at_level(WARNING, || self.assign_art(ctx, album, &c, task.op));
+        }
         Ok(())
     }
 }

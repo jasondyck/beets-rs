@@ -17,11 +17,10 @@ pub mod text;
 pub mod translate;
 
 use super::requests::{HttpError, Request, Session, format_url};
-use super::{Plugin, PluginCtx};
+use super::{ImportTask, Plugin, PluginCtx};
 use crate::config::Config;
-use crate::fileops::FileOp;
 use crate::library::Library;
-use crate::model::{Album, Item, Kind};
+use crate::model::{Item, Kind};
 use crate::query::{Obj, Query};
 use crate::template::Template;
 use anyhow::Result;
@@ -30,7 +29,7 @@ use fancy_regex::Regex as FRegex;
 use serde_json::Value as J;
 use serde_yaml::Value as Y;
 use std::cell::{Cell, OnceCell};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use text::Lyrics;
 use translate::Translator;
 
@@ -517,13 +516,8 @@ impl LyricsPlugin {
                 {
                     continue;
                 }
-                if self.add_item_lyrics(ctx.lib, item, false)? && ctx.write {
-                    // beets writes imported files after its plugin stages.
-                    match crate::media::write_item(item) {
-                        Ok(()) => ctx.lib.store(item)?,
-                        Err(e) => crate::logging::emit(format!("{e:#}")),
-                    }
-                }
+                // The importer writes the files after its plugin stages.
+                self.add_item_lyrics(ctx.lib, item, false)?;
             }
             Ok(())
         })();
@@ -547,24 +541,9 @@ impl Plugin for LyricsPlugin {
         "lyrics"
     }
 
-    fn album_imported(
-        &self,
-        ctx: &PluginCtx,
-        _album: &mut Album,
-        items: &mut [Item],
-        _source_dir: &Path,
-        _op: FileOp,
-        _asis: bool,
-    ) -> Result<()> {
+    fn import_stage(&self, ctx: &PluginCtx, task: &mut ImportTask) -> Result<()> {
         if self.conf.auto {
-            self.imported(ctx, items)?;
-        }
-        Ok(())
-    }
-
-    fn item_imported(&self, ctx: &PluginCtx, item: &mut Item) -> Result<()> {
-        if self.conf.auto {
-            self.imported(ctx, std::slice::from_mut(item))?;
+            self.imported(ctx, task.items)?;
         }
         Ok(())
     }

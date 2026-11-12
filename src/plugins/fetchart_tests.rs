@@ -1316,8 +1316,16 @@ fn run_import(ie: &mut ImportEnv, op: FileOp, asis: bool) {
     let fa = ie.env.plugin(None);
     let ctx = ie.env.ctx();
     let mut items = vec![];
-    fa.album_imported(&ctx, &mut ie.album, &mut items, &ie.src, op, asis)
-        .unwrap();
+    let paths = [ie.src.clone()];
+    let mut task = ImportTask {
+        album: Some(&mut ie.album),
+        items: &mut items,
+        paths: &paths,
+        asis,
+        op,
+    };
+    fa.import_stage(&ctx, &mut task).unwrap();
+    fa.import_task_files(&ctx, &mut task).unwrap();
 }
 
 #[test]

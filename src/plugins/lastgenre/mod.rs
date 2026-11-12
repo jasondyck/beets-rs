@@ -37,9 +37,8 @@
 
 pub mod client;
 
-use super::{DEBUG, Plugin, PluginCtx, PluginLog, WARNING};
+use super::{DEBUG, ImportTask, Plugin, PluginCtx, PluginLog, WARNING};
 use crate::config::{Config, ConfigError};
-use crate::fileops::FileOp;
 use crate::library::Library;
 use crate::model::{Album, Item, Kind as ModelKind, Record};
 use crate::query::Query;
@@ -49,7 +48,6 @@ use client::{Kind, LastFmClient, py_list};
 use fancy_regex::Regex;
 use serde_yaml::Value as Y;
 use std::collections::{HashMap, HashSet};
-use std::path::Path;
 
 pub const GENRES_TXT: &str = include_str!("genres.txt");
 pub const GENRES_TREE_YAML: &str = include_str!("genres-tree.yaml");
@@ -967,8 +965,8 @@ impl LastGenre {
     }
 
     /// The import stage (beets' `imported`): genres for the new album or
-    /// singleton. As beets writes imported files after its plugin stages,
-    /// changed items are written here when `import.write` is on.
+    /// singleton, stored in the library; the importer writes them when it
+    /// places the files.
     fn imported(
         &self,
         ctx: &PluginCtx,
@@ -980,30 +978,15 @@ impl LastGenre {
         }
         self.conf.sources()?;
         self.log.at_level(WARNING, || -> Result<()> {
-            let before: Vec<Option<crate::model::Value>> =
-                items.iter().map(|i| i.get("genres")).collect();
             match album {
-                Some(a) => self.process_album(ctx.lib, a, false)?,
+                Some(a) => self.process_album(ctx.lib, a, false),
                 None => {
                     for item in items.iter_mut() {
                         self.process_item(ctx.lib, item, false)?;
                     }
+                    Ok(())
                 }
             }
-            for (item, old) in items.iter_mut().zip(before) {
-                if let Some(id) = item.id
-                    && let Some(fresh) = ctx.lib.get_item(id)?
-                {
-                    item.set_list("genres", &fresh.list("genres"));
-                }
-                if ctx.write && item.get("genres") != old {
-                    match crate::media::write_item(item) {
-                        Ok(()) => ctx.lib.store(item)?,
-                        Err(e) => crate::logging::emit(format!("{e:#}")),
-                    }
-                }
-            }
-            Ok(())
         })
     }
 }
@@ -1157,20 +1140,8 @@ impl Plugin for LastGenre {
         NAME
     }
 
-    fn album_imported(
-        &self,
-        ctx: &PluginCtx,
-        album: &mut Album,
-        items: &mut [Item],
-        _source_dir: &Path,
-        _op: FileOp,
-        _asis: bool,
-    ) -> Result<()> {
-        self.imported(ctx, Some(album), items)
-    }
-
-    fn item_imported(&self, ctx: &PluginCtx, item: &mut Item) -> Result<()> {
-        self.imported(ctx, None, std::slice::from_mut(item))
+    fn import_stage(&self, ctx: &PluginCtx, task: &mut ImportTask) -> Result<()> {
+        self.imported(ctx, task.album.as_deref_mut(), task.items)
     }
 }
 

@@ -15,7 +15,7 @@ use crate::library::Library;
 use crate::model::{Album, Item};
 use anyhow::{Result, bail};
 use std::cell::Cell;
-use std::path::Path;
+use std::path::PathBuf;
 
 pub const USER_AGENT: &str = concat!(
     "beets-rs/",
@@ -32,26 +32,50 @@ pub struct PluginCtx<'a> {
     pub write: bool,
 }
 
+/// What an import stage or `import_task_files` listener sees of beets'
+/// `ImportTask`.
+pub struct ImportTask<'t> {
+    /// The album being imported (None for a singleton).
+    pub album: Option<&'t mut Album>,
+    /// The imported items (`task.imported_items()`).
+    pub items: &'t mut [Item],
+    /// `task.paths`: the source directory (or file, for a singleton).
+    pub paths: &'t [PathBuf],
+    /// Imported as-is (`Action.ASIS`) rather than with a match applied.
+    pub asis: bool,
+    /// How the files are (to be) placed.
+    pub op: FileOp,
+}
+
+/// A plugin's import hooks, as beets runs them: `early_import_stage` and
+/// `import_stage` (beets' `early_import_stages`/`import_stages`) between
+/// adding the task to the library and placing its files, every early
+/// stage before every import stage, each followed by reloading the task
+/// from the library; `import_task_files` once the files are placed and
+/// written; `album_imported`/`item_imported` when the task is done.
 pub trait Plugin {
     fn name(&self) -> &'static str;
 
-    /// Called after an album and its items are stored in the library.
-    /// `source_dir` is where the files came from; `op` is how they got here;
-    /// `asis` says the album was imported as-is (not autotagged).
-    fn album_imported(
-        &self,
-        _ctx: &PluginCtx,
-        _album: &mut Album,
-        _items: &mut [Item],
-        _source_dir: &Path,
-        _op: FileOp,
-        _asis: bool,
-    ) -> Result<()> {
+    fn early_import_stage(&self, _ctx: &PluginCtx, _task: &mut ImportTask) -> Result<()> {
         Ok(())
     }
 
-    /// Called after a singleton is stored in the library.
-    fn item_imported(&self, _ctx: &PluginCtx, _item: &mut Item) -> Result<()> {
+    fn import_stage(&self, _ctx: &PluginCtx, _task: &mut ImportTask) -> Result<()> {
+        Ok(())
+    }
+
+    /// beets' `import_task_files` event.
+    fn import_task_files(&self, _ctx: &PluginCtx, _task: &mut ImportTask) -> Result<()> {
+        Ok(())
+    }
+
+    /// beets' `album_imported` event.
+    fn album_imported(&self, _ctx: &PluginCtx, _album: &Album) -> Result<()> {
+        Ok(())
+    }
+
+    /// beets' `item_imported` event.
+    fn item_imported(&self, _ctx: &PluginCtx, _item: &Item) -> Result<()> {
         Ok(())
     }
 }
