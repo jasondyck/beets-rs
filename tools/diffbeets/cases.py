@@ -904,3 +904,61 @@ EXPECTED = {
         "artist:artist year- title+",
     ]},
 }
+
+
+# ---------------------------------------------------------------------------
+# Import phase: both tools import against a fake MusicBrainz serving
+# tests/fixtures/mb (see importphase.py).
+
+_FX = {"artist": "Fixture Artist", "album": "Fixture Album"}
+_FX_ID = "11111111-1111-1111-1111-111111111111"
+
+# Directories of generated MP3s (1 second each): name -> [(file, tags)].
+IMPORT_CORPUS = {
+    # Tagged like the fixture release, without ids.
+    "fx": [(f"{n}.mp3", {**_FX, "title": t, "track": str(n)})
+           for n, t in enumerate(["Alpha", "Beta", "Gamma"], 1)],
+    # With the release id, disc numbers and the pregap track.
+    "tagged": [(f"{n}.mp3", {**_FX, "album_artist": "Fixture Artist", "title": t,
+                             "track": str(n), "disc": "1", "date": "2004",
+                             "MusicBrainz Album Id": _FX_ID})
+               for n, t in enumerate(["Hidden Intro", "Alpha", "Beta", "Gamma"])],
+    # Spare files the rescan cases put into a directory at the prompt.
+    "extra": [("delta.mp3", {**_FX, "title": "Delta", "track": "4"})],
+}
+
+# (name, corpus directory, import args, extra config, answers). An answer is
+# typed at the next prompt; a tuple acts on the music first: ("remove",
+# file), ("empty",), ("copy", import-src path, new name).
+IMPORT_CASES = [
+    # Interactive (-t) imports with the match options of autotag.rs.
+    ("t", "fx", ["-t", "-C"], "", ["1", "a"]),
+    ("t-id-match", "tagged", ["-t", "-C"], "", ["a"]),
+    ("t-ignored", "fx", ["-t", "-C"], "match:\n    ignored: missing_tracks\n", ["u"]),
+    ("t-required", "fx", ["-t", "-C"], "match:\n    required: label\n", ["a"]),
+    ("t-preferred", "fx", ["-t", "-C"],
+     "match:\n    preferred:\n        media: ['Digital Media', CD]\n"
+     "        countries: [GB]\n        original_year: yes\n", ["a"]),
+    ("t-ignored-media", "tagged", ["-t", "-C"],
+     "match:\n    ignored_media: [DVD-Video]\n    ignore_data_tracks: no\n", ["a"]),
+    ("t-disambig-fields", "fx", ["-t", "-C"],
+     "match:\n    album_disambig_fields: albumtype releasegroupdisambig barcode"
+     " script language mediums bogus\n", ["2", "a"]),
+    ("t-weights", "fx", ["-t", "-C"],
+     "match:\n    distance_weights:\n        album: 0.5\n        missing_tracks: 0.0\n"
+     "    track_length_grace: 1000\n    max_rec:\n        tracks: low\n", ["a"]),
+    # Other modes.
+    ("q", "fx", ["-q", "-C"], "", []),
+    ("q-asis", "fx", ["-q", "-C", "--quiet-fallback=asis"], "", []),
+    ("q-id-match", "tagged", ["-q", "-C"],
+     "match:\n    strong_rec_thresh: 0.2\n    max_rec:\n        missing_tracks: strong\n", []),
+    ("s", "fx", ["-t", "-s", "-C"], "", ["1", "a", "u", "a"]),
+    ("A", "fx", ["-A", "-C"], "", []),
+    ("t-abort", "fx", ["-t", "-C"], "", ["b"]),
+    # "Rescan directory": a file added, one removed, the directory emptied.
+    ("rescan-add", "fx", ["-t", "-C"], "",
+     [("copy", "extra/delta.mp3", "4.mp3"), "r", "a"]),
+    ("rescan-remove", "tagged", ["-t", "-C"], "", [("remove", "0.mp3"), "r", "a"]),
+    ("rescan-empty", "fx", ["-t", "-C"], "", [("empty",), "r"]),
+    ("rescan-group", "fx", ["-t", "-C"], "", ["g", "u"]),
+]

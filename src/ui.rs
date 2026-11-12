@@ -232,12 +232,71 @@ pub fn color_split(s: &str, index: usize) -> (String, String) {
     (pre, post)
 }
 
+/// Scripted answers for tests: while set, `read_line` takes its answers
+/// from here (None once they run out: end of input), running each one's
+/// hook first, and keeps the prompts it was asked.
+#[cfg(test)]
+pub mod script {
+    use std::cell::RefCell;
+    use std::collections::VecDeque;
+
+    pub type Hook = Box<dyn FnOnce()>;
+    type Queue = VecDeque<(String, Option<Hook>)>;
+
+    thread_local! {
+        static ANSWERS: RefCell<Option<Queue>> =
+            const { RefCell::new(None) };
+        static PROMPTS: RefCell<Vec<String>> = const { RefCell::new(vec![]) };
+    }
+
+    /// Answer the next prompts with `answers`, in order.
+    pub fn set(answers: Vec<(&str, Option<Hook>)>) {
+        let a = answers
+            .into_iter()
+            .map(|(s, h)| (s.to_string(), h))
+            .collect();
+        ANSWERS.with(|x| *x.borrow_mut() = Some(a));
+        PROMPTS.with(|p| p.borrow_mut().clear());
+    }
+
+    /// The prompts asked since `set`.
+    pub fn prompts() -> Vec<String> {
+        PROMPTS.with(|p| p.borrow().clone())
+    }
+
+    /// Some(answer) while scripting (None inside: the answers ran out).
+    pub(super) fn next(prompt: &str) -> Option<Option<String>> {
+        let (answer, hook) = ANSWERS.with(|x| {
+            let mut x = x.borrow_mut();
+            let q = x.as_mut()?;
+            Some(match q.pop_front() {
+                Some((s, h)) => (Some(s), h),
+                None => (None, None),
+            })
+        })?;
+        PROMPTS.with(|p| p.borrow_mut().push(prompt.to_string()));
+        if let Some(h) = hook {
+            h();
+        }
+        Some(answer)
+    }
+}
+
 pub fn read_line(prompt: &str) -> Option<String> {
+    #[cfg(test)]
+    if let Some(answer) = script::next(prompt) {
+        return answer;
+    }
     print!("{prompt}");
     std::io::stdout().flush().ok();
     let mut line = String::new();
     match std::io::stdin().lock().read_line(&mut line) {
-        Ok(0) | Err(_) => None,
+        // beets' `input_`: a UserError, which ends the command (state
+        // already saved stays saved, as when beets raises it).
+        Ok(0) | Err(_) => {
+            eprintln!("error: stdin stream ended while input required");
+            std::process::exit(1);
+        }
         Ok(_) => Some(line.trim().to_string()),
     }
 }

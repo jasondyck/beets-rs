@@ -405,6 +405,9 @@ fn version(cfg: &Config) -> Result<()> {
 
 fn version_lines(cfg: &Config) -> Result<Vec<String>> {
     let mut names: Vec<&str> = plugins::load(cfg)?.iter().map(|p| p.name()).collect();
+    if plugins::enabled(cfg, "musicbrainz") {
+        names.push("musicbrainz");
+    }
     names.sort_unstable();
     Ok(vec![
         format!("beets-rs version {}", env!("CARGO_PKG_VERSION")),
@@ -2012,7 +2015,9 @@ mod tests {
             format!("beets-rs version {}", env!("CARGO_PKG_VERSION"))
         );
         assert!(lines[1].starts_with("Rust version "));
-        assert_eq!(lines[2], "no plugins loaded");
+        assert_eq!(lines[2], "plugins: musicbrainz");
+        cfg.set("plugins", serde_yaml::from_str("[]").unwrap());
+        assert_eq!(version_lines(&cfg).unwrap()[2], "no plugins loaded");
         cfg.set(
             "plugins",
             serde_yaml::from_str("[lyrics, fetchart, embedart]").unwrap(),

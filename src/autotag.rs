@@ -675,6 +675,10 @@ pub fn album_candidates(
     search: Option<(&str, &str)>,
     ids: &[String],
 ) -> Result<(Vec<AlbumMatch>, Recommendation)> {
+    // As beets with no metadata source plugin: nothing to search.
+    if !crate::plugins::enabled(cfg, "musicbrainz") {
+        return Ok((vec![], Recommendation::None));
+    }
     let ctx = Ctx::new(cfg);
     let cur = current_metadata(items);
     let rec_of = |c: &[AlbumMatch]| {
@@ -747,6 +751,9 @@ pub fn item_candidates(
     search: Option<(&str, &str)>,
     ids: &[String],
 ) -> Result<(Vec<TrackMatch>, Recommendation)> {
+    if !crate::plugins::enabled(cfg, "musicbrainz") {
+        return Ok((vec![], Recommendation::None));
+    }
     let ctx = Ctx::new(cfg);
     let mut cands: Vec<TrackMatch> = vec![];
     let push = |cands: &mut Vec<TrackMatch>, info: TrackInfo| {

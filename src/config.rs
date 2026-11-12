@@ -169,7 +169,7 @@ ui:
             match_tracklist: 5
         layout: column
 
-plugins: []
+plugins: [musicbrainz]
 
 fetchart:
     auto: yes
@@ -596,7 +596,7 @@ mod tests {
         assert!(paths.iter().any(|(k, _)| k == "default"));
         assert_eq!(c.library_path(), dir.path().join("library.db"));
         assert_eq!(c.f64("match.strong_rec_thresh"), 0.04);
-        assert!(c.list("plugins").is_empty());
+        assert_eq!(c.list("plugins"), ["musicbrainz"]);
         assert_eq!(c.list("fetchart.sources"), vec!["filesystem", "coverart"]);
     }
 

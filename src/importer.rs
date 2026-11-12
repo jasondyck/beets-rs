@@ -201,6 +201,10 @@ enum Outcome {
     Done,
     Skipped,
     Aborted,
+    /// "Rescan directory": the task was replaced by what a fresh walk of
+    /// its directories found (each recorded on its own); the original is
+    /// recorded as progress only, as beets' sentinel task does.
+    Rescanned,
 }
 
 impl ImportOptions {
@@ -263,32 +267,27 @@ enum Decision<M> {
     Tracks,
     /// "Group albums": split the items into albums by tags (albums only).
     Group,
+    /// "Rescan directory": walk the task's directories again (albums with
+    /// a directory scope only).
+    Rescan,
 }
 
 /// The album prompt's choices after the candidate-specific ones, in beets'
-/// order (`_get_choices` for an album task).
-const ALBUM_CHOICES: [&str; 7] = [
-    "Skip",
-    "Use as-is",
-    "as Tracks",
-    "Group albums",
-    "Enter search",
-    "enter Id",
-    "aBort",
-];
-
-/// Shown when confirming one candidate: "Apply, More candidates" + the rest.
-const ALBUM_CONFIRM: [&str; 9] = [
-    "Apply",
-    "More candidates",
-    "Skip",
-    "Use as-is",
-    "as Tracks",
-    "Group albums",
-    "Enter search",
-    "enter Id",
-    "aBort",
-];
+/// order (`_get_choices` for an album task); "Rescan directory" only for a
+/// task read from a directory (not grouped by tag, merged or from `-L`).
+/// `confirm`: confirming one candidate, so "Apply, More candidates" first.
+fn album_choices(confirm: bool, rescan: bool) -> Vec<&'static str> {
+    let mut c = vec![];
+    if confirm {
+        c.extend(["Apply", "More candidates"]);
+    }
+    c.extend(["Skip", "Use as-is", "as Tracks", "Group albums"]);
+    if rescan {
+        c.push("Rescan directory");
+    }
+    c.extend(["Enter search", "enter Id", "aBort"]);
+    c
+}
 
 /// The track prompt's choices (`_get_choices` for a singleton task).
 const ITEM_CHOICES: [&str; 5] = ["Skip", "Use as-is", "Enter search", "enter Id", "aBort"];
@@ -500,6 +499,18 @@ pub struct Importer<'a> {
     prepared: Option<Prepared>,
     /// Its lookups, taken by the prompts they were done for.
     lookups: HashMap<Vec<PathBuf>, Looked>,
+    /// The import path being worked through, for "Rescan directory".
+    current: Option<CurrentTop>,
+}
+
+/// An import path in progress: what a rescan needs to treat the albums it
+/// finds as the initial walk would.
+struct CurrentTop {
+    top: PathBuf,
+    /// Tasks a resumed import already finished.
+    done: BTreeSet<PathBuf>,
+    /// Record progress (`resume`).
+    progress: bool,
 }
 
 /// beets' `_MULTIDISC_MARKERS`, as `MULTIDISC_PATTERNS`: a disc marker,
@@ -715,6 +726,7 @@ impl<'a> Importer<'a> {
             source,
             prepared: None,
             lookups: HashMap::new(),
+            current: None,
             merged: HashSet::new(),
             clutter: fileops::clutter(cfg),
             walk: WalkFilter::from_config(cfg),
@@ -791,6 +803,11 @@ impl<'a> Importer<'a> {
                 log: vec![],
                 done: Some(done.clone()),
             });
+            self.current = Some(CurrentTop {
+                top: p.clone(),
+                done: done.clone(),
+                progress: track_progress,
+            });
             for (gi, (paths, group)) in groups.into_iter().enumerate() {
                 // The state (progress, history) keys a task by its first
                 // path: the album's directory, the parent of nested discs,
@@ -816,7 +833,7 @@ impl<'a> Importer<'a> {
                         let o = self.import_singleton(f);
                         self.unprepare();
                         match o? {
-                            Outcome::Done => {}
+                            Outcome::Done | Outcome::Rescanned => {}
                             Outcome::Skipped => outcome = Outcome::Skipped,
                             Outcome::Aborted => {
                                 outcome = Outcome::Aborted;
@@ -835,8 +852,8 @@ impl<'a> Importer<'a> {
                     // Stop the lookahead first: it only reads, so nothing
                     // it was doing needs finishing.
                     drop(ahead);
-                    // Progress so far stays recorded, so the import can resume.
-                    println!("Import aborted.");
+                    // Progress so far stays recorded, so the import can resume;
+                    // as beets, an abort stops silently.
                     return Ok(());
                 }
                 self.record(&p, key, outcome, track_progress)?;
@@ -1031,7 +1048,10 @@ impl<'a> Importer<'a> {
             return Ok(());
         }
         if self.opts.incremental {
-            if outcome == Outcome::Skipped && self.opts.incremental_skip_later {
+            // A rescanned task's sentinel records no history.
+            if outcome == Outcome::Rescanned
+                || (outcome == Outcome::Skipped && self.opts.incremental_skip_later)
+            {
                 return Ok(());
             }
             self.state.history.insert(key);
@@ -1097,7 +1117,6 @@ impl<'a> Importer<'a> {
                 let mut item = item;
                 item.id = None;
                 if self.import_singleton_item(item)? == Outcome::Aborted {
-                    println!("Import aborted.");
                     return Ok(());
                 }
             }
@@ -1134,10 +1153,9 @@ impl<'a> Importer<'a> {
             let outcome = if self.opts.group_albums {
                 self.import_groups(items, &dir)?
             } else {
-                self.import_album_items(items, &dir, std::slice::from_ref(&dir))?
+                self.import_album_items(items, &dir, std::slice::from_ref(&dir), false)?
             };
             if outcome == Outcome::Aborted {
-                println!("Import aborted.");
                 return Ok(());
             }
         }
@@ -1181,6 +1199,16 @@ impl<'a> Importer<'a> {
         if items.is_empty() {
             return Ok(Outcome::Done);
         }
+        self.import_album_read(items, paths, files)
+    }
+
+    /// An album task read from a directory walk.
+    fn import_album_read(
+        &mut self,
+        items: Vec<Item>,
+        paths: &[PathBuf],
+        files: &[PathBuf],
+    ) -> Result<Outcome> {
         let dir = if self.opts.flat && paths[0].is_dir() {
             paths[0].clone()
         } else {
@@ -1189,8 +1217,63 @@ impl<'a> Importer<'a> {
         if self.opts.group_albums {
             self.import_groups(items, &dir)
         } else {
-            self.import_album_items(items, &dir, paths)
+            self.import_album_items(items, &dir, paths, true)
         }
+    }
+
+    /// beets' `rescan_tasks`: walk the task's directories again (their
+    /// parent, filtered back to related groups, for sibling disc
+    /// directories) and import each album found as a task of its own, then
+    /// record the original as progress.
+    fn rescan(&mut self, paths: &[PathBuf]) -> Result<Outcome> {
+        self.lookups.clear();
+        let Some(cur) = self.current.as_ref() else {
+            return Ok(Outcome::Skipped);
+        };
+        let (top, done, progress) = (cur.top.clone(), cur.done.clone(), cur.progress);
+        let first = &paths[0];
+        let scoped = paths.iter().all(|d| d.starts_with(first));
+        let root = if scoped {
+            first.clone()
+        } else {
+            first.parent().unwrap_or(first).to_path_buf()
+        };
+        let mut groups = if root.exists() {
+            self.root_groups(&root)?
+        } else {
+            vec![]
+        };
+        if !scoped {
+            groups.retain(|(dirs, _)| {
+                dirs.iter()
+                    .any(|d| paths.iter().any(|o| d.starts_with(o) || o.starts_with(d)))
+            });
+        }
+        let mut found = false;
+        for (dirs, files) in groups {
+            let key = dirs[0].clone();
+            if done.contains(&key) || (self.opts.incremental && self.state.history.contains(&key)) {
+                let shown: Vec<String> = dirs.iter().map(|d| d.display().to_string()).collect();
+                crate::logging::debug!("Skipping previously-imported path: {}", shown.join("; "));
+                self.stats.already += 1;
+                continue;
+            }
+            let items = read_files(&files, &self.merged);
+            if items.is_empty() {
+                continue;
+            }
+            found = true;
+            let outcome = self.import_album_read(items, &dirs, &files)?;
+            if outcome == Outcome::Aborted {
+                return Ok(Outcome::Aborted);
+            }
+            self.record(&top, key, outcome, progress)?;
+        }
+        if !found {
+            let shown: Vec<String> = paths.iter().map(|p| p.display().to_string()).collect();
+            eprintln!("No music found after rescanning: {}", shown.join("; "));
+        }
+        Ok(Outcome::Rescanned)
     }
 
     /// "Group albums" and `-g`: run each tag-defined album in the directory
@@ -1201,8 +1284,8 @@ impl<'a> Importer<'a> {
         for group in group_albums(items) {
             // Grouped by tag, so (as in beets) the log names the files.
             let paths: Vec<PathBuf> = group.iter().map(|i| i.path().to_path_buf()).collect();
-            match self.import_album_items(group, dir, &paths)? {
-                Outcome::Done => {}
+            match self.import_album_items(group, dir, &paths, false)? {
+                Outcome::Done | Outcome::Rescanned => {}
                 Outcome::Skipped => outcome = Outcome::Skipped,
                 Outcome::Aborted => return Ok(Outcome::Aborted),
             }
@@ -1221,12 +1304,14 @@ impl<'a> Importer<'a> {
         Ok(Outcome::Done)
     }
 
-    /// `paths` identify the album in the import log.
+    /// `paths` identify the album in the import log. `rescan`: the task is
+    /// a directory's, so "Rescan directory" is offered.
     fn import_album_items(
         &mut self,
         mut items: Vec<Item>,
         dir: &Path,
         paths: &[PathBuf],
+        rescan: bool,
     ) -> Result<Outcome> {
         // As beets: the task's paths, one per line. With autotagging this is
         // `choose_match`'s header on stdout; without it beets never calls
@@ -1245,7 +1330,7 @@ impl<'a> Importer<'a> {
         }
 
         let decision = if self.opts.autotag {
-            let d = self.choose_album(&items)?;
+            let d = self.choose_album(&items, rescan)?;
             self.log_choice(&d, paths);
             d
         } else {
@@ -1261,6 +1346,7 @@ impl<'a> Importer<'a> {
             Decision::Apply(m) => Some(m),
             Decision::Tracks => return self.import_as_tracks(items),
             Decision::Group => return self.import_groups(items, dir),
+            Decision::Rescan => return self.rescan(paths),
         };
 
         // Apply the choice to a copy: a merge starts over from the
@@ -1308,7 +1394,7 @@ impl<'a> Importer<'a> {
                     paths.push(d.path().to_path_buf());
                 }
                 items.extend(dups);
-                return self.import_album_items(items, dir, &paths);
+                return self.import_album_items(items, dir, &paths, false);
             }
             DupOutcome::Upgrade { kept, album_id } => {
                 let mut idx = 0;
@@ -1324,7 +1410,7 @@ impl<'a> Importer<'a> {
         Ok(Outcome::Done)
     }
 
-    fn choose_album(&mut self, items: &[Item]) -> Result<Decision<AlbumMatch>> {
+    fn choose_album(&mut self, items: &[Item], rescan: bool) -> Result<Decision<AlbumMatch>> {
         let (mut cands, mut rec) = match self.prefetched(items) {
             Some(Ok(Candidates::Album(c, r))) => (c, r),
             Some(Err(e)) => return Err(e),
@@ -1359,7 +1445,7 @@ impl<'a> Importer<'a> {
                 self.show_album_match(items, &cands[k]);
                 self.bell();
                 match ui::options(
-                    &ALBUM_CONFIRM,
+                    &album_choices(true, rescan),
                     None,
                     has_default
                         .then_some(self.opts.default_action)
@@ -1382,7 +1468,7 @@ impl<'a> Importer<'a> {
                         "For help, see: https://beets.readthedocs.org/en/latest/faq.html#nomatch"
                     );
                 }
-                self.pick_album_candidate(items, &cands)?
+                self.pick_album_candidate(items, &cands, rescan)?
             };
 
             match choice {
@@ -1394,6 +1480,7 @@ impl<'a> Importer<'a> {
                 Some(Choice::Letter('u')) => return Ok(Decision::AsIs),
                 Some(Choice::Letter('t')) => return Ok(Decision::Tracks),
                 Some(Choice::Letter('g')) => return Ok(Decision::Group),
+                Some(Choice::Letter('r')) if rescan => return Ok(Decision::Rescan),
                 Some(Choice::Letter('e')) => {
                     let artist = ui::read_line("Artist: ").unwrap_or_default();
                     let album = ui::read_line("Album: ").unwrap_or_default();
@@ -1420,9 +1507,15 @@ impl<'a> Importer<'a> {
     }
 
     /// beets' candidate list ("Finding tags for album ...") and prompt.
-    fn pick_album_candidate(&self, items: &[Item], cands: &[AlbumMatch]) -> Result<Option<Choice>> {
+    fn pick_album_candidate(
+        &self,
+        items: &[Item],
+        cands: &[AlbumMatch],
+        rescan: bool,
+    ) -> Result<Option<Choice>> {
+        let choices = album_choices(false, rescan);
         if cands.is_empty() {
-            return Ok(ui::options(&ALBUM_CHOICES, None, Some(Choice::Letter('s'))));
+            return Ok(ui::options(&choices, None, Some(Choice::Letter('s'))));
         }
         let cur = autotag::current_metadata(items);
         let disp = self.display();
@@ -1441,7 +1534,7 @@ impl<'a> Importer<'a> {
             }
         }
         Ok(ui::options(
-            &ALBUM_CHOICES,
+            &choices,
             Some(cands.len()),
             Some(Choice::Number(1)),
         ))
@@ -1972,7 +2065,9 @@ impl<'a> Importer<'a> {
                 autotag::apply_track(self.cfg, &mut item, &m.info);
                 true
             }
-            Decision::Tracks | Decision::Group => unreachable!("not offered for tracks"),
+            Decision::Tracks | Decision::Group | Decision::Rescan => {
+                unreachable!("not offered for tracks")
+            }
         };
         let want = duplicates::key_values(&item, &self.cfg.list("import.duplicate_keys.item"));
         let new = std::slice::from_ref(&item);
@@ -1996,7 +2091,7 @@ impl<'a> Importer<'a> {
                     .to_path_buf();
                 let mut items = vec![original];
                 items.extend(dups);
-                return self.import_album_items(items, &dir, &paths);
+                return self.import_album_items(items, &dir, &paths, false);
             }
         }
         item.set_int("album_id", 0);
@@ -3752,9 +3847,247 @@ mod tests {
         // Read afresh, so its lookup is done again too.
         assert!(imp.lookups.is_empty());
         assert!(imp.prepared.is_none());
-        imp.choose_album(&items).ok();
+        imp.choose_album(&items, true).ok();
         let calls = calls.lock().unwrap().clone();
         let first = calls.iter().filter(|c| *c == "album A one,two").count();
         assert_eq!(first, 2, "{calls:?}");
+    }
+
+    // ------------------------------------------- "Rescan directory" (R)
+    // Ports of upstream's `ImportRescanTest`: the directory changes while
+    // the first prompt is being answered (the hook runs as it's answered).
+
+    type Answers = Vec<(&'static str, Option<ui::script::Hook>)>;
+
+    fn hook(f: impl FnOnce() + 'static) -> Option<ui::script::Hook> {
+        Some(Box::new(f))
+    }
+
+    /// An import path holding "Album" (two tracks); None without ffmpeg.
+    fn rescan_setup() -> Option<(tempfile::TempDir, Config, Library, PathBuf, PathBuf)> {
+        let (d, cfg, lib, _) = setup(&[]);
+        let top = d.path().join("music");
+        let album = album_with(&top, "Album", "Album", &[("one", 128), ("two", 128)])?;
+        let top = std::fs::canonicalize(top).unwrap();
+        let album = std::fs::canonicalize(album).unwrap();
+        Some((d, cfg, lib, top, album))
+    }
+
+    /// Import `path` interactively (no candidates: every prompt is the
+    /// plain choice list) with `answers`; returns the prompts asked.
+    fn rescan_run(
+        cfg: &Config,
+        lib: &Library,
+        path: &Path,
+        answers: Answers,
+        f: impl Fn(&mut ImportOptions),
+    ) -> Vec<String> {
+        let mut o = opts(cfg);
+        o.autotag = true;
+        f(&mut o);
+        let (fake, _) = FakeSource::new(0);
+        let mut imp = Importer::new(cfg, lib, o, &[]).unwrap().with_source(fake);
+        ui::script::set(answers);
+        imp.run(&[path.to_path_buf()]).unwrap();
+        ui::script::prompts()
+    }
+
+    fn albums(lib: &Library) -> Vec<Album> {
+        lib.albums(&crate::query::Query::parse::<&str>(crate::model::Kind::Album, &[]).unwrap())
+            .unwrap()
+    }
+
+    fn offers_rescan(prompt: &str) -> bool {
+        prompt.contains("Rescan directory")
+    }
+
+    #[test]
+    fn rescan_picks_up_files_added_or_removed_at_the_prompt() {
+        for threaded in [true, false] {
+            let Some((_d, cfg, lib, top, album)) = rescan_setup() else {
+                return;
+            };
+            let a = album.clone();
+            let add = hook(move || {
+                make_mp3(&a, "3.mp3", &[("album", "Album"), ("title", "three")], 128);
+            });
+            let prompts = rescan_run(&cfg, &lib, &top, vec![("r", add), ("u", None)], |o| {
+                o.threaded = threaded
+            });
+            assert_eq!(all_items(&lib).len(), 3);
+            assert!(prompts.iter().all(|p| offers_rescan(p)), "{prompts:?}");
+
+            let Some((_d, cfg, lib, top, album)) = rescan_setup() else {
+                return;
+            };
+            let remove = hook(move || std::fs::remove_file(album.join("2.mp3")).unwrap());
+            rescan_run(&cfg, &lib, &top, vec![("r", remove), ("u", None)], |o| {
+                o.threaded = threaded
+            });
+            assert_eq!(all_items(&lib).len(), 1);
+        }
+    }
+
+    #[test]
+    fn rescan_of_an_emptied_or_unreadable_directory_imports_nothing() {
+        for junk in [false, true] {
+            let Some((_d, cfg, lib, top, album)) = rescan_setup() else {
+                return;
+            };
+            let empty = hook(move || {
+                for f in ["1.mp3", "2.mp3"] {
+                    std::fs::remove_file(album.join(f)).unwrap();
+                }
+                if junk {
+                    std::fs::write(album.join("1.mp3"), b"not a real mp3").unwrap();
+                }
+            });
+            let prompts = rescan_run(&cfg, &lib, &top, vec![("r", empty)], |_| {});
+            assert!(all_items(&lib).is_empty());
+            assert_eq!(prompts.len(), 1);
+            // Nothing left for a prompt, and no abort: the import ends.
+            let st = ImportState::load(&cfg.state_path());
+            assert!(st.progress.is_empty());
+        }
+    }
+
+    #[test]
+    fn rescan_finds_every_album_the_directory_now_holds() {
+        let Some((_d, cfg, lib, top, album)) = rescan_setup() else {
+            return;
+        };
+        let a = album.clone();
+        let split = hook(move || {
+            for f in ["1.mp3", "2.mp3"] {
+                std::fs::remove_file(a.join(f)).unwrap();
+            }
+            album_with(&a, "one", "One", &[("x", 128), ("y", 128)]).unwrap();
+            album_with(&a, "two", "Two", &[("x", 128), ("y", 128)]).unwrap();
+        });
+        let answers = vec![("r", split), ("u", None), ("u", None)];
+        rescan_run(&cfg, &lib, &top, answers, |o| o.incremental = true);
+        assert_eq!(albums(&lib).len(), 2);
+        // Each album found is recorded; the original task isn't (beets'
+        // sentinel records no history).
+        let st = ImportState::load(&cfg.state_path());
+        assert!(st.history.contains(&album.join("one")) && st.history.contains(&album.join("two")));
+        assert!(!st.history.contains(&album));
+    }
+
+    #[test]
+    fn rescan_keeps_multidisc_and_flat_albums_together() {
+        // A nested two-disc album: one task before and after.
+        let Some((_d, cfg, lib, top, album)) = rescan_setup() else {
+            return;
+        };
+        for f in ["1.mp3", "2.mp3"] {
+            std::fs::remove_file(album.join(f)).unwrap();
+        }
+        album_with(&album, "CD1", "Album", &[("one", 128)]).unwrap();
+        album_with(&album, "CD2", "Album", &[("two", 128)]).unwrap();
+        let prompts = rescan_run(&cfg, &lib, &top, vec![("r", None), ("u", None)], |_| {});
+        assert_eq!(prompts.len(), 2);
+        assert_eq!(albums(&lib).len(), 1);
+        assert_eq!(all_items(&lib).len(), 2);
+
+        // --flat: the whole import path is one album, rescanned or not.
+        let Some((_d, cfg, lib, top, _)) = rescan_setup() else {
+            return;
+        };
+        album_with(&top, "Second", "Second", &[("x", 128), ("y", 128)]).unwrap();
+        let prompts = rescan_run(&cfg, &lib, &top, vec![("r", None), ("u", None)], |o| {
+            o.flat = true
+        });
+        assert_eq!(prompts.len(), 2);
+        assert_eq!(albums(&lib).len(), 1);
+        assert_eq!(all_items(&lib).len(), 4);
+    }
+
+    #[test]
+    fn rescan_of_a_single_file_import() {
+        let Some((_d, cfg, lib, _, album)) = rescan_setup() else {
+            return;
+        };
+        let file = album.join("1.mp3");
+        rescan_run(&cfg, &lib, &file, vec![("r", None), ("u", None)], |_| {});
+        assert_eq!(all_items(&lib).len(), 1);
+    }
+
+    #[test]
+    fn rescanned_albums_keep_the_import_path_for_pruning_and_resume() {
+        let Some((_d, cfg, lib, top, album)) = rescan_setup() else {
+            return;
+        };
+        rescan_run(&cfg, &lib, &top, vec![("r", None), ("u", None)], |o| {
+            o.op = FileOp::Move
+        });
+        assert_eq!(all_items(&lib).len(), 2);
+        assert!(!album.exists());
+
+        let Some((_d, cfg, lib, top, _)) = rescan_setup() else {
+            return;
+        };
+        rescan_run(&cfg, &lib, &top, vec![("r", None), ("u", None)], |o| {
+            o.resume = Resume::Yes
+        });
+        assert!(ImportState::load(&cfg.state_path()).progress.is_empty());
+    }
+
+    #[test]
+    fn rescan_of_sibling_discs_walks_the_parent_but_leaves_other_albums() {
+        let Some((d, cfg, lib, _, _)) = rescan_setup() else {
+            return;
+        };
+        let top = d.path().join("set");
+        album_with(&top, "Set Disc 1", "Set", &[("one", 128)]).unwrap();
+        album_with(&top, "Set Disc 2", "Set", &[("two", 128)]).unwrap();
+        album_with(&top, "Other Album", "Other", &[("x", 128)]).unwrap();
+        // "Other Album" sorts first: as-is; then rescan the two discs.
+        let answers = vec![("u", None), ("r", None), ("u", None)];
+        let prompts = rescan_run(&cfg, &lib, &top, answers, |_| {});
+        assert_eq!(prompts.len(), 3);
+        let mut sizes: Vec<usize> = albums(&lib)
+            .iter()
+            .map(|a| lib.album_items(a.id.unwrap()).unwrap().len())
+            .collect();
+        sizes.sort();
+        assert_eq!(sizes, [1, 2]);
+    }
+
+    /// Upstream's `TestRescanChoiceAvailability`: offered for a
+    /// directory's album, not after "Group albums", nor for singletons or
+    /// library (`-L`) imports.
+    #[test]
+    fn rescan_is_offered_only_for_directory_albums() {
+        let Some((_d, cfg, lib, top, _)) = rescan_setup() else {
+            return;
+        };
+        let prompts = rescan_run(&cfg, &lib, &top, vec![("g", None), ("s", None)], |_| {});
+        assert_eq!(prompts.len(), 2);
+        assert!(offers_rescan(&prompts[0]) && !offers_rescan(&prompts[1]));
+
+        let prompts = rescan_run(&cfg, &lib, &top, vec![("s", None)], |o| {
+            o.group_albums = true
+        });
+        assert!(!offers_rescan(&prompts[0]), "{prompts:?}");
+
+        let prompts = rescan_run(&cfg, &lib, &top, vec![("s", None), ("s", None)], |o| {
+            o.singletons = true
+        });
+        assert!(prompts.iter().all(|p| !offers_rescan(p)), "{prompts:?}");
+
+        // Into the library as-is, then reimported by query.
+        rescan_run(&cfg, &lib, &top, vec![("u", None)], |_| {});
+        let mut o = opts(&cfg);
+        o.autotag = true;
+        let (fake, _) = FakeSource::new(0);
+        let mut imp = Importer::new(&cfg, &lib, o, &[]).unwrap().with_source(fake);
+        ui::script::set(vec![("s", None)]);
+        imp.run_library(&[]).unwrap();
+        let prompts = ui::script::prompts();
+        assert_eq!(prompts.len(), 1);
+        assert!(!offers_rescan(&prompts[0]));
+        // An answer it doesn't offer is refused.
+        assert!(prompts[0].contains("Group albums, Enter search"));
     }
 }

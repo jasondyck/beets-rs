@@ -44,6 +44,8 @@ from cases import (  # noqa: E402
     CORPUS,
     EXPECTED,
     EXTRA_CONFIGS,
+    IMPORT_CASES,
+    IMPORT_CORPUS,
     IMPORTS,
     LAME_CORPUS,
     MODIFIES,
@@ -51,6 +53,7 @@ from cases import (  # noqa: E402
     TAG_WRITES,
     cases,
 )
+import importphase  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Corpus generation
@@ -124,6 +127,7 @@ class Tool:
         self.env.pop("BEETSDIR", None)
         self.env.pop("BEETSRSDIR", None)
         self.env[envvar] = root
+        self.envvar = envvar
         self.env["COLUMNS"] = "100"
         self.env["LINES"] = "50"
         self.env["TZ"] = "UTC"
@@ -275,6 +279,27 @@ def tag_cases(work, ref, rs):
 
 
 # ---------------------------------------------------------------------------
+# Interactive imports against a fake MusicBrainz
+
+
+def import_cases(work, ref, rs, opts):
+    """Results of the import phase (see importphase.py)."""
+    importphase.build_import_corpus(os.path.join(work, "import-src"), IMPORT_CORPUS, ffmpeg)
+
+    def norm(tool, text, root):
+        return normalise(tool, text.replace(root, "<ROOT>"))
+
+    todo = [c for c in IMPORT_CASES
+            if not opts.only or any(o in f"import:{c[0]}" or o.startswith("import:" + c[0])
+                                    for o in opts.only)]
+    with importphase.FakeMusicBrainz() as mb:
+        with concurrent.futures.ThreadPoolExecutor(opts.jobs) as pool:
+            batches = pool.map(
+                lambda c: importphase.run_import_case(work, c, (ref, rs), mb.port, norm), todo)
+            return [r for batch in batches for r in batch]
+
+
+# ---------------------------------------------------------------------------
 # Migration from a beets library
 
 
@@ -418,6 +443,16 @@ def main():
             ]
             seen.update(r[0] for r in tag_results)
             results += tag_results
+
+        if not opts.only or any(o.startswith("import") or o in "import:" for o in opts.only):
+            print("import phase...", flush=True)
+            import_results = import_cases(work, ref, rs, opts)
+            import_results = [
+                r for r in import_results
+                if not opts.only or any(o in r[0] for o in opts.only)
+            ]
+            seen.update(r[0] for r in import_results)
+            results += import_results
 
         counts = {"PASS": 0, "DIFF": 0, "EXPECTED": 0, "FIXED?": 0}
         for cid, args, r, s in results:

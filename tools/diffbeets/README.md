@@ -37,6 +37,17 @@ dir (under `$TMPDIR`, or `--workdir DIR`):
    empty value and a missing tag count as the same, as beets stores them),
    and both tools import the files reference beets wrote into fresh
    libraries and list every tag field.
+7. then the import phase (`import:` cases, `importphase.py`): a fake
+   MusicBrainz in this process, bound to 127.0.0.1 on a free port, serves the
+   releases in `tests/fixtures/mb` (every release search returns them all;
+   recording searches match by title). Each case imports a fresh copy of
+   generated audio with both tools (`IMPORT_CORPUS`, `IMPORT_CASES` in
+   `cases.py`: `-t` with the match options, `-q`, `-s`, `-A`, aborting, "Group
+   albums" and "Rescan directory"), answering each prompt as it appears; an
+   answer can instead change the music directory first (for the rescan
+   cases). Compared: the import's exit status, stdout and stderr
+   (`import:<case>`), then `ls` of the resulting items and albums
+   (`import:<case>:ls`).
 
 The report lists each case that isn't a plain PASS (`--show-pass` for all):
 `DIFF` (with both outputs, or a unified diff when long), `EXPECTED` (a known
