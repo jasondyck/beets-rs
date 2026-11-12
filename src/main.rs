@@ -470,6 +470,105 @@ pub enum Cmd {
         #[arg(allow_hyphen_values = true)]
         args: Vec<String>,
     },
+    /// Analyze for ReplayGain (plugin: replaygain)
+    Replaygain {
+        /// Match albums instead of tracks
+        #[arg(short = 'a', long)]
+        album: bool,
+        /// Change the number of threads, defaults to maximum available
+        /// processors
+        #[arg(short = 't', long)]
+        threads: Option<usize>,
+        /// Analyze all files, including those that already have ReplayGain
+        /// metadata
+        #[arg(short = 'f', long)]
+        force: bool,
+        /// Write new metadata to files' tags
+        #[arg(short = 'w', long, overrides_with = "nowrite")]
+        write: bool,
+        /// Don't write metadata (opposite of -w)
+        #[arg(short = 'W', long, overrides_with = "write")]
+        nowrite: bool,
+        /// Limit query results
+        #[arg(short = 'l', long)]
+        limit: Option<usize>,
+        #[arg(allow_hyphen_values = true)]
+        query: Vec<String>,
+    },
+    /// List duplicate tracks or albums (plugin: duplicates)
+    #[command(visible_alias = "dup")]
+    Duplicates {
+        /// Show duplicate counts
+        #[arg(short = 'c', long)]
+        count: bool,
+        /// Report duplicates based on arbitrary command
+        #[arg(short = 'C', long, value_name = "PROG", allow_hyphen_values = true)]
+        checksum: Option<String>,
+        /// Delete items from library and disk
+        #[arg(short = 'd', long)]
+        delete: bool,
+        /// Show all versions of duplicate tracks or albums
+        #[arg(short = 'F', long)]
+        full: bool,
+        /// Report duplicates only if all attributes are set
+        #[arg(short = 's', long)]
+        strict: bool,
+        /// Report duplicates based on keys (use multiple times)
+        #[arg(short = 'k', long = "key", value_name = "KEY")]
+        keys: Vec<String>,
+        /// Merge duplicate items
+        #[arg(short = 'M', long)]
+        merge: bool,
+        /// Move items to dest
+        #[arg(short = 'm', long = "move", value_name = "DEST")]
+        move_to: Option<String>,
+        /// Copy items to dest
+        #[arg(short = 'o', long = "copy", value_name = "DEST")]
+        copy_to: Option<String>,
+        /// Tag matched items with 'k=v' attribute
+        #[arg(short = 't', long)]
+        tag: Option<String>,
+        /// Remove items from library
+        #[arg(short = 'r', long)]
+        remove: bool,
+        /// Match albums instead of tracks
+        #[arg(short = 'a', long)]
+        album: bool,
+        /// Print paths for matched items or albums
+        #[arg(short = 'p', long)]
+        path: bool,
+        /// Print with custom format
+        #[arg(short = 'f', long)]
+        format: Option<String>,
+        /// Limit query results
+        #[arg(short = 'l', long)]
+        limit: Option<usize>,
+        #[arg(allow_hyphen_values = true)]
+        query: Vec<String>,
+    },
+    /// Update metadata from musicbrainz (plugin: mbsync)
+    Mbsync {
+        /// Show all changes but do nothing
+        #[arg(short = 'p', long)]
+        pretend: bool,
+        /// Move files in the library directory
+        #[arg(short = 'm', long = "move", overrides_with = "nomove")]
+        mv: bool,
+        /// Don't move files in library
+        #[arg(short = 'M', long = "nomove", overrides_with = "mv")]
+        nomove: bool,
+        /// Don't write updated metadata to files
+        #[arg(short = 'W', long = "nowrite")]
+        nowrite: bool,
+        /// Print with custom format
+        #[arg(short = 'f', long)]
+        format: Option<String>,
+        /// Limit query results
+        #[arg(short = 'l', long)]
+        limit: Option<usize>,
+        #[arg(allow_hyphen_values = true)]
+        query: Vec<String>,
+    },
     /// List missing tracks (plugin: missing)
     #[command(visible_alias = "miss")]
     Missing {
@@ -505,6 +604,57 @@ pub enum Cmd {
         drop: bool,
         /// Limit query results
         #[arg(short = 'l', long)]
+        limit: Option<usize>,
+        #[arg(allow_hyphen_values = true)]
+        query: Vec<String>,
+    },
+    /// Convert to external location (plugin: convert)
+    Convert {
+        /// Show actions but do nothing
+        #[arg(short = 'p', long)]
+        pretend: bool,
+        /// Change the number of threads, defaults to maximum available
+        /// processors
+        #[arg(short = 't', long)]
+        threads: Option<usize>,
+        /// Reconvert if original file is newer than converted file
+        #[arg(short = 'r', long)]
+        refresh: bool,
+        /// Keep only the converted and move the old files
+        #[arg(short = 'k', long = "keep-new")]
+        keep_new: bool,
+        /// Set the destination directory
+        #[arg(short = 'd', long)]
+        dest: Option<String>,
+        /// Set the target format of the tracks
+        #[arg(short = 'f', long)]
+        format: Option<String>,
+        /// Do not ask for confirmation
+        #[arg(short = 'y', long)]
+        yes: bool,
+        /// Symlink files that do not need transcoding.
+        #[arg(short = 'l', long)]
+        link: bool,
+        /// Hardlink files that do not need transcoding. Overrides --link.
+        #[arg(short = 'H', long)]
+        hardlink: bool,
+        /// Create an m3u8 playlist file containing the converted files. The
+        /// playlist file will be saved below the destination directory, thus
+        /// PLAYLIST could be a file name or a relative path. To ensure a
+        /// working playlist when transferred to a different computer, or
+        /// opened from an external drive, relative paths pointing to media
+        /// files will be used.
+        #[arg(short = 'm', long)]
+        playlist: Option<String>,
+        /// Force transcoding. Ignores no_convert, never_convert_lossy_files,
+        /// and max_bitrate
+        #[arg(short = 'F', long)]
+        force: bool,
+        /// Match albums instead of tracks
+        #[arg(short = 'a', long)]
+        album: bool,
+        /// Limit query results
+        #[arg(long)]
         limit: Option<usize>,
         #[arg(allow_hyphen_values = true)]
         query: Vec<String>,

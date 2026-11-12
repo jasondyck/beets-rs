@@ -4,6 +4,8 @@
 
 pub mod art;
 pub mod chroma;
+pub mod convert;
+pub mod duplicates;
 pub mod edit;
 pub mod embedart;
 pub mod fetchart;
@@ -11,10 +13,13 @@ pub mod ftintitle;
 pub mod info;
 pub mod lastgenre;
 pub mod lyrics;
+pub mod mbsync;
 pub mod missing;
+pub mod replaygain;
 pub mod requests;
 pub mod scrub;
 pub mod the;
+pub mod types;
 pub mod zero;
 
 use crate::config::Config;
@@ -113,6 +118,7 @@ pub trait Plugin {
 
 pub const AVAILABLE: &[&str] = &[
     "chroma",
+    "duplicates",
     "edit",
     "embedart",
     "fetchart",
@@ -121,11 +127,15 @@ pub const AVAILABLE: &[&str] = &[
     "inline",
     "lastgenre",
     "lyrics",
+    "mbsync",
     "missing",
     "musicbrainz",
+    "replaygain",
+    "convert",
     "scrub",
     "the",
     "zero",
+    "types",
 ];
 
 /// The plugins to load: `plugins` (or `-p`) minus `disabled_plugins` (`-P`),
@@ -162,9 +172,16 @@ pub fn load(cfg: &Config) -> Result<Vec<Box<dyn Plugin>>> {
             "info" => out.push(Box::new(info::InfoPlugin)),
             "inline" => out.push(Box::new(crate::inline::load(cfg))),
             "ftintitle" => out.push(Box::new(ftintitle::FtInTitle::new(cfg))),
+            "duplicates" => out.push(Box::new(duplicates::DuplicatesPlugin)),
             "scrub" => out.push(Box::new(scrub::Scrub::new(cfg))),
+            "convert" => out.push(Box::new(convert::ConvertPlugin::new())),
             "edit" => out.push(Box::new(edit::EditPlugin::new(cfg))),
             "missing" => out.push(Box::new(missing::MissingPlugin)),
+            "mbsync" => out.push(Box::new(mbsync::MbsyncPlugin)),
+            "replaygain" => match replaygain::ReplayGain::new(cfg) {
+                Ok(p) => out.push(Box::new(p)),
+                Err(e) => crate::logging::emit(format!("** error loading plugin {name}\n{e:#}")),
+            },
             // Also a metadata source: its lookups and candidates are wired
             // into `MbSource` and `autotag` (see the module docs).
             "chroma" => out.push(Box::new(chroma::Chroma)),
@@ -175,6 +192,7 @@ pub fn load(cfg: &Config) -> Result<Vec<Box<dyn Plugin>>> {
                 Ok(p) => out.push(Box::new(p)),
                 Err(e) => crate::logging::emit(format!("** error loading plugin {name}\n{e:#}")),
             },
+            "types" => out.push(Box::new(types::TypesPlugin)),
             // The autotagger's metadata source, as in beets 2.14: it's
             // queried only while this plugin is enabled.
             "musicbrainz" => crate::mb::warn_deprecated_config(cfg),
@@ -238,6 +256,10 @@ impl PluginLog {
 
     pub fn set_base_level(&self, level: u8) {
         self.base_level.set(level);
+    }
+
+    pub fn base_level(&self) -> u8 {
+        self.base_level.get()
     }
 
     /// Run `f` with the base level at `level`, restoring it afterwards.

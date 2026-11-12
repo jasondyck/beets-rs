@@ -78,6 +78,7 @@ original_date: no
 va_name: Various Artists
 format_item: $artist - $album - $title
 format_album: $albumartist - $album
+time_format: '%Y-%m-%d %H:%M:%S'
 sort_item: artist+ album+ disc+ track+
 sort_album: albumartist+ album+
 sort_case_insensitive: yes
@@ -243,6 +244,23 @@ lastgenre:
     ignorelist: {}
     aliases: yes
 
+duplicates:
+    album: no
+    checksum: ''
+    copy: ''
+    count: no
+    delete: no
+    format: ''
+    full: no
+    keys: []
+    merge: no
+    move: ''
+    path: no
+    tiebreak: {}
+    strict: no
+    tag: ''
+    remove: no
+
 missing:
     count: no
     total: no
@@ -262,6 +280,18 @@ zero:
     keep_fields: []
     update_database: no
     omit_single_disc: no
+
+replaygain:
+    overwrite: no
+    auto: yes
+    backend: command
+    threads: CPU_COUNT
+    parallel_on_import: no
+    per_disc: no
+    peak: 'true'
+    targetlevel: 89
+    r128: [Opus]
+    r128_targetlevel: 84
 
 chroma:
     search_limit: 5
@@ -299,6 +329,44 @@ ftintitle:
 
 scrub:
     auto: yes
+
+convert:
+    dest:
+    pretend: no
+    link: no
+    hardlink: no
+    threads: CPU_COUNT
+    format: mp3
+    id3v23: inherit
+    write_metadata: yes
+    formats:
+        aac:
+            command: ffmpeg -i $source -y -vn -acodec aac -aq 1 $dest
+            extension: m4a
+        alac:
+            command: ffmpeg -i $source -y -vn -acodec alac $dest
+            extension: m4a
+        flac: ffmpeg -i $source -y -vn -acodec flac $dest
+        mp3: ffmpeg -i $source -y -vn -aq 2 $dest
+        opus: ffmpeg -i $source -y -vn -acodec libopus -ab 96k $dest
+        ogg: ffmpeg -i $source -y -vn -acodec libvorbis -aq 3 $dest
+        wma: ffmpeg -i $source -y -vn -acodec wmav2 -vn $dest
+    max_bitrate:
+    auto: no
+    auto_keep: no
+    tmpdir:
+    quiet: no
+    embed: yes
+    paths: {}
+    no_convert: ''
+    never_convert_lossy_files: no
+    copy_album_art: no
+    album_art_maxwidth: 0
+    delete_originals: no
+    playlist:
+    force: no
+    refresh: no
+    keep_new: no
 
 edit:
     albumfields: album albumartist
@@ -383,13 +451,26 @@ const PLUGIN_SECTIONS: &[&str] = &[
     "zero",
     "chroma",
     "ftintitle",
+    "replaygain",
+    "duplicates",
     "scrub",
+    "convert",
     "edit",
 ];
 
 /// Plugins whose defaults are top-level keys (beets' `config.add`).
 const PLUGIN_TOP_KEYS: &[(&str, &[&str])] =
     &[("inline", &["pathfields", "item_fields", "album_fields"])];
+
+/// `DEFAULT_CONFIG` parsed, with the defaults computed at run time
+/// (replaygain's `threads`: `os.cpu_count()`).
+fn default_tree() -> Y {
+    let text = DEFAULT_CONFIG.replace(
+        "threads: CPU_COUNT",
+        &format!("threads: {}", crate::plugins::replaygain::cpu_count()),
+    );
+    serde_yaml::from_str(&text).expect("default config parses")
+}
 
 /// confuse's `ConfigReadError`: "PATH could not be read: REASON".
 fn read_yaml(file: &Path) -> Result<Y> {
@@ -504,7 +585,7 @@ impl Config {
 
     /// `load` with the configuration directory given.
     pub fn load_in(dir: &Path, overlays: &[PathBuf]) -> Result<Config> {
-        let defaults: Y = serde_yaml::from_str(DEFAULT_CONFIG).expect("default config parses");
+        let defaults: Y = default_tree();
         let mut cfg = Config {
             root: defaults,
             user: Y::Mapping(Mapping::new()),
@@ -560,7 +641,7 @@ impl Config {
 
     pub fn defaults() -> Config {
         Config {
-            root: serde_yaml::from_str(DEFAULT_CONFIG).unwrap(),
+            root: default_tree(),
             user: Y::Mapping(Mapping::new()),
             config_dir: default_config_dir(),
             sources: vec![],
@@ -589,7 +670,7 @@ impl Config {
         let mut out = if full {
             self.root.clone()
         } else {
-            let defaults: Y = serde_yaml::from_str(DEFAULT_CONFIG).unwrap();
+            let defaults: Y = default_tree();
             let mut base = Mapping::new();
             for p in PLUGIN_SECTIONS.iter().filter(|p| enabled(p)) {
                 if let Some(v) = defaults.get(*p) {

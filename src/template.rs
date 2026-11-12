@@ -480,12 +480,12 @@ pub fn asciify_path(s: &str, sep_replace: &str) -> String {
 /// Format a time string in `time_format` with another strftime format.
 fn tmpl_time(s: &str, fmt: &str) -> Result<String, String> {
     use std::fmt::Write;
-    let cur = crate::model::TIME_FORMAT;
-    let dt = chrono::NaiveDateTime::parse_from_str(s, cur).map_err(|_| {
+    let cur = crate::model::time_format();
+    let dt = crate::model::strptime(s).ok_or_else(|| {
         format!(
             "time data {} does not match format {}",
             py_repr(s),
-            py_repr(cur)
+            py_repr(&cur)
         )
     })?;
     let mut out = String::new();

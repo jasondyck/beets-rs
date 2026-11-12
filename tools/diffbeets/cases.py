@@ -970,6 +970,10 @@ def cases():
         out.append((f"info:{' '.join(args)}", ["-p", "info", "info", *args]))
     for args in MISSING_ARGS:
         out.append((f"missing:{' '.join(args)}", [*_NOMB, "-p", "missing", *args]))
+    for args in DUP_ARGS:
+        out.append((f"dup:{' '.join(args)}", ["-p", "duplicates", *args]))
+    for args in TYPES_ARGS:
+        out.append((f"types:{' '.join(args)}", args))
     return out
 
 
@@ -1585,3 +1589,350 @@ EXPECTED.update({
     "art:cmd-not-enabled:1": _NOT_ENABLED,
     "art:extractart:2": _EXTRACT_CRASH,
 })
+
+# replaygain, ffmpeg backend (`rg/`: an MP3 album on two discs, an Opus album,
+# a FLAC album): gains computed on import and by the command, as stored
+# (`ls`) and as written to the files (`info`).
+_RG_LS = ["ls", "-f", "$title|$disc|$rg_track_gain|$rg_track_peak|$rg_album_gain|$rg_album_peak"
+          "|$r128_track_gain|$r128_album_gain"]
+_RG_DB = ["ls", "-f", "$title %ifdef{{rg_track_gain,$rg_track_gain,-}} "
+          "%ifdef{{rg_album_peak,$rg_album_peak,-}} %ifdef{{r128_album_gain,$r128_album_gain,-}}"]
+_RG_TAGS = ["-p", "info", "info", "-i",
+            "title,rg_track_gain,rg_track_peak,rg_album_gain,rg_album_peak,r128_track_gain,"
+            "r128_album_gain", "artist:RG Artist"]
+
+
+def _rg(cfg=""):
+    return "{{plugins: [replaygain], replaygain: {{backend: ffmpeg" + cfg + "}}}}"
+
+
+ART_CASES += [
+    ("rg-import", "rg", {}, _rg(), [_IMP, _RG_LS, _RG_DB, _RG_TAGS]),
+    ("rg-import-write", "rg", {}, "{{import: {{write: yes}}, " + _rg()[2:],
+     [_IMP, _RG_TAGS]),
+    ("rg-import-singletons", "rg", {}, _rg(), [["import", "-A", "-q", "-s", "{music}"], _RG_LS]),
+    ("rg-import-parallel", "rg", {}, _rg(", parallel_on_import: yes, threads: 2"),
+     [_IMP, _RG_LS]),
+    ("rg-auto-off", "rg", {}, _rg(", auto: no"), [_IMP, _RG_LS, ["replaygain", "-a"], _RG_LS]),
+    ("rg-cmd", "rg", {}, _rg(", auto: no"),
+     [_IMP, ["replaygain"], _RG_LS, ["replaygain"], ["replaygain", "-a", "album:RG Album"],
+      _RG_LS, ["replaygain", "-a"], ["replaygain", "-f", "-t", "0", "title:One"],
+      ["replaygain", "-a", "-l", "1", "-f"], _RG_DB, _RG_TAGS]),
+    ("rg-cmd-write", "rg", {}, _rg(", auto: no"),
+     [_IMP, ["replaygain", "-a", "-w", "-t", "1"], _RG_TAGS, ["write", "-p"]]),
+    ("rg-cmd-nowrite", "rg", {}, "{{import: {{write: yes}}, " + _rg(", auto: no")[2:],
+     [_IMP, ["replaygain", "-W"], _RG_TAGS, ["replaygain", "-a"], _RG_TAGS]),
+    ("rg-targetlevel", "rg", {}, _rg(", targetlevel: 84, r128_targetlevel: 89, peak: sample"),
+     [_IMP, _RG_LS]),
+    ("rg-per-disc", "rg", {}, _rg(", per_disc: yes"), [_IMP, _RG_LS]),
+    ("rg-r128-formats", "rg", {}, _rg(", r128: [MP3, FLAC]"), [_IMP, _RG_LS, _RG_TAGS]),
+    ("rg-no-r128", "rg", {}, _rg(", r128: []"), [_IMP, _RG_LS]),
+    ("rg-overwrite", "rg", {}, _rg(", overwrite: yes, auto: no"),
+     [_IMP, ["replaygain", "-a"], ["modify", "-y", "rg_track_gain=1.5", "title:One"],
+      ["replaygain", "-a"], ["replaygain", "-a", "-f"], _RG_LS]),
+    ("rg-mixed-album", "rg", {}, _rg(", auto: no"),
+     [["import", "-A", "-q", "--flat", "{music}"], ["replaygain", "-a"], _RG_LS]),
+    ("rg-bad-backend", "rg", {}, "{{plugins: [replaygain], replaygain: {{backend: bogus}}}}",
+     [["replaygain"]]),
+    ("rg-bad-peak", "rg", {}, _rg(", peak: loud"), [["replaygain"]]),
+    ("rg-gstreamer", "rg", {}, "{{plugins: [replaygain], replaygain: {{backend: gstreamer}}}}",
+     [["replaygain"]]),
+    ("rg-command-missing", "rg", {}, "{{plugins: [replaygain]}}", [["replaygain"]]),
+]
+EXPECTED.update({
+    "art:rg-bad-backend:1": _PLUGIN_LOAD,
+    "art:rg-bad-peak:1": _PLUGIN_LOAD,
+    "art:rg-gstreamer:1": _PLUGIN_LOAD,
+    "art:rg-command-missing:1": _PLUGIN_LOAD,
+    "art:rg-bad-backend:state": _PLUGIN_LOAD,
+    "art:rg-bad-peak:state": _PLUGIN_LOAD,
+    "art:rg-gstreamer:state": _PLUGIN_LOAD,
+    "art:rg-command-missing:state": _PLUGIN_LOAD,
+})
+
+# ---------------------------------------------------------------------------
+# duplicates plugin. Read-only listings on the shared corpus (main phase);
+# the cases that change the library run in the art phase, each on a fresh
+# library with the same two tracks imported twice.
+
+DUP_ARGS = [
+    ["dup"],
+    ["dup", "-a"],
+    ["dup", "-k", "album", "-F", "-c"],
+    ["duplicates", "-a", "-k", "album", "-F", "-c"],
+    ["dup", "-k", "artist", "-k", "album", "-s"],
+    ["dup", "-k", "album", "-k", "nonexistent", "-F", "-c"],
+    ["dup", "-k", "album", "-k", "nonexistent", "-s"],
+    ["dup", "-k", "album", "-p"],
+    ["dup", "-a", "-k", "albumartist", "-F", "-f", "$albumartist|$album|$id"],
+    ["dup", "-k", "album", "-l", "5", "-F"],
+    ["dup", "-k", "album", "-F", "Hit"],
+    ["dup", "-k", "year", "-F", "-c"],
+    ["dup", "-k", "length", "-F"],
+    ["dup", "-k", "comp", "-k", "singleton", "-F", "-c"],
+    ["dup", "-a", "-k", "albumtype", "-k", "year", "-p", "-c"],
+]
+
+
+_DUP_CFG = "{{plugins: [duplicates], import: {{duplicate_action: keep}}}}"
+_DUP_IMP = [_IMP, _IMP]
+_DUP_LS = ["ls", "-f", "$id $album_id $title $grouping $mb_trackid $dupe"]
+_DUP_LSA = ["ls", "-a", "-f", "$id $album $dupe"]
+_CKSUM = "sh -c 'cksum < \"$0\"' {{file}}"
+ART_CASES += [
+    ("dup-list", "tracks", {}, _DUP_CFG,
+     [*_DUP_IMP, ["dup", "-k", "title", "-F", "-c"], ["dup", "-a", "-k", "album", "-c"],
+      ["dup", "-k", "title", "-p"], ["dup", "-a", "-k", "album", "-F", "-p"]]),
+    ("dup-tag", "tracks", {}, _DUP_CFG,
+     [*_DUP_IMP, ["dup", "-k", "title", "-t", "dupe=1"], _DUP_LS]),
+    ("dup-tag-album", "tracks", {}, _DUP_CFG,
+     [*_DUP_IMP, ["dup", "-a", "-k", "album", "-t", "dupe=1"], _DUP_LS, _DUP_LSA]),
+    ("dup-tag-bad", "tracks", {}, _DUP_CFG,
+     [*_DUP_IMP, ["dup", "-k", "title", "-t", "a=b=c"], _DUP_LS]),
+    ("dup-remove", "tracks", {}, _DUP_CFG,
+     [*_DUP_IMP, ["dup", "-k", "title", "-r"], _DUP_LS, _DUP_LSA]),
+    ("dup-delete", "tracks", {}, _DUP_CFG,
+     [*_DUP_IMP, ["dup", "-k", "title", "-d"], _DUP_LS, _DUP_LSA]),
+    ("dup-delete-album", "tracks", {}, _DUP_CFG,
+     [*_DUP_IMP, ["dup", "-a", "-k", "album", "-d"], _DUP_LS, _DUP_LSA]),
+    ("dup-copy", "tracks", {}, _DUP_CFG,
+     [*_DUP_IMP, ["dup", "-k", "title", "-o", "{root}/out"], ["ls", "-p"]]),
+    ("dup-move-album", "tracks", {}, _DUP_CFG,
+     [*_DUP_IMP, ["dup", "-a", "-k", "album", "-m", "{root}/out"], ["ls", "-p"]]),
+    ("dup-merge-items", "tracks", {}, _DUP_CFG,
+     [*_DUP_IMP, ["modify", "-y", "-M", "id:3", "grouping=G"],
+      ["dup", "-k", "title", "-M", "-F", "-f", "$id $grouping"], _DUP_LS]),
+    ("dup-merge-albums", "tracks", {}, _DUP_CFG,
+     [*_DUP_IMP, ["modify", "-y", "-M", "id:3", "mb_trackid=x3"],
+      ["dup", "-a", "-k", "album", "-M", "-F"], _DUP_LS, ["ls", "-f", "$id $album_id $path"]]),
+    ("dup-checksum", "tracks", {}, _DUP_CFG,
+     [*_DUP_IMP, ["dup", "-C", _CKSUM, "-F"], ["dup", "-C", _CKSUM, "-c"],
+      ["ls", "-f", "$id $sh"], ["dup", "-C", "false {{file}}", "-F"]]),
+    ("dup-tiebreak", "tracks", {},
+     "{{plugins: [duplicates], import: {{duplicate_action: keep}}, "
+     "duplicates: {{tiebreak: {{items: [id]}}}}}}",
+     [*_DUP_IMP, ["dup", "-k", "title", "-F", "-f", "$id $title"]]),
+]
+
+
+# ---------------------------------------------------------------------------
+# types plugin (flexible attribute types) and queries on album getters
+# (`albumtotal`, the missing plugin's `$missing`). Read-only on the shared
+# corpus; `modify` cases run in the art phase on fresh libraries.
+
+EXTRA_CONFIGS["types.yaml"] = (
+    "types: {{rating: int, Flex_Attr: bool, albummood: int, mood: float}}\n")
+EXTRA_CONFIGS["typesf.yaml"] = "types: {{rating: float}}\n"
+EXTRA_CONFIGS["typesd.yaml"] = "time_format: '%Y-%m-%d'\ntypes: {{releasedate: date}}\n"
+_TY = ["-c", f"{ROOT}/types.yaml", "-p", "types"]
+_TYF = ["-c", f"{ROOT}/typesf.yaml", "-p", "types"]
+_TYD = ["-c", f"{ROOT}/typesd.yaml", "-p", "types"]
+_MISS = ["-p", "missing"]
+TYPES_ARGS = [
+    [*_TY, "ls", "-f", "$title|$rating|$Flex_Attr|$mood|%ifdef{rating,Y,N}", "rating:1.."],
+    [*_TY, "ls", "-f", "$title $rating", "rating+", "title+"],
+    [*_TY, "ls", "-f", "$title $rating", "rating-", "title+"],
+    [*_TY, "ls", "-f", "$title", "rating:5..7"],
+    [*_TY, "ls", "-f", "$title", "rating:10"],
+    [*_TY, "ls", "-f", "$title", "rating:=5"],
+    [*_TY, "ls", "-f", "$title", "rating::^1"],
+    [*_TY, "ls", "-f", "$title", "rating:1"],
+    [*_TY, "ls", "-f", "$title", "rating:abc"],
+    [*_TY, "ls", "-f", "$title", "Flex_Attr:false"],
+    [*_TY, "ls", "-f", "$title", "mood:..1"],
+    [*_TY, "ls", "-a", "-f", "$album $albummood", "albummood:0"],
+    [*_TY, "ls", "-a", "-f", "$album", "albummood+", "album+"],
+    [*_TY, "ls", "-f", "$title $albummood", "albummood:0"],
+    ["-c", f"{ROOT}/types.yaml", "-p", "types,info", "info", "-l", "-i",
+     "rating,Flex_Attr,nope", "rating:1.."],
+    [*_TYF, "ls", "-f", "$title $rating", "rating:3..7.5"],
+    [*_TYF, "ls", "-f", "$title $rating", "rating+", "title+"],
+    [*_TYD, "ls", "-f", "$title $releasedate", "releasedate:2001"],
+    [*_TYD, "ls", "-f", "$title $releasedate", "releasedate:..2002-01"],
+    [*_MISS, "ls", "-a", "-f", "$album $missing", "missing:1.."],
+    [*_MISS, "ls", "-a", "-f", "$album", "missing:0"],
+    [*_MISS, "ls", "-a", "-f", "$album", "missing:=-1"],
+    [*_MISS, "ls", "-a", "-f", "$album $missing", "missing+", "album+"],
+    [*_MISS, "ls", "-f", "$title", "missing:-1"],
+    ["ls", "-a", "-f", "$album $albumtotal", "albumtotal:3"],
+    ["ls", "-a", "-f", "$album", "albumtotal:2..3"],
+    ["ls", "-a", "-f", "$album $albumtotal", "albumtotal-", "album+"],
+    ["ls", "-f", "$title", "albumtotal:5"],
+    ["ls", "-a", "-f", "$album", "missing:1"],
+]
+
+_TY_CFG = "{{plugins: [types], types: {{myint: int, myfloat: float, mybool: bool, mydate: date}}}}"
+_TY_LS = ["ls", "-f", "$title|$myint|$myfloat|$mybool|$mydate|%ifdef{{myint,Y,N}}"]
+ART_CASES += [
+    ("types-modify", "tracks", {}, _TY_CFG,
+     [_IMP, ["modify", "-y", "title:One", "myint=2", "myfloat=3.14159", "mybool=yes",
+             "mydate=2020-01-02 10:11:12"],
+      ["modify", "-y", "title:Two", "myint=abc", "myfloat=-9.1", "mybool=xyz",
+       "mydate=garbage"],
+      _TY_LS, ["ls", "-f", "$title", "myint:1..3"], ["ls", "-f", "$title", "mybool:false"],
+      ["ls", "-f", "$title", "mydate:2020"], ["ls", "-f", "$title", "myfloat+"],
+      ["modify", "-y", "title:One", "myint=3", "mybool=no"],
+      ["modify", "-y", "title:One", "myint!"], _TY_LS]),
+    ("types-album", "tracks", {}, _TY_CFG,
+     [_IMP, ["modify", "-y", "-a", "album:Art", "myint=5", "mybool=1"],
+      ["ls", "-a", "-f", "$album $myint $mybool", "myint:4..6"],
+      ["ls", "-f", "$title $myint", "myint:5"]]),
+    ("types-time-format", "tracks", {},
+     "{{plugins: [types], time_format: '%Y-%m-%d', types: {{mydate: date}}}}",
+     [_IMP, ["modify", "-y", "title:One", "mydate=1999-01-01"],
+      ["ls", "-f", "$title $mydate", "mydate:..1999-07"]]),
+]
+
+# convert: real ffmpeg on `conv` (a FLAC and an Ogg track); state: the
+# converted files' format, tags, embedded art and link targets, playlists.
+_CV_CFG = ("{{plugins: [convert], convert: {{dest: '{root}/out', threads: 1, "
+           "tmpdir: '{root}'" + "{extra}}}}}")
+_CV_LS = ["ls", "-f", "$path $format"]
+
+
+def _cv(extra=""):
+    return _CV_CFG.replace("{extra}", (", " + extra) if extra else "")
+
+
+_CV_IMP = ["import", "-A", "-q", "{music}"]
+# One file per import: beets' import pipeline prints every task's path
+# before the stages' messages.
+_CV_SINGLES = [["import", "-A", "-q", "-s", "{music}/01.flac"],
+               ["import", "-A", "-q", "-s", "{music}/02.ogg"]]
+ART_CASES += [
+    ("convert-basic", "conv", {}, _cv(),
+     [_CV_IMP, (["convert"], "n\n"), (["convert"], "y\n"), ["convert", "-y"], _CV_LS]),
+    ("convert-pretend-playlist", "conv", {}, _cv(),
+     [_CV_IMP, ["convert", "-p", "-m", "pl.m3u"], ["convert", "-y", "-m", "sub/pl.m3u8"]]),
+    ("convert-format-link", "conv", {}, _cv(),
+     [_CV_IMP, ["convert", "-y", "-f", "ogg", "-l"], ["convert", "-y", "-f", "vorbis",
+                                                      "-d", "{root}/out/v", "title:Dos"]]),
+    ("convert-hardlink", "conv", {}, _cv(),
+     [_CV_IMP, ["convert", "-y", "-f", "FLAC", "-H", "-l"]]),
+    ("convert-keep-new", "conv", {}, _cv(),
+     [_CV_IMP, ["convert", "-y", "-k", "-f", "ogg"], _CV_LS,
+      ["convert", "-y", "-k", "-p", "-f", "opus"]]),
+    ("convert-album-art", "conv", {"cover.jpg": "sq300.jpg"},
+     "{{plugins: [fetchart, convert], convert: {{dest: '{root}/out', threads: 1, "
+     "copy_album_art: yes, album_art_maxwidth: 100}}}}",
+     [_CV_IMP, ["convert", "-y", "-a", "-p"], ["convert", "-y", "-a"], ["convert", "-y", "-a"]]),
+    ("convert-album-art-copy", "conv", {"cover.jpg": "small.jpg"},
+     "{{plugins: [fetchart, convert], art_filename: 'folder', convert: {{dest: '{root}/out', "
+     "threads: 1, copy_album_art: yes, embed: no, album_art_maxwidth: 100}}}}",
+     [_CV_IMP, ["convert", "-y", "-a", "-p", "-l"], ["convert", "-y", "-a", "-l"]]),
+    ("convert-no-convert", "conv", {}, _cv("no_convert: 'format:OGG , title:Uno'"),
+     [_CV_IMP, ["convert", "-y"], ["convert", "-y", "-F", "-d", "{root}/out/f"]]),
+    ("convert-never-lossy", "conv", {}, _cv("never_convert_lossy_files: yes, format: opus"),
+     [_CV_IMP, ["convert", "-y"]]),
+    ("convert-max-bitrate", "conv", {}, _cv("max_bitrate: 1, format: ogg"),
+     [_CV_IMP, ["convert", "-y", "-m", "pl.m3u", "--limit", "1"], ["convert", "-y"]]),
+    ("convert-paths", "conv", {},
+     _cv("paths: {{default: '$album/$track-$title', 'format:OGG': 'ogg/$title'}}"),
+     [_CV_IMP, ["convert", "-y", "-m", "lists/all.m3u"]]),
+    ("convert-command-shortcut", "conv", {},
+     _cv("command: 'ffmpeg -i $source -y -vn -acodec libvorbis \"$dest\"', extension: oga"),
+     [_CV_IMP, ["convert", "-y", "-f", "flac"]]),
+    ("convert-errors", "conv", {},
+     _cv("formats: {{bad: {{extension: x}}, fail: {{command: 'false $source $dest', "
+         "extension: fl}}, gone: 'no-such-encoder-xyz $source $dest'}}"),
+     [_CV_IMP, ["convert", "-y", "-f", "xyz"], ["convert", "-y", "-f", "bad"],
+      ["convert", "-y", "-f", "fail"], ["convert", "-y", "-f", "gone", "title:Uno"],
+      ["convert", "-y", "nomatch"], ["convert", "-y", "-t", "0"]]),
+    ("convert-no-dest", "conv", {}, "{{plugins: [convert]}}",
+     [_CV_IMP, ["convert", "-y"], ["convert", "-p", "nomatch"]]),
+    ("convert-write-metadata-off", "conv", {}, _cv("write_metadata: no, id3v23: yes"),
+     [_CV_IMP, ["modify", "-y", "title=Changed"], ["convert", "-y"]]),
+    ("convert-id3v23", "conv", {}, _cv("id3v23: yes"),
+     [_CV_IMP, ["modify", "-y", "title:Dos", "title=Changed"], ["convert", "-y"]]),
+    # On import (singletons: beets converts an album's items in parallel,
+    # so their messages come in any order).
+    ("convert-auto", "conv", {}, _cv("auto: yes"), [*_CV_SINGLES, _CV_LS]),
+    ("convert-auto-delete", "conv", {}, _cv("auto: yes, delete_originals: yes, format: ogg"),
+     [*_CV_SINGLES, _CV_LS]),
+    ("convert-auto-move", "conv", {},
+     "{{plugins: [convert], import: {{copy: no, move: yes}}, convert: {{dest: '{root}/out', "
+     "threads: 1, auto: yes, quiet: yes, tmpdir: '{root}'}}}}", [*_CV_SINGLES, _CV_LS]),
+    ("convert-auto-fail", "conv", {}, _cv("auto: yes, command: 'false'"), [*_CV_SINGLES, _CV_LS]),
+    ("convert-auto-keep", "conv", {}, _cv("auto_keep: yes"), [*_CV_SINGLES, _CV_LS]),
+]
+
+# ---------------------------------------------------------------------------
+# mbsync, in the import phase (against its fake MusicBrainz): a library
+# imported from the fixtures, changed, then synced; each step is compared,
+# and the ls/db/requests outcomes are taken after the last step.
+
+_MBS = "plugins: [musicbrainz, mbsync]\n"
+_REC = "00000000-0000-0000-0001-0000000000"
+IMPORT_CASES += [
+    ("mbsync-album", "tagged", ["-t"], _MBS, ["a"], [
+        ["mbsync", "-p"],
+        ["modify", "-y", "-M", "title:Alpha", "title=Wrong", "year=1999", "label=Other"],
+        ["modify", "-y", "-M", "title:Beta", "artist=Somebody", "mb_trackid!"],
+        ["mbsync", "-p"],
+        ["mbsync"],
+        ["mbsync"],
+        ["ls", "-p"],
+    ]),
+    ("mbsync-album-nomove", "tagged", ["-t"], _MBS, ["a"], [
+        ["modify", "-y", "-M", "-a", "album=Old Name"],
+        ["mbsync", "-M", "-f", "$album|$title"],
+        ["ls", "-p"],
+    ]),
+    ("mbsync-album-write", "tagged", ["-t"], _MBS + "import:\n    write: yes\n", ["a"], [
+        ["modify", "-y", "-M", "-W", "title:Gamma", "title=Wrong"],
+        ["mbsync", "-W", "-M"],
+        ["modify", "-y", "-M", "-W", "title:Gamma", "title=Wrong"],
+        ["mbsync"],
+        ["ls", "-p"],
+    ]),
+    ("mbsync-skip", "fx", ["-A", "-C"], _MBS, [], [
+        ["mbsync"],
+        ["mbsync", "-f", "'%if{{$album,$album,$title}}'"],
+    ]),
+    ("mbsync-notfound", "tagged", ["-t", "-C"], _MBS, ["a"], [
+        ["modify", "-y", "-a", "mb_albumid=99999999-9999-9999-9999-999999999999"],
+        ["mbsync"],
+        ["modify", "-y", "-a", "mb_albumid=not-an-id"],
+        ["mbsync"],
+    ]),
+    ("mbsync-source", "tagged", ["-t", "-C"], _MBS, ["a"], [
+        ["modify", "-y", "-M", "title:Alpha", "title=Wrong"],
+        ["-P", "musicbrainz", "mbsync"],
+        ["modify", "-y", "-a", "data_source=Discogs"],
+        ["mbsync"],
+    ]),
+    ("mbsync-singletons", "fx", ["-A", "-s", "-C"], _MBS, [], [
+        ["mbsync"],
+        ["modify", "-y", "title:Alpha", f"mb_trackid={_REC}01"],
+        ["modify", "-y", "title:Beta", f"mb_trackid={_REC}99"],
+        ["mbsync", "-p"],
+        ["ls", "-f", "$title|$artist|$mb_trackid|$length"],
+        ["mbsync"],
+        ["ls", "-f", "$title|$artist|$mb_trackid|$length"],
+    ]),
+    ("mbsync-va", "sampler", ["-t", "-C"], _MBS, ["a"], [
+        ["modify", "-y", "-M", "disc:2", "title=Swapped", "artist=Nobody"],
+        ["modify", "-y", "-M", "-a", "albumartist=Someone"],
+        ["mbsync", "-p"],
+        ["mbsync"],
+    ]),
+]
+IMPORT_CASES += [
+    # Files really move: a title and the album renamed (and moved) by
+    # modify, then synced back.
+    ("mbsync-album-move", "tagged", ["-t"], _MBS, ["a"], [
+        ["modify", "-y", "title:Alpha", "title=Wrong"],
+        ["modify", "-y", "-a", "album=Old Name"],
+        ["ls", "-p"],
+        ["mbsync"],
+        ["ls", "-p"],
+    ]),
+    # Info listeners (ftintitle on albuminfo_received) apply to mbsync's
+    # lookups too.
+    ("mbsync-ftintitle", "sampler", ["-t", "-C"], "plugins: [musicbrainz, mbsync, ftintitle]\n",
+     ["a"], [
+        ["modify", "-y", "-M", "title:Ocean", "artist=Nobody", "title=Nothing"],
+        ["mbsync", "-p"],
+        ["mbsync"],
+     ]),
+]

@@ -91,6 +91,35 @@ def build_art_corpus(src, ffmpeg_audio):
              "-metadata:s:v", "comment=Cover (front)", out],
             check=True,
         )
+    build_rg_corpus(src)
+    # convert (`conv/`): a FLAC and an Ogg Vorbis track of one album.
+    for i, (title, fmt) in enumerate([("Uno", "flac"), ("Dos", "ogg")], 1):
+        tags = dict(common, title=title, track=str(i), album="Conv Album", _d="0.5")
+        ffmpeg_audio(os.path.join(src, "conv", f"{i:02d}.{fmt}"), fmt, tags)
+
+
+# replaygain (`rg/`): an MP3 album over two discs whose tracks differ in
+# loudness, an Opus album (R128) and a FLAC single.
+RG_AUDIO = [
+    ("a/01.mp3", "sine=frequency=440:duration=1", "One", "RG Album", "1"),
+    ("a/02.mp3", "anoisesrc=d=1:a=0.3:seed=7", "Two", "RG Album", "1"),
+    ("a/03.mp3", "sine=frequency=1000:duration=2,volume=0.3", "Three", "RG Album", "2"),
+    ("o/01.opus", "sine=frequency=300:duration=1", "Op One", "RG Opus", "1"),
+    ("o/02.opus", "anoisesrc=d=1:a=0.1:seed=3", "Op Two", "RG Opus", "1"),
+    ("f/01.flac", "anoisesrc=d=1:a=0.5:seed=5", "Flac One", "RG Flac", "1"),
+]
+
+
+def build_rg_corpus(src):
+    for i, (rel, lavfi, title, album, disc) in enumerate(RG_AUDIO, 1):
+        out = os.path.join(src, "rg", rel)
+        os.makedirs(os.path.dirname(out), exist_ok=True)
+        tags = {"title": title, "artist": "RG Artist", "album_artist": "RG Artist",
+                "album": album, "track": str(i), "disc": disc}
+        cmd = ["ffmpeg", "-nostdin", "-loglevel", "error", "-y", "-f", "lavfi", "-i", lavfi]
+        for k, v in tags.items():
+            cmd += ["-metadata", f"{k}={v}"]
+        subprocess.run([*cmd, out], check=True)
 
 
 class ArtServer:
@@ -163,6 +192,31 @@ def describe_embedded(path):
         return f"{len(images)} image(s), cover {describe_image(f.name)}"
 
 
+AUDIO_EXTS = (".mp3", ".flac", ".ogg", ".opus", ".m4a", ".ops")
+
+
+def describe_converted(path, normalise):
+    """A converted file (convert's `out/`): link target, format and tags."""
+    import mediafile
+
+    link = ""
+    if os.path.islink(path):
+        link = f" -> {normalise(os.readlink(path))}"
+    try:
+        mf = mediafile.MediaFile(path)
+    except Exception as exc:  # noqa: BLE001
+        return f"unreadable: {type(exc).__name__}{link}"
+    images = mf.images or []
+    art = f"{len(images)} image(s)"
+    if images:
+        with tempfile.NamedTemporaryFile() as f:
+            f.write(mf.art)
+            f.flush()
+            art += f", cover {describe_image(f.name)}"
+    return (f"{mf.format} {mf.title!r} {mf.artist!r} {mf.album!r} {mf.track} "
+            f"{art}{link}")
+
+
 def snapshot(root, tool, normalise):
     lines = []
     p = subprocess.run([tool.beet, "ls", "-a", "-f", "$album|$artpath|$art_source"],
@@ -177,7 +231,12 @@ def snapshot(root, tool, normalise):
                 full = os.path.join(dirpath, f)
                 rel = os.path.relpath(full, root)
                 low = f.lower()
-                if low.endswith(".mp3"):
+                if top == "out" and low.endswith(AUDIO_EXTS):
+                    lines.append(f"{rel}: {describe_converted(full, normalise)}")
+                elif top == "out" and low.endswith((".m3u", ".m3u8")):
+                    with open(full, encoding="utf-8") as fh:
+                        lines.append(f"{rel}: {fh.read()!r}")
+                elif low.endswith(".mp3"):
                     lines.append(f"{rel}: {describe_embedded(full)}")
                 elif low.endswith((".jpg", ".jpeg", ".png", ".webp", ".gif")):
                     lines.append(f"{rel}: {describe_image(full)}")
