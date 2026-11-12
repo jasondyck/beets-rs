@@ -441,6 +441,40 @@ pub fn run(cli: Cli) -> Result<()> {
                 },
             )
         }
+        Cmd::Lastgenre {
+            pretend,
+            force,
+            no_force,
+            keep_existing,
+            no_keep_existing,
+            source,
+            items,
+            albums: _,
+            query,
+        } => {
+            require_plugin(&cfg, "lastgenre")?;
+            if !plugins.iter().any(|p| p.name() == "lastgenre") {
+                // It failed to load (and said why).
+                bail!("unknown command 'lastgenre'");
+            }
+            let flag = |on: bool, off: bool| match (on, off) {
+                (true, _) => Some(true),
+                (_, true) => Some(false),
+                _ => None,
+            };
+            plugins::lastgenre::command(
+                &cfg,
+                &lib,
+                plugins::lastgenre::CmdOpts {
+                    pretend,
+                    force: flag(force, no_force),
+                    keep_existing: flag(keep_existing, no_keep_existing),
+                    source,
+                    album: !items,
+                    query,
+                },
+            )
+        }
         Cmd::Fields => fields(&lib),
         Cmd::MigrateBeets {
             beets_config,
@@ -680,6 +714,16 @@ fn model_changes_in(old: &Record, new: &Record, only: Option<&[String]>) -> Vec<
 /// it was) and its changes, if there are any. Returns whether there were.
 fn show_model_changes(label: &str, old: &Record, new: &Record) -> bool {
     show_changes(label, old, new, None, false)
+}
+
+/// `show_model_changes(new, old, fields, print_obj=False)`: print just the
+/// changes to `fields`. Returns whether there were any.
+pub fn print_model_changes(old: &Record, new: &Record, fields: &[String]) -> bool {
+    let changes = model_changes_in(old, new, Some(fields));
+    for c in &changes {
+        println!("  {}", c.replace('\n', "\n  "));
+    }
+    !changes.is_empty()
 }
 
 /// `show_model_changes` with beets' `fields` (only these are compared) and

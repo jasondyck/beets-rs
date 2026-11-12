@@ -170,6 +170,8 @@ pub struct Request<'a> {
     pub headers: &'a [(&'a str, &'a str)],
     pub json: Option<&'a J>,
     pub allow_redirects: bool,
+    /// An `application/x-www-form-urlencoded` body (see [`urlencode`]).
+    pub form: Option<&'a str>,
 }
 
 impl Session {
@@ -242,9 +244,12 @@ impl Session {
             for (k, v) in req.headers {
                 r = r.set(k, v);
             }
-            let result = match req.json {
-                Some(body) => r.send_json(body),
-                None => r.call(),
+            let result = match (req.json, req.form) {
+                (Some(body), _) => r.send_json(body),
+                (None, Some(form)) => r
+                    .set("Content-Type", "application/x-www-form-urlencoded")
+                    .send_string(form),
+                (None, None) => r.call(),
             };
             let retry_cause = match result {
                 Ok(resp) => return Ok(read(resp)),

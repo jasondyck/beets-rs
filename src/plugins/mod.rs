@@ -5,6 +5,7 @@
 pub mod art;
 pub mod embedart;
 pub mod fetchart;
+pub mod lastgenre;
 pub mod lyrics;
 pub mod requests;
 
@@ -55,7 +56,7 @@ pub trait Plugin {
     }
 }
 
-pub const AVAILABLE: &[&str] = &["embedart", "fetchart", "lyrics", "musicbrainz"];
+pub const AVAILABLE: &[&str] = &["embedart", "fetchart", "lastgenre", "lyrics", "musicbrainz"];
 
 /// The plugins to load: `plugins` (or `-p`) minus `disabled_plugins` (`-P`),
 /// as beets' `get_plugin_names`.
@@ -79,6 +80,10 @@ pub fn load(cfg: &Config) -> Result<Vec<Box<dyn Plugin>>> {
             // ("** error loading plugin", with the traceback in beets) and
             // left out.
             "fetchart" => match fetchart::FetchArt::new(cfg) {
+                Ok(p) => out.push(Box::new(p)),
+                Err(e) => crate::logging::emit(format!("** error loading plugin {name}\n{e:#}")),
+            },
+            "lastgenre" => match lastgenre::LastGenre::new(cfg) {
                 Ok(p) => out.push(Box::new(p)),
                 Err(e) => crate::logging::emit(format!("** error loading plugin {name}\n{e:#}")),
             },
