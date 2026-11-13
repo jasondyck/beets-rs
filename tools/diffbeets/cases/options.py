@@ -70,7 +70,15 @@ _OPTION_CASES = [
     # treatment; `-p` enables the plugin so both tools know the command.
     ["-p", "fetchart", "fetchart", "-y"],
     ["-p", "fetchart", "fetchart", "--bogus"],
-    ["-p", "fetchart", "fetchart", "-f", "--", "-x"],
+    # `-x` alone is a negated query on the nonexistent field `x`, so it
+    # matches nearly every album: fetchart then downloads art for them
+    # (network/timing dependent) and changes the shared library after the
+    # main phase's outputs were recorded, which made the migrate:artpath
+    # cases compare against stale expected output (and flaky). The extra
+    # `album:...` term keeps the dash-leading argument (the point of the
+    # case) while matching no album, so fetchart does nothing.
+    ["-p", "fetchart", "fetchart", "-f", "--", "-x",
+     "album:__diffbeets_no_such_album__"],
     ["-p", "info", "info", "-Q"],
     ["-p", "missing", "missing", "--nope"],
     ["-p", "fetchart,info", "info", "--bogus"],
