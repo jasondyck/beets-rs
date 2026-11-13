@@ -123,6 +123,8 @@ pub struct TrackInfo {
     /// Fields beets would have as None (MusicBrainz gave nothing), so that
     /// a disambiguation string or `match.required` sees them as beets does.
     pub nulls: BTreeSet<&'static str>,
+    /// Extra information fields (mbpseudo's custom tags).
+    pub extra: Vec<(String, V)>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -171,6 +173,8 @@ pub struct AlbumInfo {
     pub data_url: String,
     /// Fields beets would have as None (see [`TrackInfo::nulls`]).
     pub nulls: BTreeSet<&'static str>,
+    /// Extra information fields (mbpseudo's custom tags).
+    pub extra: Vec<(String, V)>,
 }
 
 /// A string field: None if listed in `nulls`.
@@ -244,6 +248,9 @@ impl AlbumInfo {
         .collect();
         for (k, v) in &self.external_ids {
             d.insert(k.clone(), V::opt_str(v.clone()));
+        }
+        for (k, v) in &self.extra {
+            d.insert(k.clone(), v.clone());
         }
         d
     }
@@ -322,6 +329,7 @@ impl TrackInfo {
         ]
         .into_iter()
         .map(|(k, v)| (k.to_string(), v))
+        .chain(self.extra.iter().cloned())
         .collect()
     }
 
@@ -395,6 +403,13 @@ pub struct ParseOpts {
     pub genres_field: Option<&'static str>,
     /// `musicbrainz.external_ids`: the sources wanted.
     pub external_ids: Vec<String>,
+    /// mbpseudo's `scripts`: pseudo-release scripts wanted.
+    pub pseudo_scripts: Vec<String>,
+    /// mbpseudo's `custom_tags_only`: translate only into custom tags.
+    pub custom_tags_only: bool,
+    /// mbpseudo's `album_custom_tags` / `track_custom_tags`.
+    pub album_custom_tags: Vec<(String, String)>,
+    pub track_custom_tags: Vec<(String, String)>,
 }
 
 impl Default for ParseOpts {
@@ -408,6 +423,10 @@ impl Default for ParseOpts {
             va_name: "Various Artists".into(),
             genres_field: None,
             external_ids: vec![],
+            pseudo_scripts: vec![],
+            custom_tags_only: false,
+            album_custom_tags: vec![],
+            track_custom_tags: vec![],
         }
     }
 }
@@ -433,6 +452,83 @@ impl ParseOpts {
                 .filter(|src| cfg.bool(&format!("musicbrainz.external_ids.{src}")))
                 .map(|s| s.to_string())
                 .collect(),
+            pseudo_scripts: if crate::plugins::enabled(cfg, "mbpseudo") {
+                cfg.list("mbpseudo.scripts")
+            } else {
+                vec![]
+            },
+            custom_tags_only: crate::plugins::enabled(cfg, "mbpseudo")
+                && cfg.bool("mbpseudo.custom_tags_only"),
+            album_custom_tags: if crate::plugins::enabled(cfg, "mbpseudo") {
+                cfg.mapping("mbpseudo.album_custom_tags")
+            } else {
+                vec![]
+            },
+            track_custom_tags: if crate::plugins::enabled(cfg, "mbpseudo") {
+                cfg.mapping("mbpseudo.track_custom_tags")
+            } else {
+                vec![]
+            },
+        }
+    }
+}
+
+/// The script of a release (or a release relation's release).
+fn release_script(v: &J) -> Option<&str> {
+    v.get("text-representation")?.get("script")?.as_str()
+}
+
+/// beets' mbpseudo `_wanted_pseudo_release_id`/`_intercept_mb_release`: the
+/// id of a forward `transl-tracklisting` release relation whose script is
+/// one of `scripts`, or None.
+pub fn wanted_pseudo_release(release: &J, scripts: &[String]) -> Option<String> {
+    if scripts.is_empty() {
+        return None;
+    }
+    if let Some(script) = release_script(release)
+        && scripts.iter().any(|s| s == script)
+    {
+        return None;
+    }
+    let album_id = release.get("id").and_then(|v| v.as_str())?;
+    for rel in relations(release, "release") {
+        if rel.get("type").and_then(|v| v.as_str()) != Some("transl-tracklisting")
+            || rel.get("direction").and_then(|v| v.as_str()) != Some("forward")
+        {
+            continue;
+        }
+        let Some(target) = rel.get("release") else {
+            continue;
+        };
+        if let (Some(id), Some(script)) = (
+            target.get("id").and_then(|v| v.as_str()),
+            release_script(target),
+        ) && scripts.iter().any(|s| s == script)
+        {
+            crate::logging::debug!(
+                "mbpseudo: Adding pseudo-release {id} for main release {album_id}"
+            );
+            return Some(id.to_string());
+        }
+    }
+    None
+}
+
+/// beets' mbpseudo `_add_custom_tags`: the pseudo-release's fields as the
+/// official release's custom info fields.
+pub fn add_custom_tags(official: &mut AlbumInfo, pseudo: &AlbumInfo, opts: &ParseOpts) {
+    let pdata = pseudo.to_data();
+    for (tag, pseudo_key) in &opts.album_custom_tags {
+        if let Some(v) = pdata.get(pseudo_key) {
+            official.extra.push((tag.clone(), v.clone()));
+        }
+    }
+    for (track, pseudo_track) in official.tracks.iter_mut().zip(&pseudo.tracks) {
+        let tdata = pseudo_track.to_data();
+        for (tag, pseudo_key) in &opts.track_custom_tags {
+            if let Some(v) = tdata.get(pseudo_key) {
+                track.extra.push((tag.clone(), v.clone()));
+            }
         }
     }
 }
@@ -948,6 +1044,7 @@ pub fn parse_release(j: &J, opts: &ParseOpts) -> AlbumInfo {
         external_ids: parse_external_ids(j, &opts.external_ids),
         data_source: "MusicBrainz".into(),
         nulls,
+        extra: vec![],
     };
     if info.va {
         let va = &opts.va_name;
@@ -1246,26 +1343,22 @@ impl MusicBrainz {
     /// MusicBrainz or the id isn't an MBID; a pseudo-release gets the
     /// release facts of the release it translates.
     pub fn album_for_id(&self, album_id: &str) -> Result<Option<AlbumInfo>> {
-        let mut info = self.album_for_id_raw(album_id)?;
-        if let Some(info) = info.as_mut() {
-            for l in info_listeners() {
-                l.album_info(info);
-            }
-        }
-        Ok(info)
+        Ok(self.album_for_id_variants(album_id)?.into_iter().next())
     }
 
-    fn album_for_id_raw(&self, album_id: &str) -> Result<Option<AlbumInfo>> {
+    /// The candidates a release id yields: the release itself, or (mbpseudo)
+    /// the translated pseudo-release first and the official one after it.
+    pub fn album_for_id_variants(&self, album_id: &str) -> Result<Vec<AlbumInfo>> {
         crate::logging::debug!("musicbrainz: Requesting MusicBrainz release {album_id}");
         let Some(id) = extract_id(album_id) else {
             crate::logging::debug!("musicbrainz: Invalid MBID ({album_id}).");
-            return Ok(None);
+            return Ok(vec![]);
         };
         let release = match self.get_release(&id) {
             Ok(r) => r,
             Err(e) if e.is::<NotFound>() => {
                 crate::logging::debug!("musicbrainz: Release {id} not found on MusicBrainz.");
-                return Ok(None);
+                return Ok(vec![]);
             }
             Err(e) => return Err(e),
         };
@@ -1277,9 +1370,39 @@ impl MusicBrainz {
         {
             let actual_id = rel.get("release").map(|r| s(r, "id")).unwrap_or_default();
             let actual = parse_release(&self.get_release(&actual_id)?, &self.opts);
-            return Ok(Some(merge_pseudo_and_actual(album, actual)));
+            let mut info = merge_pseudo_and_actual(album, actual);
+            for l in info_listeners() {
+                l.album_info(&mut info);
+            }
+            return Ok(vec![info]);
         }
-        Ok(Some(album))
+        // mbpseudo: an official release whose translation has a wanted
+        // script also offers the translated (pseudo) track listing.
+        if !self.opts.pseudo_scripts.is_empty()
+            && let Some(pseudo_id) = wanted_pseudo_release(&release, &self.opts.pseudo_scripts)
+        {
+            let pseudo = parse_release(&self.get_release(&pseudo_id)?, &self.opts);
+            if self.opts.custom_tags_only {
+                let mut official = album;
+                add_custom_tags(&mut official, &pseudo, &self.opts);
+                return Ok(vec![official]);
+            }
+            let merged = merge_pseudo_and_actual(pseudo, album.clone());
+            let mut infos = vec![merged, album];
+            for info in infos.iter_mut() {
+                for l in info_listeners() {
+                    l.album_info(info);
+                }
+            }
+            return Ok(infos);
+        }
+        let mut infos = vec![album];
+        for info in infos.iter_mut() {
+            for l in info_listeners() {
+                l.album_info(info);
+            }
+        }
+        Ok(infos)
     }
 
     /// A release lookup with beets' includes; a release with too many

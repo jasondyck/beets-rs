@@ -64,6 +64,8 @@ fn declared(cfg: &Config, plugin: &str) -> Result<[Vec<(String, FieldType)>; 2]>
             [t.clone(), t]
         }
         "lyrics" => [own(crate::plugins::lyrics::ITEM_TYPES), vec![]],
+        "acousticbrainz" => [own(crate::plugins::acousticbrainz::ITEM_TYPES), vec![]],
+        "mpdstats" => [own(crate::plugins::mpdstats::ITEM_TYPES), vec![]],
         "missing" => [vec![], own(crate::plugins::missing::ALBUM_TYPES)],
         _ => [vec![], vec![]],
     })

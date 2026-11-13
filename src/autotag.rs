@@ -701,9 +701,12 @@ pub fn album_candidates(
     // beets' `albums_for_ids`: each lookup's error is logged, not fatal.
     let add_ids = |cands: &mut Vec<AlbumMatch>, ids: &[String]| {
         for id in ids {
-            match mb.album_for_id(id) {
-                Ok(Some(info)) => add_candidate(&ctx, &cur, items, cands, info),
-                Ok(None) => {}
+            match mb.album_for_id_variants(id) {
+                Ok(infos) => {
+                    for info in infos {
+                        add_candidate(&ctx, &cur, items, cands, info);
+                    }
+                }
                 Err(e) => crate::logging::emit(format!("warning: {e:#}")),
             }
         }

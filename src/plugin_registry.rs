@@ -57,9 +57,11 @@ pub struct PluginDef {
 inventory::collect!(PluginDef);
 
 /// Every registered plugin, in the order of beets' bundled plugin list.
+/// `order` is the primary key; `name` breaks ties so the order is
+/// deterministic (the registry's link order is not).
 pub fn defs() -> Vec<&'static PluginDef> {
     let mut defs: Vec<&'static PluginDef> = inventory::iter::<PluginDef>.into_iter().collect();
-    defs.sort_by_key(|d| d.order);
+    defs.sort_by_key(|d| (d.order, d.name));
     defs
 }
 
@@ -70,12 +72,16 @@ pub fn find(name: &str) -> Option<&'static PluginDef> {
         .find(|d| d.name == name)
 }
 
-/// Every plugin command, in `beet --help` order.
+/// Every plugin command, in `beet --help` order (`order`, then the
+/// command's name to make ties deterministic).
 pub fn commands() -> Vec<&'static PluginCommand> {
-    let mut out: Vec<&'static PluginCommand> =
-        defs().iter().flat_map(|d| d.commands.iter()).collect();
-    out.sort_by_key(|c| c.order);
-    out
+    let mut out: Vec<(u16, String, &'static PluginCommand)> = defs()
+        .iter()
+        .flat_map(|d| d.commands.iter())
+        .map(|c| (c.order, (c.build)().get_name().to_string(), c))
+        .collect();
+    out.sort_by(|a, b| (a.0, &a.1).cmp(&(b.0, &b.1)));
+    out.into_iter().map(|(_, _, c)| c).collect()
 }
 
 /// The command whose canonical name or alias is `name`.
@@ -107,4 +113,53 @@ pub fn default_tree() -> Y {
         }
     }
     Y::Mapping(out)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::BTreeMap;
+
+    /// `order` values are picked by hand (one number per plugin file), so a
+    /// collision must show up here rather than depending on link order.
+    #[test]
+    fn plugin_orders_are_unique() {
+        let mut by_order: BTreeMap<u16, &'static str> = BTreeMap::new();
+        for def in inventory::iter::<PluginDef> {
+            if let Some(other) = by_order.insert(def.order, def.name) {
+                panic!(
+                    "plugins {other:?} and {:?} both have order {}; pick another",
+                    def.name, def.order
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn command_orders_are_unique() {
+        let mut all: Vec<(u16, String)> = inventory::iter::<PluginDef>
+            .into_iter()
+            .flat_map(|d| d.commands.iter())
+            .map(|c| (c.order, (c.build)().get_name().to_string()))
+            .collect();
+        all.sort();
+        for pair in all.windows(2) {
+            assert_ne!(
+                pair[0].0, pair[1].0,
+                "commands {:?} and {:?} both have order {}; pick another",
+                pair[0].1, pair[1].1, pair[0].0
+            );
+        }
+    }
+
+    #[test]
+    fn orders_are_deterministic() {
+        let names: Vec<&str> = defs().iter().map(|d| d.name).collect();
+        let mut sorted = names.clone();
+        sorted.sort_by_key(|n| {
+            let def = find(n).unwrap();
+            (def.order, def.name)
+        });
+        assert_eq!(names, sorted);
+    }
 }
