@@ -45,9 +45,8 @@ impl Rng {
         use std::time::{SystemTime, UNIX_EPOCH};
         let nanos = SystemTime::now()
             .duration_since(UNIX_EPOCH)
-            .map(|d| d.as_nanos() as u64)
-            .unwrap_or(0);
-        Rng(nanos ^ (std::process::id() as u64).rotate_left(32) ^ 0x9e37_79b9_7f4a_7c15)
+            .map_or(0, |d| d.as_nanos() as u64);
+        Rng(nanos ^ u64::from(std::process::id()).rotate_left(32) ^ 0x9e37_79b9_7f4a_7c15)
     }
 
     fn next_u64(&mut self) -> u64 {

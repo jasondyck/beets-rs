@@ -196,7 +196,7 @@ fn b64(data: &[u8]) -> String {
             *chunk.get(1).unwrap_or(&0),
             *chunk.get(2).unwrap_or(&0),
         ];
-        let n = (b[0] as u32) << 16 | (b[1] as u32) << 8 | b[2] as u32;
+        let n = u32::from(b[0]) << 16 | u32::from(b[1]) << 8 | u32::from(b[2]);
         out.push(ALPHABET[(n >> 18) as usize & 63] as char);
         out.push(ALPHABET[(n >> 12) as usize & 63] as char);
         out.push(if chunk.len() > 1 {
@@ -570,8 +570,7 @@ impl Spotify {
             track.medium_total = medium_totals
                 .iter()
                 .find(|(m, _)| *m == track.medium)
-                .map(|(_, n)| *n)
-                .unwrap_or(0);
+                .map_or(0, |(_, n)| *n);
         }
         let mut extra = vec![("spotify_album_id".to_string(), V::Str(id.to_string()))];
         if let Some(first) = artists_ids.first() {
@@ -727,7 +726,7 @@ impl Spotify {
     }
 
     /// `get_search_query_with_filters`.
-    pub fn search_query(&self, query_type: &str, artist: &str, name: &str, va_likely: bool) -> String {
+    pub fn search_query(query_type: &str, artist: &str, name: &str, va_likely: bool) -> String {
         let mut query = if query_type == "album" {
             format!("album:\"{name}\"")
         } else {
@@ -960,8 +959,7 @@ impl Spotify {
                 let id = track
                     .get("id")
                     .and_then(|i| i.as_str())
-                    .map(String::from)
-                    .unwrap_or_else(|| chunk.get(idx).cloned().unwrap_or_default());
+                    .map_or_else(|| chunk.get(idx).cloned().unwrap_or_default(), String::from);
                 out.push((id, track.clone()));
             }
         }
@@ -1002,8 +1000,7 @@ impl Spotify {
                 let id = feature
                     .get("id")
                     .and_then(|i| i.as_str())
-                    .map(String::from)
-                    .unwrap_or_else(|| chunk.get(idx).cloned().unwrap_or_default());
+                    .map_or_else(|| chunk.get(idx).cloned().unwrap_or_default(), String::from);
                 out.push((id, feature.clone()));
             }
         }
@@ -1178,7 +1175,7 @@ impl MetadataSource for Spotify {
         album: &str,
         va_likely: bool,
     ) -> Result<Vec<AlbumInfo>> {
-        let query = self.search_query("album", artist, album, va_likely);
+        let query = Self::search_query("album", artist, album, va_likely);
         let mut me = self.reopen();
         let results = match me.search_response("album", &query) {
             Ok(r) => r,
@@ -1206,7 +1203,7 @@ impl MetadataSource for Spotify {
         artist: &str,
         title: &str,
     ) -> Result<Vec<TrackInfo>> {
-        let query = self.search_query("track", artist, title, false);
+        let query = Self::search_query("track", artist, title, false);
         let mut me = self.reopen();
         let results = match me.search_response("track", &query) {
             Ok(r) => r,

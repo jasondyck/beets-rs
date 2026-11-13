@@ -61,9 +61,8 @@ fn salt() -> String {
     // to the same alphabet (beets' only requirement is a random string).
     let mut n = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_nanos() as u64)
-        .unwrap_or(0)
-        ^ (std::process::id() as u64) << 32;
+        .map_or(0, |d| d.as_nanos() as u64)
+        ^ u64::from(std::process::id()) << 32;
     let alphabet: Vec<char> = "abcdefghijklmnopqrstuvwxyz0123456789".chars().collect();
     let mut out = String::new();
     for _ in 0..10 {
@@ -124,7 +123,7 @@ impl State {
         let xml = self.send("getPlaylist", &[("id", id)])?;
         let doc = Document::parse(&xml)?;
         let root = doc.root_element();
-        let Some(playlist) = root.children().find(|n| n.is_element()) else {
+        let Some(playlist) = root.children().find(roxmltree::Node::is_element) else {
             return Ok(None);
         };
         // Beets checks the first child's `code` attribute for an API error.
@@ -141,7 +140,7 @@ impl State {
         let name = playlist.attribute("name").unwrap_or("undefined").to_string();
         let tracks = playlist
             .children()
-            .filter(|n| n.is_element())
+            .filter(roxmltree::Node::is_element)
             .map(|t| {
                 (
                     t.attribute("artist").unwrap_or_default().to_string(),
@@ -172,7 +171,7 @@ impl State {
         let xml = self.send("getPlaylists", &[])?;
         let doc = Document::parse(&xml)?;
         let root = doc.root_element();
-        let Some(playlists) = root.children().find(|n| n.is_element()) else {
+        let Some(playlists) = root.children().find(roxmltree::Node::is_element) else {
             return Ok(vec![]);
         };
         if let Some(code) = playlists.attribute("code")
@@ -188,7 +187,7 @@ impl State {
         let names = self.list("playlist_names");
         let mut ids = vec![];
         for name in names {
-            for playlist in playlists.children().filter(|n| n.is_element()) {
+            for playlist in playlists.children().filter(roxmltree::Node::is_element) {
                 if playlist.attribute("name") == Some(name.as_str())
                     && let Some(id) = playlist.attribute("id")
                 {

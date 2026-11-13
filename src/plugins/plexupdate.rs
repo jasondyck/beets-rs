@@ -180,8 +180,7 @@ fn uuid_hex() -> String {
     {
         let t = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_nanos())
-            .unwrap_or(0);
+            .map_or(0, |d| d.as_nanos());
         for (i, b) in bytes.iter_mut().enumerate() {
             *b = (t >> (i % 16 * 8)) as u8;
         }

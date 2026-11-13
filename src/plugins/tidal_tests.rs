@@ -4,6 +4,7 @@
 //! PKCE/token handling.
 
 use super::*;
+use crate::hooks::V;
 use crate::plugins::Plugin as _;
 use crate::plugins::requests::testserver::{Reply, Seen, Server, serve};
 use crate::plugins::tidal::api::{TidalApi, merge};
@@ -153,7 +154,7 @@ fn refs(map: &BTreeMap<String, J>) -> BTreeMap<String, &J> {
     map.iter().map(|(k, v)| (k.clone(), v)).collect()
 }
 
-fn doc(data: Vec<J>, included: Vec<J>) -> J {
+fn doc(data: &[J], included: &[J]) -> J {
     json!({"data": data, "included": included})
 }
 
@@ -277,7 +278,7 @@ fn pagination_merges_pages_and_dedupes_included() {
                 );
                 let mut included: Vec<J> = tracks.into_values().collect();
                 included.extend(artists.into_values());
-                Reply::json(doc(vec![a], included))
+                Reply::json(doc(&[a], &included))
             } else {
                 let (a, (tracks, artists)) = make_album(
                     "1",
@@ -290,7 +291,7 @@ fn pagination_merges_pages_and_dedupes_included() {
                 );
                 let mut included: Vec<J> = tracks.into_values().collect();
                 included.extend(artists.into_values());
-                let mut d = doc(vec![a], included);
+                let mut d = doc(&[a], &included);
                 d["links"] = json!({"next": "/v2/albums?page=2"});
                 Reply::json(d)
             }
@@ -319,7 +320,7 @@ fn tracks_are_batched_in_twenties() {
                 .map(|id| make_track(id, "T", "PT1M", "I", &["a1"], None))
                 .collect();
             let artists = vec![make_artist("a1", "A")];
-            Reply::json(doc(data, artists))
+            Reply::json(doc(&data, &artists))
         },
         |cfg| {
             let ids: Vec<String> = (0..45).map(|i| i.to_string()).collect();
@@ -338,7 +339,6 @@ fn tracks_are_batched_in_twenties() {
 // -------------------------------------------------------------- parsing
 
 fn expected_album_data() -> BTreeMap<String, crate::hooks::V> {
-    use crate::hooks::V as V;
     let pairs: Vec<(&str, V)> = vec![
         ("album", V::Str("My Album (Deluxe Edition)".into())),
         ("album_id", V::Str("1".into())),
@@ -427,7 +427,6 @@ fn parse_album() {
     assert_eq!(got, want);
     assert_eq!(info.tracks.len(), 2);
 
-    use crate::hooks::V as V;
     let first = info.tracks[0].to_data();
     assert_eq!(first["title"], V::Str("Track One".into()));
     assert_eq!(first["artist"], V::Str("Artist 1001".into()));
@@ -558,7 +557,6 @@ fn parse_track_fields() {
     assert_eq!(info.length, Some(240.0));
     assert_eq!(info.isrc, "ISRC456");
     assert_eq!(info.artist, "My Artist");
-    use crate::hooks::V as V;
     assert_eq!(info.to_data()["tidal_track_id"], V::Str("101".into()));
     assert_eq!(info.to_data()["tidal_artist_id"], V::Str("1001".into()));
     assert_eq!(info.to_data()["tidal_track_popularity"], V::Int(50));
@@ -585,9 +583,9 @@ fn track_for_id_and_missing() {
     let (result, requests) = with_api(
         move |r| {
             if r.target.contains("filter%5Bid%5D=490839595") {
-                Reply::json(doc(vec![track.clone()], vec![artist.clone()]))
+                Reply::json(doc(std::slice::from_ref(&track), std::slice::from_ref(&artist)))
             } else {
-                Reply::json(doc(vec![], vec![]))
+                Reply::json(doc(&[], &[]))
             }
         },
         |cfg| {
@@ -626,7 +624,7 @@ fn album_for_id_and_missing() {
         v
     };
     let (result, _) = with_api(
-        move |_| Reply::json(doc(vec![album.clone()], included.clone())),
+        move |_| Reply::json(doc(std::slice::from_ref(&album), &included)),
         |cfg| {
             let mut tidal = Tidal::new(cfg);
             let found = tidal
@@ -662,7 +660,7 @@ fn candidates_by_barcode() {
         v
     };
     let (found, requests) = with_api(
-        move |_| Reply::json(doc(vec![album.clone()], included.clone())),
+        move |_| Reply::json(doc(std::slice::from_ref(&album), &included)),
         |cfg| {
             let mut item = Item::new_item();
             item.set_str("barcode", "123456");
@@ -699,7 +697,7 @@ fn candidates_query_fallback() {
             if r.target.starts_with("/v2/searchResults") {
                 Reply::json(make_search_doc("albums", &["1"]))
             } else {
-                Reply::json(doc(vec![album.clone()], included.clone()))
+                Reply::json(doc(std::slice::from_ref(&album), &included))
             }
         },
         |cfg| {
@@ -738,9 +736,9 @@ fn item_candidates_by_isrc_and_query() {
     let (found, requests) = with_api(
         move |r| {
             if r.target.contains("filter%5Bisrc%5D=ISRC001") {
-                Reply::json(doc(vec![track.clone()], vec![artist.clone()]))
+                Reply::json(doc(std::slice::from_ref(&track), std::slice::from_ref(&artist)))
             } else {
-                Reply::json(doc(vec![], vec![]))
+                Reply::json(doc(&[], &[]))
             }
         },
         |cfg| {
@@ -765,7 +763,7 @@ fn item_candidates_by_isrc_and_query() {
                 d["included"] = json!([query_track, query_artist]);
                 Reply::json(d)
             } else {
-                Reply::json(doc(vec![], vec![]))
+                Reply::json(doc(&[], &[]))
             }
         },
         |cfg| {
@@ -793,7 +791,6 @@ fn track_search_handles_empty_response() {
 
 #[test]
 fn static_helpers() {
-    use crate::hooks::V as V;
     let with = |pairs: &[(&str, J)]| -> J {
         let mut m = serde_json::Map::new();
         for (k, v) in pairs {
@@ -934,7 +931,7 @@ fn merge_dedupes_included() {
         "included": [{"type": "artists", "id": "a"}, {"type": "tracks", "id": "t"}],
         "links": {"next": "x"},
     });
-    merge(&mut a, b);
+    merge(&mut a, &b);
     assert_eq!(a["data"].as_array().unwrap().len(), 2);
     assert_eq!(a["included"].as_array().unwrap().len(), 2);
     assert_eq!(a["links"]["next"], "x");
@@ -1110,7 +1107,7 @@ fn expired_token_is_refreshed() {
                     "expires_in": 3600,
                 }))
             } else {
-                Reply::json(doc(vec![], vec![]))
+                Reply::json(doc(&[], &[]))
             }
         });
         (dir, server)
@@ -1164,8 +1161,8 @@ fn import_begin_requires_a_token_file() {
 
 // -------------------------------------------------------------- tidalsync
 
-fn popularity_doc(track: J, artist: J) -> Reply {
-    Reply::json(doc(vec![track], vec![artist]))
+fn popularity_doc(track: &J, artist: &J) -> Reply {
+    Reply::json(doc(std::slice::from_ref(track), std::slice::from_ref(artist)))
 }
 
 #[test]
@@ -1173,7 +1170,7 @@ fn sync_updates_popularity() {
     let track = make_track("490839595", "Test Track", "PT3M", "ISRC001", &["1001"], None);
     let artist = make_artist("1001", "Test Artist");
     let (result, requests) = with_api(
-        move |_| popularity_doc(track.clone(), artist.clone()),
+        move |_| popularity_doc(&track, &artist),
         |cfg| {
             let env = Env::new();
             let _ = &env;
@@ -1213,7 +1210,7 @@ fn sync_skips_existing_unless_forced() {
     let track = make_track("490839595", "Test Track", "PT3M", "ISRC001", &["1001"], None);
     let artist = make_artist("1001", "Test Artist");
     let (got, requests) = with_api(
-        move |_| popularity_doc(track.clone(), artist.clone()),
+        move |_| popularity_doc(&track, &artist),
         |cfg| {
             let mut tidal = Tidal::new(cfg);
             let log = PluginLog::new("tidal");
@@ -1255,7 +1252,7 @@ fn sync_skips_models_without_ids_and_on_misses() {
     missing.set_str("tidal_track_id", "490839595");
     lib.add(&mut missing).unwrap();
     let (result, requests) = with_api(
-        move |_| Reply::json(doc(vec![], vec![])),
+        move |_| Reply::json(doc(&[], &[])),
         |cfg| {
             let mut tidal = Tidal::new(cfg);
             let log = PluginLog::new("tidal");
@@ -1309,9 +1306,9 @@ fn sync_updates_album_popularity() {
     let (result, _) = with_api(
         move |r| {
             if r.target.starts_with("/v2/tracks") {
-                popularity_doc(track.clone(), artist.clone())
+                popularity_doc(&track, &artist)
             } else {
-                Reply::json(doc(vec![album_data.clone()], included.clone()))
+                Reply::json(doc(std::slice::from_ref(&album_data), &included))
             }
         },
         |cfg| {
@@ -1343,7 +1340,7 @@ fn tidalsync_command_defaults_to_items_and_respects_limit() {
         move |r| {
             let id = query_param_of(r, "filter%5Bid%5D").unwrap_or_default();
             let track = make_track(&id, "One", "PT3M", "ISRC1", &["a1"], None);
-            popularity_doc(track, artist.clone())
+            popularity_doc(&track, &artist)
         },
         |cfg| {
             let lib = Library::in_memory().unwrap();
@@ -1354,7 +1351,7 @@ fn tidalsync_command_defaults_to_items_and_respects_limit() {
                 lib.add(&mut item).unwrap();
             }
             let (_r, lines) = crate::logging::capture(|| {
-                command_tidalsync(cfg, &lib, false, false, false, Some(1), &[]).unwrap()
+                command_tidalsync(cfg, &lib, false, false, false, Some(1), &[]).unwrap();
             });
             let got: Vec<String> = lib
                 .items(&Query::parse(Kind::Item, &["data_source:tidal".to_string()]).unwrap())
@@ -1385,7 +1382,7 @@ fn tidalsync_command_defaults_to_items_and_respects_limit() {
 fn tidalsync_command_empty_library() {
     let (_r, lines) = crate::logging::capture(|| {
         let env = Env::new();
-        command_tidalsync(&env.cfg, &env.lib, false, false, false, None, &[]).unwrap()
+        command_tidalsync(&env.cfg, &env.lib, false, false, false, None, &[]).unwrap();
     });
     assert!(
         lines.iter().any(|l| l.contains("Syncing popularity for 0 items")),

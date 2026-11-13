@@ -93,7 +93,7 @@ impl Thumbnails {
         size: u32,
         target_dir: &Path,
     ) -> bool {
-        let target = target_dir.join(self.thumbnail_file_name(album_dir));
+        let target = target_dir.join(Self::thumbnail_file_name(album_dir));
         if target.exists()
             && let (Ok(tm), Ok(am)) = (
                 std::fs::metadata(&target).and_then(|m| m.modified()),
@@ -127,7 +127,7 @@ impl Thumbnails {
         true
     }
 
-    pub fn thumbnail_file_name(&self, path: &Path) -> String {
+    pub fn thumbnail_file_name(path: &Path) -> String {
         let uri = uri(path);
         format!("{}.png", md5(uri.as_bytes()).iter().map(|b| format!("{b:02x}")).collect::<String>())
     }
@@ -137,8 +137,7 @@ impl Thumbnails {
             .and_then(|m| m.modified())
             .ok()
             .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-            .map(|d| d.as_secs_f64())
-            .unwrap_or(0.0);
+            .map_or(0.0, |d| d.as_secs_f64());
         if let Err(e) = write_metadata(
             image,
             &[
@@ -190,7 +189,7 @@ pub struct CmdOpts {
     pub query: Vec<String>,
 }
 
-pub fn command(lib: &Library, opts: CmdOpts) -> Result<()> {
+pub fn command(lib: &Library, opts: &CmdOpts) -> Result<()> {
     let plugin = Thumbnails {
         auto: true,
         force: opts.force,
@@ -392,7 +391,7 @@ pub fn run_thumbnails(
     let a = ThumbnailsArgs::from_arg_matches(m)?;
     crate::plugins::thumbnails::command(
         lib,
-        crate::plugins::thumbnails::CmdOpts {
+        &crate::plugins::thumbnails::CmdOpts {
             force: a.force,
             dolphin: a.dolphin,
             limit: a.limit,

@@ -73,7 +73,7 @@ impl ParentWorkPlugin {
         if !composer_exists {
             self.log.debug(&format!(
                 "no composer for {}; add one at https://musicbrainz.org/work/{}",
-                self.show(cfg, item),
+                Self::show(cfg, item),
                 string(work, "id")
             ));
         }
@@ -125,7 +125,7 @@ impl ParentWorkPlugin {
         if mb_workid.is_empty() {
             self.log.info(&format!(
                 "No work for {}, add one at https://musicbrainz.org/recording/{}",
-                self.show(cfg, item),
+                Self::show(cfg, item),
                 item.str("mb_trackid")
             ));
             return Ok(false);
@@ -171,7 +171,7 @@ impl ParentWorkPlugin {
             );
         } else if hasparent {
             self.log
-                .debug(&format!("{}: Work present, skipping", self.show(cfg, item)));
+                .debug(&format!("{}: Work present, skipping", Self::show(cfg, item)));
             return Ok(false);
         }
         if let Some(d) = work_date.filter(|d| !d.is_empty()) {
@@ -191,7 +191,7 @@ impl ParentWorkPlugin {
     }
 
     /// `format(item)` with `format_item`.
-    fn show(&self, cfg: &Config, item: &Item) -> String {
+    fn show(cfg: &Config, item: &Item) -> String {
         let fmt = crate::template::Template::parse(&cfg.str("format_item"));
         crate::commands::format_record(&fmt, item, None)
     }

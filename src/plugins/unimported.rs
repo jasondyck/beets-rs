@@ -35,7 +35,7 @@ fn walk(dir: &Path, out: &mut Vec<(PathBuf, Vec<PathBuf>)>) {
     for e in rd.flatten() {
         let p = e.path();
         // `os.walk` doesn't follow symlinked directories.
-        let is_dir = e.file_type().map(|t| t.is_dir()).unwrap_or(false);
+        let is_dir = e.file_type().is_ok_and(|t| t.is_dir());
         if is_dir {
             dirs.push(p);
         } else {
@@ -51,8 +51,7 @@ fn walk(dir: &Path, out: &mut Vec<(PathBuf, Vec<PathBuf>)>) {
 pub fn run(cfg: &Config, lib: &Library, out: &mut impl Write) -> Result<()> {
     let libdir = lib
         .music_dir()
-        .map(Path::to_path_buf)
-        .unwrap_or_else(|| cfg.directory());
+        .map_or_else(|| cfg.directory(), Path::to_path_buf);
     let exts: Vec<String> = cfg
         .list("unimported.ignore_extensions")
         .iter()

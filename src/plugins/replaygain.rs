@@ -664,8 +664,7 @@ fn which(cmd: &str) -> Option<PathBuf> {
     let executable = |p: &Path| {
         p.is_file()
             && std::fs::metadata(p)
-                .map(|m| m.permissions().mode() & 0o111 != 0)
-                .unwrap_or(false)
+                .is_ok_and(|m| m.permissions().mode() & 0o111 != 0)
     };
     if cmd.contains('/') {
         let p = PathBuf::from(cmd);
@@ -988,7 +987,7 @@ impl JobQueue {
     /// Queue a job; false once the pool is closed (the caller then runs it
     /// itself, as for a pool that was never opened).
     fn push(&self, job: Job) -> bool {
-        let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
+        let mut state = self.state.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         if state.closed {
             return false;
         }
@@ -1000,12 +999,12 @@ impl JobQueue {
 
     /// No more jobs will be pushed; workers drain what is queued and stop.
     fn close(&self) {
-        self.state.lock().unwrap_or_else(|e| e.into_inner()).closed = true;
+        self.state.lock().unwrap_or_else(std::sync::PoisonError::into_inner).closed = true;
         self.ready.notify_all();
     }
 
     fn pop(&self) -> Option<Job> {
-        let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
+        let mut state = self.state.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         loop {
             if let Some(job) = state.jobs.pop_front() {
                 return Some(job);
@@ -1013,20 +1012,20 @@ impl JobQueue {
             if state.closed {
                 return None;
             }
-            state = self.ready.wait(state).unwrap_or_else(|e| e.into_inner());
+            state = self.ready.wait(state).unwrap_or_else(std::sync::PoisonError::into_inner);
         }
     }
 }
 
 impl Pool {
-    fn new(threads: usize, backend: Arc<dyn Backend>, level: u8) -> Pool {
+    fn new(threads: usize, backend: &Arc<dyn Backend>, level: u8) -> Pool {
         let (dtx, drx) = mpsc::channel::<Done>();
         let queue = Arc::new(JobQueue::new());
         let workers = (0..threads)
             .map(|_| {
                 let queue = Arc::clone(&queue);
                 let dtx = dtx.clone();
-                let backend = Arc::clone(&backend);
+                let backend = Arc::clone(backend);
                 std::thread::spawn(move || {
                     let log = PluginLog::new(NAME);
                     log.set_base_level(level);
@@ -1091,7 +1090,7 @@ pub struct ReplayGain {
 
 /// The `threads` default: `os.cpu_count()`.
 pub fn cpu_count() -> usize {
-    std::thread::available_parallelism().map_or(1, |n| n.get())
+    std::thread::available_parallelism().map_or(1, std::num::NonZero::get)
 }
 
 impl ReplayGain {
@@ -1135,8 +1134,8 @@ impl ReplayGain {
             log,
             format_item: Template::parse(&cfg.str("format_item")),
             format_album: Template::parse(&cfg.str("format_album")),
-            pool: Default::default(),
-            fatal: Default::default(),
+            pool: std::cell::RefCell::default(),
+            fatal: std::cell::RefCell::default(),
         })
     }
 
@@ -1342,11 +1341,7 @@ impl ReplayGain {
     fn open_pool(&self, threads: usize) {
         let mut pool = self.pool.borrow_mut();
         if threads > 0 && pool.is_none() {
-            *pool = Some(Pool::new(
-                threads,
-                Arc::clone(&self.backend),
-                self.log.base_level(),
-            ));
+            *pool = Some(Pool::new(threads, &self.backend, self.log.base_level()));
         }
     }
 
@@ -1431,7 +1426,7 @@ pub struct CmdOpts {
 
 impl ReplayGain {
     /// beets' `command_func`.
-    pub fn command(&self, cfg: &Config, library: &Library, opts: CmdOpts) -> Result<()> {
+    pub fn command(&self, cfg: &Config, library: &Library, opts: &CmdOpts) -> Result<()> {
         let write = opts.write.unwrap_or_else(|| cfg.bool("import.write"));
         // `-t 0` runs the analyses in turn.
         if opts.threads != Some(0) {
@@ -1571,7 +1566,7 @@ pub fn run_replaygain(
     rg.command(
         cfg,
         lib,
-        crate::plugins::replaygain::CmdOpts {
+        &crate::plugins::replaygain::CmdOpts {
             album: a.album,
             force: a.force,
             threads: a.threads,

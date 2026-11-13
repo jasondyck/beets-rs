@@ -71,8 +71,7 @@ pub fn load(cfg: &Config) -> PlaylistPlugin {
 pub fn is_m3u_file(path: &Path) -> bool {
     path.extension()
         .and_then(|e| e.to_str())
-        .map(|e| e.eq_ignore_ascii_case("m3u") || e.eq_ignore_ascii_case("m3u8"))
-        .unwrap_or(false)
+        .is_some_and(|e| e.eq_ignore_ascii_case("m3u") || e.eq_ignore_ascii_case("m3u8"))
 }
 
 /// `os.path.abspath` (what beets' `PlaylistQuery` uses for the
@@ -94,8 +93,7 @@ fn rstrip_ws(line: &[u8]) -> &[u8] {
     let end = line
         .iter()
         .rposition(|b| !b.is_ascii_whitespace())
-        .map(|i| i + 1)
-        .unwrap_or(0);
+        .map_or(0, |i| i + 1);
     &line[..end]
 }
 

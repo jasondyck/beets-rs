@@ -2,6 +2,7 @@
 
 use super::*;
 use crate::model::{Item, Kind};
+use std::collections::BTreeMap;
 use crate::plugins::PluginLog;
 use crate::query::Query;
 
@@ -121,7 +122,7 @@ fn process_track_stores_the_count() {
         ]
         .into_iter()
         .collect(),
-        Default::default(),
+        BTreeMap::default(),
     );
     let id = add(&lib, "Song", "A", "Al", "m1");
     let track = Track {
