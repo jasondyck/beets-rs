@@ -1,12 +1,11 @@
 //! A port of beets 2.14's `sonosupdate` plugin (`beetsplug/sonosupdate.py`):
 //! after a command that changed the library, ask a Sonos controller to
-//! update its library. The Sonos discovery (soco's SSDP search) isn't
-//! ported: with no device found, beets logs "Could not find a Sonos device."
-//! and beets-rs always does (there is no Sonos client in this tree).
+//! update its music library. The Sonos client is the minimal soco port in
+//! [`super::sonos`] (SSDP discovery and the ContentDirectory refresh).
 
 use crate::config::Config;
 use crate::events::{Event, Listener};
-use crate::library::Library;
+use crate::plugins::sonos::{self, Device};
 use crate::plugins::{Plugin, PluginLog};
 use std::cell::Cell;
 use std::rc::Rc;
@@ -23,6 +22,8 @@ struct State {
     /// The library changed during this command.
     pending: Cell<bool>,
     log: PluginLog,
+    /// beets' `soco.discovery.any_soco()`, injectable for tests.
+    discover: Box<dyn Fn() -> Option<Device>>,
 }
 
 pub fn load(_cfg: &Config) -> SonosUpdate {
@@ -32,6 +33,7 @@ pub fn load(_cfg: &Config) -> SonosUpdate {
     crate::events::register(Rc::new(State {
         pending: Cell::new(false),
         log,
+        discover: Box::new(sonos::any_soco),
     }));
     SonosUpdate
 }
@@ -41,8 +43,20 @@ impl State {
     /// `music_library.start_library_update()`.
     fn update(&self) {
         self.log.info("Requesting a Sonos library update...");
-        // No Sonos client: as beets when discovery finds no device.
-        self.log.warning("Could not find a Sonos device.");
+
+        let Some(device) = (self.discover)() else {
+            self.log.warning("Could not find a Sonos device.");
+            return;
+        };
+
+        // beets would end the command with a traceback here; report it
+        // and carry on instead.
+        if let Err(e) = device.start_library_update() {
+            self.log.warning(&format!("Sonos update failed: {e:#}"));
+            return;
+        }
+
+        self.log.info("Sonos update triggered");
     }
 }
 
@@ -84,8 +98,3 @@ fn registry_make(
 #[cfg(test)]
 #[path = "sonosupdate_tests.rs"]
 mod tests;
-
-/// The `Library` argument of the listener (kept for the signature beets
-/// has; the update itself doesn't use it).
-#[allow(dead_code)]
-fn _library(_: &Library) {}
