@@ -1275,6 +1275,7 @@ mod tests {
             assert_eq!(tracks[0].info.data_source, "Deezer");
             assert_eq!(tracks[0].info.track_id, "1001");
         });
+        // SAFETY: see the `set_var` above: test-only, no concurrent access.
         unsafe { std::env::remove_var("BEETSRS_DEEZER_API_URL") };
         result.unwrap();
     }

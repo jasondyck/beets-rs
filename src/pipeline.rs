@@ -16,16 +16,20 @@ use std::sync::mpsc::{self, Receiver, Sender};
 
 /// Lets a running stage notice that the pipeline was dropped, to stop
 /// between steps of a long job.
+///
+/// The flag is a one-way "stop" signal: no data is published through it (jobs
+/// and results travel over the channels, whose operations establish the
+/// happens-before edges), so a relaxed load/store is enough.
 #[derive(Clone, Default)]
 pub struct Cancel(Arc<AtomicBool>);
 
 impl Cancel {
     pub fn is_set(&self) -> bool {
-        self.0.load(Ordering::SeqCst)
+        self.0.load(Ordering::Relaxed)
     }
 
     fn set(&self) {
-        self.0.store(true, Ordering::SeqCst);
+        self.0.store(true, Ordering::Relaxed);
     }
 }
 

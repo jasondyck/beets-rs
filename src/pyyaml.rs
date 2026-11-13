@@ -181,8 +181,19 @@ fn resolve_plain(value: &str) -> &'static str {
 
 // --------------------------------------------------------------- dumping
 
+/// The libyaml emitter's output callback: append the bytes it produced.
+///
+/// # Safety
+///
+/// `data` must point to the live `Vec<u8>` registered with
+/// `yaml_emitter_set_output` (see `Emitter::new`), and `buffer`/`size` must
+/// describe a readable region, as libyaml guarantees for its write handler.
 unsafe fn write_handler(data: *mut c_void, buffer: *mut u8, size: u64) -> i32 {
+    // SAFETY: libyaml calls the handler with the pointer passed to
+    // `yaml_emitter_set_output`; it points at `Emitter::out`, which is boxed
+    // so its address stays valid for as long as the emitter.
     let out = unsafe { &mut *data.cast::<Vec<u8>>() };
+    // SAFETY: libyaml passes a readable buffer of `size` output bytes.
     out.extend_from_slice(unsafe { std::slice::from_raw_parts(buffer, size as usize) });
     1
 }
@@ -238,6 +249,10 @@ impl Emitter {
             sort_keys: true,
             wrote_separators_anchor: false,
         };
+        // SAFETY: `e.sys` is a fresh `MaybeUninit` that
+        // `yaml_emitter_initialize` fills in; `e.out` is boxed, so the pointer
+        // registered as the write handler's data stays valid when the emitter
+        // is moved.
         unsafe {
             let p = e.sys.as_mut_ptr();
             assert!(!unsafe_sys::yaml_emitter_initialize(p).fail, "yaml emitter");
@@ -252,6 +267,12 @@ impl Emitter {
         let mut event = MaybeUninit::<unsafe_sys::yaml_event_t>::uninit();
         let event = event.as_mut_ptr();
         let mut anchor_buf = String::new();
+        // SAFETY: `self.sys` was initialized by `Emitter::new` and is freed
+        // once in `finish`. `event` starts as `MaybeUninit` and each
+        // `yaml_*_event_initialize` fills it; libyaml copies the tag/anchor
+        // strings it is given, so the temporaries above need only live until
+        // the call returns. Every event is passed to `yaml_emitter_emit`,
+        // which takes ownership of it, exactly once.
         unsafe {
             let em = self.sys.as_mut_ptr();
             let ok = match ev {
@@ -328,6 +349,8 @@ impl Emitter {
     }
 
     fn finish(mut self) -> String {
+        // SAFETY: `self.sys` was initialized by `Emitter::new`; `finish`
+        // consumes `self`, so the emitter is flushed and freed exactly once.
         unsafe {
             let _ = unsafe_sys::yaml_emitter_flush(self.sys.as_mut_ptr());
             unsafe_sys::yaml_emitter_delete(self.sys.as_mut_ptr());
@@ -437,6 +460,7 @@ pub fn dump_confuse(value: &serde_yaml::Value) -> String {
     let mut e = Emitter::new();
     e.confuse = true;
     e.sort_keys = false;
+    // SAFETY: `e` was just created, so `e.sys` is an initialized emitter.
     unsafe {
         let p = e.sys.as_mut_ptr();
         unsafe_sys::yaml_emitter_set_indent(p, 4);
@@ -677,15 +701,25 @@ struct Parser<'a> {
 
 impl Drop for Parser<'_> {
     fn drop(&mut self) {
+        // SAFETY: `self.sys` was initialized by `Parser::new` (which panics
+        // otherwise), and `drop` runs it exactly once.
         unsafe { unsafe_sys::yaml_parser_delete(self.sys.as_mut_ptr()) }
     }
 }
 
+/// A libyaml string pointer as an owned Rust string.
+///
+/// # Safety
+///
+/// `p` must be null or a valid NUL-terminated C string that stays valid for
+/// the duration of the call, as libyaml's event/token strings are.
 unsafe fn cstr(p: *const u8) -> Option<String> {
     if p.is_null() {
         None
     } else {
         Some(
+            // SAFETY: the checker's contract: non-null means a valid
+            // NUL-terminated string, borrowed only for this call.
             unsafe { CStr::from_ptr(p.cast()) }
                 .to_string_lossy()
                 .into_owned(),
@@ -699,6 +733,9 @@ impl<'a> Parser<'a> {
             sys: Box::new(MaybeUninit::uninit()),
             input,
         };
+        // SAFETY: `p.sys` is a fresh `MaybeUninit` filled by
+        // `yaml_parser_initialize`; libyaml borrows `input`'s buffer, which
+        // the `&'a str` field keeps alive for the parser's lifetime.
         unsafe {
             let sp = p.sys.as_mut_ptr();
             assert!(!unsafe_sys::yaml_parser_initialize(sp).fail, "yaml parser");
@@ -710,6 +747,11 @@ impl<'a> Parser<'a> {
 
     fn next(&mut self) -> Result<PEv, String> {
         let mut event = MaybeUninit::<unsafe_sys::yaml_event_t>::uninit();
+        // SAFETY: `self.sys` was initialized by `Parser::new`. `event` is a
+        // `MaybeUninit` that `yaml_parser_parse` writes on success; every
+        // string/byte pointer read out of it is copied into owned data before
+        // `yaml_event_delete` frees the event; on a parse error libyaml has
+        // not filled the event, so there is nothing to delete.
         unsafe {
             let sp = self.sys.as_mut_ptr();
             let ev = event.as_mut_ptr();
@@ -817,6 +859,11 @@ fn char_at(input: &str, mark: unsafe_sys::yaml_mark_t) -> Option<char> {
 fn token_at(input: &str, mark: unsafe_sys::yaml_mark_t) -> Option<&'static str> {
     let mut parser = Box::new(MaybeUninit::<unsafe_sys::yaml_parser_t>::uninit());
     let mut found = None;
+    // SAFETY: `parser` is a local `MaybeUninit` initialized here (and left
+    // uninitialized only on the error return, before libyaml used it); the
+    // input string lives in `input` for the whole call. Each scanned token is
+    // a `MaybeUninit` filled by `yaml_parser_scan` and deleted before the next
+    // iteration or return, and the parser is deleted before returning.
     unsafe {
         let sp = parser.as_mut_ptr();
         if unsafe_sys::yaml_parser_initialize(sp).fail {

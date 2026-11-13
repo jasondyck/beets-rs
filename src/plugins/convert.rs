@@ -901,6 +901,8 @@ impl<'a> Converter<'a> {
             });
         }
         let queue = Mutex::new(jobs);
+        // A stop flag only: the error itself is returned through the channel
+        // below, so relaxed ordering is enough.
         let abort = AtomicBool::new(false);
         let worker = Worker {
             s: self.s,
@@ -914,6 +916,8 @@ impl<'a> Converter<'a> {
                 let (queue, abort, worker) = (&queue, &abort, &worker);
                 scope.spawn(move || {
                     while !abort.load(Ordering::Relaxed) {
+                        // The lock only covers the pop; the transcode runs
+                        // without it, so the workers overlap.
                         let Some(job) = queue.lock().unwrap().pop_front() else {
                             break;
                         };
@@ -1234,6 +1238,9 @@ fn mkstemp(tmpdir: &Path, ext: &str) -> Result<PathBuf> {
 /// `util.par_map`: `f` over `jobs` in up to `threads` threads; the
 /// results in order.
 fn par_map<J: Sync, R: Send>(threads: usize, jobs: &[J], f: impl Fn(&J) -> R + Sync) -> Vec<R> {
+    // Scoped threads borrow `jobs` and `results`. `fetch_add` hands every
+    // index to exactly one worker, which then writes only its own result
+    // slot; relaxed ordering is enough for handing out distinct indices.
     let next = std::sync::atomic::AtomicUsize::new(0);
     let results: Vec<Mutex<Option<R>>> = jobs.iter().map(|_| Mutex::new(None)).collect();
     std::thread::scope(|scope| {
