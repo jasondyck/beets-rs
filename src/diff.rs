@@ -71,7 +71,7 @@ fn matching_blocks(a: &[char], b: &[char]) -> Vec<(usize, usize, usize)> {
     merged
 }
 
-/// difflib's `get_opcodes`: (op, a_start, a_end, b_start, b_end).
+/// difflib's `get_opcodes`: (op, `a_start`, `a_end`, `b_start`, `b_end`).
 pub fn opcodes(a: &[char], b: &[char]) -> Vec<(Op, usize, usize, usize, usize)> {
     let (mut i, mut j) = (0, 0);
     let mut out = vec![];

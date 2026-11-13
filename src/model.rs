@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 pub enum FieldType {
     Str,
     Int,
-    /// Integer formatted with zero padding to the given width (beets' PaddedInt).
+    /// Integer formatted with zero padding to the given width (beets' `PaddedInt`).
     Padded(usize),
     /// A float formatted with this many decimal places (beets' `Float(digits)`).
     Float(usize),

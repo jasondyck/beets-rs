@@ -481,7 +481,7 @@ pub fn refresh_mtime(item: &mut Item) {
 }
 
 /// Embed an image as the front cover, replacing any existing front cover
-/// (in the tag MediaFile uses, keeping every other tag as it is).
+/// (in the tag `MediaFile` uses, keeping every other tag as it is).
 #[cfg(test)]
 pub fn embed_art(path: &Path, image: &[u8]) -> Result<()> {
     let pic = Picture::from_reader(&mut &image[..])
@@ -492,7 +492,7 @@ pub fn embed_art(path: &Path, image: &[u8]) -> Result<()> {
 }
 
 /// Whether the file has embedded pictures (beets' `has_cover_art`:
-/// MediaFile's `images`).
+/// `MediaFile`'s `images`).
 pub fn has_art(path: &Path) -> Result<bool> {
     Ok(!MediaFile::open(path)?.pictures().is_empty())
 }
@@ -558,7 +558,7 @@ pub fn write_with_images_at(
     Ok(())
 }
 
-/// The embedded pictures' data (MediaFile's `art`: the front cover, else
+/// The embedded pictures' data (`MediaFile`'s `art`: the front cover, else
 /// the first picture), or `None` if there are none.
 pub fn get_art(path: &Path) -> Result<Option<Vec<u8>>> {
     let pics = MediaFile::open(path)?.pictures();
@@ -569,7 +569,7 @@ pub fn get_art(path: &Path) -> Result<Option<Vec<u8>>> {
         .map(|p| p.data().to_vec()))
 }
 
-/// Remove every embedded picture (from the tag MediaFile uses). Returns
+/// Remove every embedded picture (from the tag `MediaFile` uses). Returns
 /// whether anything was removed.
 #[cfg(test)]
 pub fn clear_art(path: &Path) -> Result<bool> {
@@ -711,7 +711,7 @@ mod roundtrip {
         assert_eq!(samples, (samples / 1152.0).round() * 1152.0);
     }
 
-    /// MediaFile reads APEv2 `date` and `album_artist` (as ffmpeg writes
+    /// `MediaFile` reads APEv2 `date` and `album_artist` (as ffmpeg writes
     /// them) case-insensitively; a WAV file's format is "WAVE".
     #[test]
     fn wavpack_date_and_album_artist_and_wave_format() {

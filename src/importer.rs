@@ -4585,12 +4585,12 @@ mod tests {
         .then_some(())
     }
 
-    /// A library row: (id, album_id, album, title, path).
+    /// A library row: (id, `album_id`, album, title, path).
     type Row = (i64, i64, String, String, PathBuf);
     type Mode = (&'static str, fn(&mut ImportOptions));
 
     /// Import with the fake source in quiet mode (no match: as-is) and
-    /// return the library's (id, album_id, album, title, path) rows and the
+    /// return the library's (id, `album_id`, album, title, path) rows and the
     /// lookups made, in order.
     fn quiet_import(
         threaded: bool,
@@ -4773,7 +4773,7 @@ mod tests {
         ui::script::prompts()
     }
 
-    /// beets' test_edit `EditDuringImporter` cases without candidates:
+    /// beets' `test_edit` `EditDuringImporter` cases without candidates:
     /// "eDit" at the prompt, with a script as the editor.
     fn edit_import(
         singleton: bool,

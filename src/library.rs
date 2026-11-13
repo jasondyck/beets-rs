@@ -297,7 +297,7 @@ fn make_tables(conn: &Connection) -> Result<()> {
 
 /// Whether the database has beets-rs' layout from before it matched
 /// beets' (flexible attribute tables without an `id`, a `data_source`
-/// column, absolute paths, singletons with album_id 0).
+/// column, absolute paths, singletons with `album_id` 0).
 fn has_old_layout(conn: &Connection) -> Result<bool> {
     let cols = columns_of(conn, "item_attributes")?;
     Ok(!cols.is_empty() && !cols.iter().any(|(c, _)| c == "id"))
@@ -305,7 +305,7 @@ fn has_old_layout(conn: &Connection) -> Result<bool> {
 
 /// Rebuild an old beets-rs database in beets' layout: tables recreated
 /// with beets' statements (columns beets doesn't have, such as a legacy
-/// `genre`, kept as beets keeps them), singletons' album_id NULL,
+/// `genre`, kept as beets keeps them), singletons' `album_id` NULL,
 /// `data_source` moved to the flexible attributes. Paths are made
 /// relative afterwards by beets' `relative_path` migration.
 fn rebuild_old_layout(conn: &Connection, backup: Option<&Path>) -> Result<()> {
@@ -1609,7 +1609,7 @@ mod tests {
     }
 
     /// As beets: paths inside the library directory are stored relative to
-    /// it, other paths as they are, a singleton's album_id is NULL.
+    /// it, other paths as they are, a singleton's `album_id` is NULL.
     #[test]
     fn stores_paths_relative_and_singletons_null() {
         let d = tempfile::tempdir().unwrap();
@@ -1739,7 +1739,7 @@ mod tests {
 
     /// A library made by beets-rs before it used beets' layout: rebuilt in
     /// beets' layout (backed up first), paths made relative, singletons'
-    /// album_id NULL, `data_source` a flexible attribute, beets' data
+    /// `album_id` NULL, `data_source` a flexible attribute, beets' data
     /// migrations run on what it held.
     #[test]
     fn old_beets_rs_layout_is_rebuilt() {

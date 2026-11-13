@@ -193,7 +193,7 @@ impl<'a> V<'a> {
         }
     }
 
-    /// Python's ordering (`<`), or the TypeError.
+    /// Python's ordering (`<`), or the `TypeError`.
     pub fn cmp(&self, other: &V<'a>, op: &str) -> PyResult<std::cmp::Ordering> {
         use std::cmp::Ordering;
         let type_err = || {
