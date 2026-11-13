@@ -39,6 +39,7 @@ config`, plugins fetchart / lyrics / embedart, release preferences.
 - [x] **2.6 ui**: `ui.color`, `ui.colors`, change-display highlighting as in beets, `terminal_width`, `ui.length_diff_thresh`
 - [x] **2.7 config dump format**: `beet config` / `config -d` output as confuse prints it (4-space indent, inline lists, empty values instead of `null`, comments copied from the defaults)
 - [x] **2.8 modify display when deleting a field the album also has** (found in 5.17): `modify field!` on an item whose album has an attribute of the same name: beets shows `field: 2 -> 1` (the album's value shows through) or "No changes to make."; we show `field: 2` / list changes
+- [ ] **2.9 unknown options become query terms** (found in 6.1): subcommands accept hyphen values in the query argument, so `beet rm -y` treats `-y` as a query term; beets (optparse) errors with "no such option: -y". Match beets: reject unknown options, keep negative-number/`-field` query terms working as beets parses them
 
 ## 3. Core: queries, templates, library
 
@@ -86,7 +87,7 @@ Done: fetchart (filesystem + CAA), lyrics (LRCLIB), embedart.
 
 ## 6. Quality
 
-- [ ] **6.1 Integration tests**: CLI end-to-end tests in temp `BEETSRSDIR` with generated audio files (import → ls → modify → mv → update → rm)
+- [x] **6.1 Integration tests**: CLI end-to-end tests in temp `BEETSRSDIR` with generated audio files (import → ls → modify → mv → update → rm)
 - [x] **6.3 Differential checks against reference beets** (`~/.cache/beets-reference`, approved by the maintainer): a repeatable script that builds the same temp library with both `beet`s (generated audio, same config) and diffs `ls`/`ls -a`/`-f` output and destination paths over a corpus of queries and templates; run it for 3.1 (queries) and 3.2 (templates/paths) and fix every difference; reuse it for later items. Done: tools/diffbeets, 857 cases, 0 unexplained diffs, 31 listed deviations; every later item must keep it green and add its own cases. Import phase added: fake MusicBrainz on 127.0.0.1:0 serving tests/fixtures/mb, scripted prompt answers, 18 cases
 - [ ] **6.2 README/docs**: keep README's "What's implemented" table current; document differences from beets
 - [ ] **6.4 Conflict-free plugin registration** (queued by the maintainer 2026-11-12; run alone, right after the in-flight branches merge, before new plugin work): parallel plugin branches conflict in the same central lists. Make adding a plugin touch only its own files: (a) self-registering plugins (`linkme`/`inventory` or a build.rs scan of src/plugins/): name, constructor, default config YAML and optional CLI subcommand declared in the plugin file; `plugins/mod.rs` AVAILABLE/load match, `config.rs` DEFAULT_CONFIG plugin sections/PLUGIN_SECTIONS/PLUGIN_TOP_KEYS, and plugin `Cmd` variants (main.rs) plus their dispatch (commands.rs) come from the registry (plugin commands added to clap at run time; core commands unchanged; `--help` and command order/aliases as before); (b) split tools/diffbeets/cases.py into per-area modules (tools/diffbeets/cases/<name>.py) discovered automatically; (c) README plugin table sorted alphabetically, with `README.md merge=union` in .gitattributes. Pure refactor: diffbeets identical (same case count, 0 differ), all tests pass, `beet --help`/`config -d` output unchanged
