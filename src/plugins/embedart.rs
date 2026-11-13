@@ -747,3 +747,192 @@ mod tests {
         assert_eq!(guess_extension("foo/bar"), None);
     }
 }
+
+// ---------------------------------------------------------------- registry
+
+inventory::submit! {
+    crate::plugin_registry::PluginDef {
+        name: "embedart",
+        order: 4,
+        defaults: r#"embedart:
+    maxwidth: 0
+    auto: yes
+    compare_threshold: 0
+    ifempty: no
+    remove_art_file: no
+    quality: 0
+    clearart_on_import: no
+"#,
+        config_keys: &["embedart"],
+        redacted: &[],
+        make: Some(registry_make),
+        fatal: false,
+        commands: &[
+            crate::plugin_registry::PluginCommand {
+                order: 110,
+                plugin: "embedart",
+                build: build_embedart,
+                run: run_embedart,
+            },
+            crate::plugin_registry::PluginCommand {
+                order: 120,
+                plugin: "embedart",
+                build: build_extractart,
+                run: run_extractart,
+            },
+            crate::plugin_registry::PluginCommand {
+                order: 130,
+                plugin: "embedart",
+                build: build_clearart,
+                run: run_clearart,
+            },
+        ],
+    }
+}
+
+fn registry_make(cfg: &crate::config::Config) -> anyhow::Result<Box<dyn crate::plugins::Plugin>> {
+    Ok(Box::new(EmbedArt::new(cfg)))
+}
+
+// ---------------------------------------------------------------- command
+
+#[derive(clap::Args)]
+pub struct EmbedartArgs {
+    /// The image file to embed
+    #[arg(short = 'f', long = "file", value_name = "PATH")]
+    file: Option<PathBuf>,
+    /// Skip confirmation
+    #[arg(short = 'y', long)]
+    yes: bool,
+    /// The URL of the image file to embed
+    #[arg(short = 'u', long, value_name = "URL")]
+    url: Option<String>,
+    /// Limit query results
+    #[arg(short = 'l', long)]
+    limit: Option<usize>,
+    #[arg(allow_hyphen_values = true)]
+    query: Vec<String>,
+}
+
+pub fn build_embedart() -> clap::Command {
+    use clap::Args as _;
+    EmbedartArgs::augment_args(
+        clap::Command::new("embedart")
+            .about("Embed image files into file metadata (plugin: embedart)"),
+    )
+}
+
+pub fn run_embedart(
+    cfg: &crate::config::Config,
+    lib: &crate::library::Library,
+    _plugins: &[Box<dyn crate::plugins::Plugin>],
+    m: &clap::ArgMatches,
+) -> anyhow::Result<()> {
+    use clap::FromArgMatches as _;
+    let a = EmbedartArgs::from_arg_matches(m)?;
+    let ctx = crate::plugins::PluginCtx {
+        cfg,
+        lib,
+        write: cfg.bool("import.write"),
+    };
+    crate::plugins::embedart::embed_command(
+        &ctx,
+        crate::plugins::embedart::EmbedCmd {
+            file: a.file,
+            url: a.url,
+            yes: a.yes,
+            limit: a.limit,
+            query: a.query,
+        },
+    )
+}
+
+// ---------------------------------------------------------------- command
+
+#[derive(clap::Args)]
+pub struct ExtractartArgs {
+    /// Image output file
+    #[arg(short = 'o', value_name = "OUTPATH")]
+    outpath: Option<PathBuf>,
+    /// Image filename to create for all matched albums
+    #[arg(short = 'n', value_name = "FILENAME")]
+    filename: Option<String>,
+    /// Associate the extracted images with the album
+    #[arg(short = 'a')]
+    associate: bool,
+    /// Limit query results
+    #[arg(short = 'l', long)]
+    limit: Option<usize>,
+    #[arg(allow_hyphen_values = true)]
+    query: Vec<String>,
+}
+
+pub fn build_extractart() -> clap::Command {
+    use clap::Args as _;
+    ExtractartArgs::augment_args(
+        clap::Command::new("extractart")
+            .about("Extract an image from file metadata (plugin: embedart)"),
+    )
+}
+
+pub fn run_extractart(
+    cfg: &crate::config::Config,
+    lib: &crate::library::Library,
+    _plugins: &[Box<dyn crate::plugins::Plugin>],
+    m: &clap::ArgMatches,
+) -> anyhow::Result<()> {
+    use clap::FromArgMatches as _;
+    let a = ExtractartArgs::from_arg_matches(m)?;
+    let ctx = crate::plugins::PluginCtx {
+        cfg,
+        lib,
+        write: cfg.bool("import.write"),
+    };
+    crate::plugins::embedart::extract_command(
+        &ctx,
+        crate::plugins::embedart::ExtractCmd {
+            outpath: a.outpath,
+            filename: a.filename,
+            associate: a.associate,
+            limit: a.limit,
+            query: a.query,
+        },
+    )
+}
+
+// ---------------------------------------------------------------- command
+
+#[derive(clap::Args)]
+pub struct ClearartArgs {
+    /// Skip confirmation
+    #[arg(short = 'y', long)]
+    yes: bool,
+    /// Limit query results
+    #[arg(short = 'l', long)]
+    limit: Option<usize>,
+    #[arg(allow_hyphen_values = true)]
+    query: Vec<String>,
+}
+
+pub fn build_clearart() -> clap::Command {
+    use clap::Args as _;
+    ClearartArgs::augment_args(
+        clap::Command::new("clearart").about("Remove images from file metadata (plugin: embedart)"),
+    )
+}
+
+pub fn run_clearart(
+    cfg: &crate::config::Config,
+    lib: &crate::library::Library,
+    _plugins: &[Box<dyn crate::plugins::Plugin>],
+    m: &clap::ArgMatches,
+) -> anyhow::Result<()> {
+    use clap::FromArgMatches as _;
+    let a = ClearartArgs::from_arg_matches(m)?;
+    let ctx = crate::plugins::PluginCtx {
+        cfg,
+        lib,
+        write: cfg.bool("import.write"),
+    };
+    crate::plugins::embedart::clear_command(&ctx, a.yes, a.limit, &a.query)
+}

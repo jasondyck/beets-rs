@@ -340,3 +340,96 @@ fn missing_albums(
 #[cfg(test)]
 #[path = "missing_tests.rs"]
 mod tests;
+
+// ---------------------------------------------------------------- registry
+
+inventory::submit! {
+    crate::plugin_registry::PluginDef {
+        name: "missing",
+        order: 16,
+        defaults: r#"missing:
+    count: no
+    total: no
+    album: no
+    release_types: [album]
+"#,
+        config_keys: &["missing"],
+        redacted: &[],
+        make: Some(registry_make),
+        fatal: false,
+        commands: &[
+            crate::plugin_registry::PluginCommand {
+                order: 230,
+                plugin: "missing",
+                build: build_missing,
+                run: run_missing,
+            },
+        ],
+    }
+}
+
+fn registry_make(_cfg: &crate::config::Config) -> anyhow::Result<Box<dyn crate::plugins::Plugin>> {
+    Ok(Box::new(MissingPlugin))
+}
+
+// ---------------------------------------------------------------- command
+
+#[derive(clap::Args)]
+pub struct MissingArgs {
+    /// Count missing tracks per album
+    #[arg(short = 'c', long)]
+    count: bool,
+    /// Count total of missing tracks
+    #[arg(short = 't', long)]
+    total: bool,
+    /// Show missing album releases for artist instead of tracks;
+    /// Defaults to only releases of type 'album'
+    #[arg(short = 'a', long)]
+    album: bool,
+    /// Comma-separated list of release types for missing albums (valid:
+    /// nat, album, single, ep, broadcast, other, compilation, soundtrack,
+    /// spokenword, interview, audiobook, live, remix, dj-mix,
+    /// mixtape/street)
+    #[arg(long = "release-types", value_name = "RELEASE_TYPES")]
+    release_types: Vec<String>,
+    /// Print with custom format
+    #[arg(short = 'f', long)]
+    format: Option<String>,
+    /// Limit query results
+    #[arg(short = 'l', long)]
+    limit: Option<usize>,
+    #[arg(allow_hyphen_values = true)]
+    query: Vec<String>,
+}
+
+pub fn build_missing() -> clap::Command {
+    use clap::Args as _;
+    MissingArgs::augment_args(
+        clap::Command::new("missing")
+            .about("List missing tracks (plugin: missing)")
+            .visible_alias("miss"),
+    )
+}
+
+pub fn run_missing(
+    cfg: &crate::config::Config,
+    lib: &crate::library::Library,
+    _plugins: &[Box<dyn crate::plugins::Plugin>],
+    m: &clap::ArgMatches,
+) -> anyhow::Result<()> {
+    use clap::FromArgMatches as _;
+    let a = MissingArgs::from_arg_matches(m)?;
+    crate::plugins::missing::command(
+        cfg,
+        lib,
+        crate::plugins::missing::CmdOpts {
+            count: a.count,
+            total: a.total,
+            album: a.album,
+            release_types: a.release_types,
+            format: a.format,
+            limit: a.limit,
+            query: a.query,
+        },
+    )
+}

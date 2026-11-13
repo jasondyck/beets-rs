@@ -42,7 +42,7 @@ dir (under `$TMPDIR`, or `--workdir DIR`):
    free port, serves the releases in `tests/fixtures/mb` (a release search
    returns those sharing a word with its `release:(...)` term; recording
    searches match by title). Each case imports a fresh copy of generated
-   audio with both tools (`IMPORT_CORPUS`, `IMPORT_CASES` in `cases.py`: `-t`
+   audio with both tools (`IMPORT_CORPUS`, `IMPORT_CASES` in `cases/imports.py`: `-t`
    with the match options, `-q`, `-s`, `-A`, aborting, "Group albums",
    "Rescan directory", and the metadata cases: VA, multi-artist credits,
    titled discs, works, and the options that shape applied metadata), with
@@ -56,7 +56,7 @@ dir (under `$TMPDIR`, or `--workdir DIR`):
    and includes (`import:<case>:requests`).
 
 8. then the art phase (`art:` cases, `artphase.py`, `ART_CASES` in
-   `cases.py`): fetchart and embedart on fresh libraries, one per case and
+   `cases/art.py`): fetchart and embedart on fresh libraries, one per case and
    tool, each with a copy of two generated MP3s (also with an embedded cover)
    and the case's images (made with ffmpeg); the case's steps (`import -A`,
    `fetchart`, `embedart`, `extractart`, `clearart`, `modify`, `ls`) run in
@@ -80,12 +80,15 @@ difference: the reason is printed) and `FIXED?` (listed as expected but now
 equal: remove it from the list). The exit status is 1 if anything is `DIFF`
 or `FIXED?`.
 
-Cases, corpus, config and the expected differences live in `cases.py`:
-queries (run with `ls` and `ls -a`) from beets' `test_query.py`,
-`test_queryparse.py`, `test_datequery.py` and `test_sort.py`; templates
-(`ls -f`, `ls -a -f`) from `test_functemplate.py` and `test_library.py`; path
-formats and path options (`mv -p -d`). Relative date cases only use ranges that
-are robust to when the run happens.
+Cases, corpus, config and the expected differences live in the `cases/`
+package, one module per area (`corpus.py`/`_corpus.py`, `listings.py`,
+`imports.py`, `art.py`, `art_plugins.py`, `config.py`, ...), discovered
+automatically: a new module only needs an `ORDER` and, say, `CASES` or
+`ART_CASES`. The main phase has queries (run with `ls` and `ls -a`) from
+beets' `test_query.py`, `test_queryparse.py`, `test_datequery.py` and
+`test_sort.py`; templates (`ls -f`, `ls -a -f`) from `test_functemplate.py`
+and `test_library.py`; path formats and path options (`mv -p -d`). Relative
+date cases only use ranges that are robust to when the run happens.
 
 Options: `--only SUBSTR` (repeatable) runs matching case ids, `--keep` keeps
 the temp dir, `-j N` sets parallelism, `-v` lists the setup steps.

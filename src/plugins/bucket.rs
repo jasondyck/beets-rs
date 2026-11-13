@@ -511,3 +511,28 @@ mod tests {
         );
     }
 }
+
+// ---------------------------------------------------------------- registry
+
+inventory::submit! {
+    crate::plugin_registry::PluginDef {
+        name: "bucket",
+        order: 30,
+        defaults: r#"bucket:
+    bucket_year: []
+    bucket_alpha: []
+    bucket_alpha_regex: {}
+    extrapolate: no
+"#,
+        config_keys: &["bucket"],
+        redacted: &[],
+        make: Some(registry_make),
+        fatal: false,
+        commands: &[],
+    }
+}
+
+fn registry_make(cfg: &crate::config::Config) -> anyhow::Result<Box<dyn crate::plugins::Plugin>> {
+    Bucket::new(cfg)?;
+    Ok(Box::new(BucketPlugin))
+}

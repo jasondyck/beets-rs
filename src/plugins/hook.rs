@@ -471,3 +471,24 @@ fn python_oserror(e: &std::io::Error, prog: &str) -> String {
 #[cfg(test)]
 #[path = "hook_tests.rs"]
 mod tests;
+
+// ---------------------------------------------------------------- registry
+
+inventory::submit! {
+    crate::plugin_registry::PluginDef {
+        name: "hook",
+        order: 8,
+        defaults: r#"hook:
+    hooks: []
+"#,
+        config_keys: &["hook"],
+        redacted: &[],
+        make: Some(registry_make),
+        fatal: false,
+        commands: &[],
+    }
+}
+
+fn registry_make(cfg: &crate::config::Config) -> anyhow::Result<Box<dyn crate::plugins::Plugin>> {
+    Ok(Box::new(load(cfg)?))
+}

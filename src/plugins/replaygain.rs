@@ -1423,3 +1423,110 @@ impl ReplayGain {
 #[cfg(test)]
 #[path = "replaygain_tests.rs"]
 mod tests;
+
+// ---------------------------------------------------------------- registry
+
+inventory::submit! {
+    crate::plugin_registry::PluginDef {
+        name: "replaygain",
+        order: 19,
+        defaults: r#"replaygain:
+    overwrite: no
+    auto: yes
+    backend: command
+    threads: CPU_COUNT
+    parallel_on_import: no
+    per_disc: no
+    peak: 'true'
+    targetlevel: 89
+    r128: [Opus]
+    r128_targetlevel: 84
+    command: ''
+    noclip: yes
+"#,
+        config_keys: &["replaygain"],
+        redacted: &[],
+        make: Some(registry_make),
+        fatal: false,
+        commands: &[
+            crate::plugin_registry::PluginCommand {
+                order: 170,
+                plugin: "replaygain",
+                build: build_replaygain,
+                run: run_replaygain,
+            },
+        ],
+    }
+}
+
+fn registry_make(cfg: &crate::config::Config) -> anyhow::Result<Box<dyn crate::plugins::Plugin>> {
+    Ok(Box::new(ReplayGain::new(cfg)?))
+}
+
+// ---------------------------------------------------------------- command
+
+#[derive(clap::Args)]
+pub struct ReplaygainArgs {
+    /// Match albums instead of tracks
+    #[arg(short = 'a', long)]
+    album: bool,
+    /// Change the number of threads, defaults to maximum available
+    /// processors
+    #[arg(short = 't', long)]
+    threads: Option<usize>,
+    /// Analyze all files, including those that already have ReplayGain
+    /// metadata
+    #[arg(short = 'f', long)]
+    force: bool,
+    /// Write new metadata to files' tags
+    #[arg(short = 'w', long, overrides_with = "nowrite")]
+    write: bool,
+    /// Don't write metadata (opposite of -w)
+    #[arg(short = 'W', long, overrides_with = "write")]
+    nowrite: bool,
+    /// Limit query results
+    #[arg(short = 'l', long)]
+    limit: Option<usize>,
+    #[arg(allow_hyphen_values = true)]
+    query: Vec<String>,
+}
+
+pub fn build_replaygain() -> clap::Command {
+    use clap::Args as _;
+    ReplaygainArgs::augment_args(
+        clap::Command::new("replaygain").about("Analyze for ReplayGain (plugin: replaygain)"),
+    )
+}
+
+pub fn run_replaygain(
+    cfg: &crate::config::Config,
+    lib: &crate::library::Library,
+    plugins: &[Box<dyn crate::plugins::Plugin>],
+    m: &clap::ArgMatches,
+) -> anyhow::Result<()> {
+    use clap::FromArgMatches as _;
+    let a = ReplaygainArgs::from_arg_matches(m)?;
+    if !plugins.iter().any(|p| p.name() == "replaygain") {
+        // It failed to load (and said why).
+        anyhow::bail!("unknown command 'replaygain'");
+    }
+    // Set up again (it said what it had to when it loaded).
+    let rg = crate::logging::capture(|| crate::plugins::replaygain::ReplayGain::new(cfg)).0?;
+    let write = match (a.write, a.nowrite) {
+        (true, _) => Some(true),
+        (_, true) => Some(false),
+        _ => None,
+    };
+    rg.command(
+        cfg,
+        lib,
+        crate::plugins::replaygain::CmdOpts {
+            album: a.album,
+            force: a.force,
+            threads: a.threads,
+            write,
+            limit: a.limit,
+            query: a.query,
+        },
+    )
+}

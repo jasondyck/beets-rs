@@ -100,3 +100,22 @@ pub fn configure(cfg: &Config) -> Result<()> {
 #[cfg(test)]
 #[path = "types_tests.rs"]
 mod tests;
+
+// ---------------------------------------------------------------- registry
+
+inventory::submit! {
+    crate::plugin_registry::PluginDef {
+        name: "types",
+        order: 25,
+        defaults: r#""#,
+        config_keys: &["types"],
+        redacted: &[],
+        make: Some(registry_make),
+        fatal: false,
+        commands: &[],
+    }
+}
+
+fn registry_make(_cfg: &crate::config::Config) -> anyhow::Result<Box<dyn crate::plugins::Plugin>> {
+    Ok(Box::new(TypesPlugin))
+}

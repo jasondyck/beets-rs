@@ -599,3 +599,119 @@ fn expanduser(p: &str) -> PathBuf {
 
 #[cfg(test)]
 mod tests;
+
+// ---------------------------------------------------------------- registry
+
+inventory::submit! {
+    crate::plugin_registry::PluginDef {
+        name: "lyrics",
+        order: 14,
+        defaults: r#"lyrics:
+    auto: yes
+    auto_ignore: null
+    translate:
+        api_key: null
+        from_languages: []
+        to_language: null
+    dist_thresh: 0.11
+    google_API_key: null
+    google_engine_ID: '009217259823014548361:lndtuqkycfu'
+    genius_api_key: Ryq93pUGm8bM6eUWwD_M3NOFFDAtp2yEE7W76V-uFL5jks5dNvcGCdarqFjDhP9c
+    lrcmux:
+        url: https://api.lrcmux.dev
+        sources: []
+    fallback: null
+    force: no
+    keep_synced: no
+    local: no
+    print: no
+    rest_directory: null
+    synced: no
+    # Musixmatch and Tekstowo are disabled by default as they currently
+    # block requests with the beets user agent.
+    sources: [lrclib, google, genius, lrcmux]
+"#,
+        config_keys: &["lyrics"],
+        redacted: &["lyrics.translate.api_key", "lyrics.google_API_key", "lyrics.google_engine_ID", "lyrics.genius_api_key"],
+        make: Some(registry_make),
+        fatal: false,
+        commands: &[
+            crate::plugin_registry::PluginCommand {
+                order: 140,
+                plugin: "lyrics",
+                build: build_lyrics,
+                run: run_lyrics,
+            },
+        ],
+    }
+}
+
+fn registry_make(cfg: &crate::config::Config) -> anyhow::Result<Box<dyn crate::plugins::Plugin>> {
+    Ok(Box::new(LyricsPlugin::new(cfg)))
+}
+
+// ---------------------------------------------------------------- command
+
+#[derive(clap::Args)]
+pub struct LyricsArgs {
+    /// Print lyrics to console
+    #[arg(short = 'p', long)]
+    print: bool,
+    /// Write lyrics to given directory as ReST files
+    #[arg(short = 'r', long = "write-rest", value_name = "dir")]
+    rest_directory: Option<String>,
+    /// Always re-download lyrics
+    #[arg(short = 'f', long)]
+    force: bool,
+    /// Skip items that already have synced lyrics
+    #[arg(long, overrides_with = "no_keep_synced")]
+    keep_synced: bool,
+    /// Do not skip items that already have synced lyrics
+    #[arg(long, overrides_with = "keep_synced")]
+    no_keep_synced: bool,
+    /// Do not fetch missing lyrics
+    #[arg(short = 'l', long)]
+    local: bool,
+    /// Limit query results
+    #[arg(long)]
+    limit: Option<usize>,
+    #[arg(allow_hyphen_values = true)]
+    query: Vec<String>,
+}
+
+pub fn build_lyrics() -> clap::Command {
+    use clap::Args as _;
+    LyricsArgs::augment_args(
+        clap::Command::new("lyrics").about("Fetch song lyrics (plugin: lyrics)"),
+    )
+}
+
+pub fn run_lyrics(
+    cfg: &crate::config::Config,
+    lib: &crate::library::Library,
+    _plugins: &[Box<dyn crate::plugins::Plugin>],
+    m: &clap::ArgMatches,
+) -> anyhow::Result<()> {
+    use clap::FromArgMatches as _;
+    let a = LyricsArgs::from_arg_matches(m)?;
+    let keep_synced = if a.keep_synced {
+        Some(true)
+    } else if a.no_keep_synced {
+        Some(false)
+    } else {
+        None
+    };
+    crate::plugins::lyrics::command(
+        cfg,
+        lib,
+        crate::plugins::lyrics::CmdOpts {
+            print: a.print,
+            rest_directory: a.rest_directory,
+            force: a.force,
+            keep_synced,
+            local: a.local,
+            limit: a.limit,
+            query: a.query,
+        },
+    )
+}

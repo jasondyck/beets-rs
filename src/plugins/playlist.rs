@@ -318,3 +318,27 @@ pub fn cli_exit(cfg: &Config, _lib: &crate::library::Library) {
 #[cfg(test)]
 #[path = "playlist_tests.rs"]
 mod tests;
+
+// ---------------------------------------------------------------- registry
+
+inventory::submit! {
+    crate::plugin_registry::PluginDef {
+        name: "playlist",
+        order: 36,
+        defaults: r#"playlist:
+    auto: no
+    playlist_dir: .
+    relative_to: library
+    forward_slash: no
+"#,
+        config_keys: &["playlist"],
+        redacted: &[],
+        make: Some(registry_make),
+        fatal: false,
+        commands: &[],
+    }
+}
+
+fn registry_make(cfg: &crate::config::Config) -> anyhow::Result<Box<dyn crate::plugins::Plugin>> {
+    Ok(Box::new(load(cfg)))
+}

@@ -232,3 +232,22 @@ mod tests {
         }
     }
 }
+
+// ---------------------------------------------------------------- registry
+
+inventory::submit! {
+    crate::plugin_registry::PluginDef {
+        name: "fromfilename",
+        order: 32,
+        defaults: r#""#,
+        config_keys: &["fromfilename"],
+        redacted: &[],
+        make: Some(registry_make),
+        fatal: false,
+        commands: &[],
+    }
+}
+
+fn registry_make(_cfg: &crate::config::Config) -> anyhow::Result<Box<dyn crate::plugins::Plugin>> {
+    Ok(Box::new(FromFilenamePlugin))
+}

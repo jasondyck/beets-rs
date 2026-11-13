@@ -1765,3 +1765,36 @@ mod tests {
         assert_eq!(plurality(["b".to_string(), "a".into()]), "b");
     }
 }
+
+// ---------------------------------------------------------------- registry
+
+inventory::submit! {
+    crate::plugin_registry::PluginDef {
+        name: "musicbrainz",
+        order: 17,
+        defaults: r#"musicbrainz:
+    host: musicbrainz.org
+    https: no
+    ratelimit: 1
+    ratelimit_interval: 1
+    search_limit: 5
+    data_source_mismatch_penalty: 0.5
+    search_query_ascii: no
+    genres: no
+    genres_tag: genre
+    external_ids:
+        discogs: no
+        bandcamp: no
+        spotify: no
+        deezer: no
+        tidal: no
+    extra_tags: []
+    aliases_as_credits: no
+"#,
+        config_keys: &["musicbrainz"],
+        redacted: &[],
+        make: None,
+        fatal: false,
+        commands: &[],
+    }
+}

@@ -2,45 +2,7 @@
 //! beets-style `plugins:` config list. They hook into import and can add
 //! their own subcommands (wired up in `main.rs`/`commands.rs`).
 
-pub mod art;
-pub mod badfiles;
-pub mod chroma;
-pub mod convert;
-pub mod duplicates;
-pub mod edit;
-pub mod embedart;
-pub mod fetchart;
-pub mod filefilter;
-pub mod ftintitle;
-pub mod hook;
-pub mod ihate;
-pub mod importadded;
-pub mod info;
-pub mod lastgenre;
-pub mod lyrics;
-pub mod mbsync;
-pub mod missing;
-pub mod permissions;
-pub mod replaygain;
-pub mod requests;
-pub mod rewrite;
-// 5.18a: template and path plugins.
-pub mod albumtypes;
-pub mod bucket;
-pub mod fromfilename;
-pub mod scrub;
-pub mod smartplaylist;
-pub mod substitute;
-pub mod the;
-pub mod types;
-pub mod unimported;
-pub mod web;
-// 5.18c: export and media-server plugins.
-pub mod export;
-pub mod parentwork;
-pub mod playlist;
-pub mod random;
-pub mod zero;
+include!(concat!(env!("OUT_DIR"), "/plugin_modules.rs"));
 
 use crate::config::Config;
 use crate::fileops::FileOp;
@@ -180,46 +142,14 @@ pub struct ChoiceInfo<'a> {
     pub desc: String,
 }
 
-pub const AVAILABLE: &[&str] = &[
-    "badfiles",
-    "chroma",
-    "duplicates",
-    "edit",
-    "embedart",
-    "fetchart",
-    "filefilter",
-    "ftintitle",
-    "hook",
-    "ihate",
-    "importadded",
-    "info",
-    "inline",
-    "lastgenre",
-    "lyrics",
-    "mbsync",
-    "missing",
-    "musicbrainz",
-    "permissions",
-    "replaygain",
-    "convert",
-    "scrub",
-    "smartplaylist",
-    "the",
-    "zero",
-    "types",
-    "web",
-    "rewrite",
-    "advancedrewrite",
-    "substitute",
-    "bucket",
-    "albumtypes",
-    "fromfilename",
-    "unimported",
-    "random",
-    "export",
-    "playlist",
-    "parentwork",
-];
+/// The bundled plugins' names, in beets' list order (the "unknown plugin"
+/// message's `available:` list).
+pub fn available() -> Vec<&'static str> {
+    crate::plugin_registry::defs()
+        .iter()
+        .map(|d| d.name)
+        .collect()
+}
 
 /// The plugins to load: `plugins` (or `-p`) minus `disabled_plugins` (`-P`),
 /// as beets' `get_plugin_names`.
@@ -238,101 +168,27 @@ pub fn load(cfg: &Config) -> Result<Vec<Box<dyn Plugin>>> {
     sorted.sort();
     crate::logging::debug!("Loading plugins: {}", sorted.join(", "));
     for name in names {
-        match name.as_str() {
-            // beets' `_get_plugin`: a plugin that fails to set up is logged
-            // ("** error loading plugin", with the traceback in beets) and
-            // left out.
-            "fetchart" => match fetchart::FetchArt::new(cfg) {
-                Ok(p) => out.push(Box::new(p)),
-                Err(e) => crate::logging::emit(format!("** error loading plugin {name}\n{e:#}")),
-            },
-            "lastgenre" => match lastgenre::LastGenre::new(cfg) {
-                Ok(p) => out.push(Box::new(p)),
-                Err(e) => crate::logging::emit(format!("** error loading plugin {name}\n{e:#}")),
-            },
-            "lyrics" => out.push(Box::new(lyrics::LyricsPlugin::new(cfg))),
-            "embedart" => out.push(Box::new(embedart::EmbedArt::new(cfg))),
-            "info" => out.push(Box::new(info::InfoPlugin)),
-            "inline" => out.push(Box::new(crate::inline::load(cfg))),
-            "rewrite" => match rewrite::Rewriter::rewrite(cfg) {
-                Ok(_) => out.push(Box::new(rewrite::RewritePlugin("rewrite"))),
-                Err(e) => crate::logging::emit(format!("** error loading plugin {name}\n{e:#}")),
-            },
-            "substitute" => match substitute::Substitute::new(cfg) {
-                Ok(_) => out.push(Box::new(substitute::SubstitutePlugin)),
-                Err(e) => crate::logging::emit(format!("** error loading plugin {name}\n{e:#}")),
-            },
-            "bucket" => match bucket::Bucket::new(cfg) {
-                Ok(_) => out.push(Box::new(bucket::BucketPlugin)),
-                Err(e) => crate::logging::emit(format!("** error loading plugin {name}\n{e:#}")),
-            },
-            "albumtypes" => out.push(Box::new(albumtypes::AlbumTypesPlugin)),
-            "fromfilename" => out.push(Box::new(fromfilename::FromFilenamePlugin)),
-            "random" => out.push(Box::new(random::RandomPlugin)),
-            "playlist" => out.push(Box::new(playlist::load(cfg))),
-            "parentwork" => out.push(Box::new(parentwork::ParentWorkPlugin::new(cfg))),
-            "export" => match export::ExportPlugin::new(cfg) {
-                Ok(p) => out.push(Box::new(p)),
-                Err(e) => crate::logging::emit(format!("** error loading plugin {name}\n{e:#}")),
-            },
-            // Its rules are read on `pluginload`, where an error ends the
-            // command.
-            "advancedrewrite" => {
-                rewrite::Rewriter::advanced(cfg)?;
-                out.push(Box::new(rewrite::RewritePlugin("advancedrewrite")));
-            }
-            "badfiles" => out.push(Box::new(badfiles::load(cfg))),
-            "filefilter" => match filefilter::FileFilter::new(cfg) {
-                Ok(_) => out.push(Box::new(filefilter::FileFilterPlugin)),
-                Err(e) => crate::logging::emit(format!("** error loading plugin {name}\n{e:#}")),
-            },
-            "hook" => match hook::load(cfg) {
-                Ok(p) => out.push(Box::new(p)),
-                Err(e) => crate::logging::emit(format!("** error loading plugin {name}\n{e:#}")),
-            },
-            "ihate" => out.push(Box::new(ihate::load(cfg))),
-            "importadded" => out.push(Box::new(importadded::load(cfg))),
-            "permissions" => out.push(Box::new(permissions::load(cfg))),
-            "unimported" => out.push(Box::new(unimported::UnimportedPlugin)),
-            "ftintitle" => out.push(Box::new(ftintitle::FtInTitle::new(cfg))),
-            "duplicates" => out.push(Box::new(duplicates::DuplicatesPlugin)),
-            "scrub" => out.push(Box::new(scrub::Scrub::new(cfg))),
-            "smartplaylist" => match smartplaylist::SmartPlaylist::new(cfg) {
-                Ok(p) => out.push(Box::new(p)),
-                Err(e) => crate::logging::emit(format!("** error loading plugin {name}\n{e:#}")),
-            },
-            "convert" => out.push(Box::new(convert::ConvertPlugin::new())),
-            "edit" => out.push(Box::new(edit::EditPlugin::new(cfg))),
-            "missing" => out.push(Box::new(missing::MissingPlugin)),
-            "mbsync" => out.push(Box::new(mbsync::MbsyncPlugin)),
-            "replaygain" => match replaygain::ReplayGain::new(cfg) {
-                Ok(p) => out.push(Box::new(p)),
-                Err(e) => crate::logging::emit(format!("** error loading plugin {name}\n{e:#}")),
-            },
-            // Also a metadata source: its lookups and candidates are wired
-            // into `MbSource` and `autotag` (see the module docs).
-            "chroma" => out.push(Box::new(chroma::Chroma)),
-            // `%the{}` lives in the template environment (`FormatEnv`);
-            // loading only logs the config warnings.
-            "the" => out.push(Box::new(the::The::load(cfg))),
-            "zero" => match zero::Zero::new(cfg) {
-                Ok(p) => out.push(Box::new(p)),
-                Err(e) => crate::logging::emit(format!("** error loading plugin {name}\n{e:#}")),
-            },
-            "types" => out.push(Box::new(types::TypesPlugin)),
-            "web" => out.push(Box::new(web::WebPlugin)),
-            // The autotagger's metadata source, as in beets 2.14: it's
-            // queried only while this plugin is enabled.
-            "musicbrainz" => crate::mb::warn_deprecated_config(cfg),
-            other => bail!(
-                "unknown plugin {other:?} (available: {})",
-                AVAILABLE.join(", ")
-            ),
+        let Some(def) = crate::plugin_registry::find(&name) else {
+            bail!(
+                "unknown plugin {name:?} (available: {})",
+                available().join(", ")
+            );
+        };
+        let Some(make) = def.make else {
+            // `musicbrainz` isn't a `Plugin`: it's the autotagger's own
+            // metadata source, enabled by its config plugin name.
+            crate::mb::warn_deprecated_config(cfg);
+            continue;
+        };
+        // beets' `_get_plugin`: a plugin that fails to set up is logged
+        // ("** error loading plugin", with the traceback in beets) and left
+        // out; a plugin whose setup happens on `pluginload` ends the command.
+        match make(cfg) {
+            Ok(p) => out.push(p),
+            Err(e) if def.fatal => return Err(e),
+            Err(e) => crate::logging::emit(format!("** error loading plugin {name}\n{e:#}")),
         }
     }
-    // Hooks run in the order the plugins are listed, as beets' listeners.
-    // (embedart embeds fetchart's art through the `art_set` event, not
-    // through its own import hook, so the two can come in either order.)
     Ok(out)
 }
 

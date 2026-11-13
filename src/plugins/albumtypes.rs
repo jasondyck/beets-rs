@@ -158,3 +158,32 @@ mod tests {
         );
     }
 }
+
+// ---------------------------------------------------------------- registry
+
+inventory::submit! {
+    crate::plugin_registry::PluginDef {
+        name: "albumtypes",
+        order: 31,
+        defaults: r#"albumtypes:
+    types:
+    - [ep, EP]
+    - [single, Single]
+    - [soundtrack, OST]
+    - [live, Live]
+    - [compilation, Anthology]
+    - [remix, Remix]
+    ignore_va: [compilation]
+    bracket: '[]'
+"#,
+        config_keys: &["albumtypes"],
+        redacted: &[],
+        make: Some(registry_make),
+        fatal: false,
+        commands: &[],
+    }
+}
+
+fn registry_make(_cfg: &crate::config::Config) -> anyhow::Result<Box<dyn crate::plugins::Plugin>> {
+    Ok(Box::new(AlbumTypesPlugin))
+}

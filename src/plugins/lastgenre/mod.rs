@@ -1195,3 +1195,115 @@ fn run_command(p: &LastGenre, lib: &Library, write: bool, opts: &CmdOpts) -> Res
 
 #[cfg(test)]
 mod tests;
+
+// ---------------------------------------------------------------- registry
+
+inventory::submit! {
+    crate::plugin_registry::PluginDef {
+        name: "lastgenre",
+        order: 13,
+        defaults: r#"lastgenre:
+    whitelist: yes
+    min_weight: 10
+    count: 1
+    fallback: null
+    canonical: no
+    cleanup_existing: no
+    source: album
+    force: no
+    keep_existing: no
+    auto: yes
+    prefer_specific: no
+    title_case: yes
+    pretend: no
+    ignorelist: {}
+    aliases: yes
+"#,
+        config_keys: &["lastgenre"],
+        redacted: &[],
+        make: Some(registry_make),
+        fatal: false,
+        commands: &[
+            crate::plugin_registry::PluginCommand {
+                order: 150,
+                plugin: "lastgenre",
+                build: build_lastgenre,
+                run: run_lastgenre,
+            },
+        ],
+    }
+}
+
+fn registry_make(cfg: &crate::config::Config) -> anyhow::Result<Box<dyn crate::plugins::Plugin>> {
+    Ok(Box::new(LastGenre::new(cfg)?))
+}
+
+// ---------------------------------------------------------------- command
+
+#[derive(clap::Args)]
+pub struct LastgenreArgs {
+    /// Show actions but do nothing
+    #[arg(short = 'p', long)]
+    pretend: bool,
+    /// Modify existing genres
+    #[arg(short = 'f', long, overrides_with = "no_force")]
+    force: bool,
+    /// Don't modify existing genres
+    #[arg(short = 'F', long, overrides_with = "force")]
+    no_force: bool,
+    /// Combine with existing genres when modifying
+    #[arg(short = 'k', long, overrides_with = "no_keep_existing")]
+    keep_existing: bool,
+    /// Don't combine with existing genres when modifying
+    #[arg(short = 'K', long, overrides_with = "keep_existing")]
+    no_keep_existing: bool,
+    /// Genre source: artist, album, or track
+    #[arg(short = 's', long, value_name = "SOURCE")]
+    source: Option<String>,
+    /// Match items instead of albums
+    #[arg(short = 'A', long, overrides_with = "albums")]
+    items: bool,
+    /// Match albums instead of items (default)
+    #[arg(short = 'a', long, overrides_with = "items")]
+    albums: bool,
+    #[arg(allow_hyphen_values = true)]
+    query: Vec<String>,
+}
+
+pub fn build_lastgenre() -> clap::Command {
+    use clap::Args as _;
+    LastgenreArgs::augment_args(
+        clap::Command::new("lastgenre").about("Fetch genres (plugin: lastgenre)"),
+    )
+}
+
+pub fn run_lastgenre(
+    cfg: &crate::config::Config,
+    lib: &crate::library::Library,
+    plugins: &[Box<dyn crate::plugins::Plugin>],
+    m: &clap::ArgMatches,
+) -> anyhow::Result<()> {
+    use clap::FromArgMatches as _;
+    let a = LastgenreArgs::from_arg_matches(m)?;
+    if !plugins.iter().any(|p| p.name() == "lastgenre") {
+        // It failed to load (and said why).
+        anyhow::bail!("unknown command 'lastgenre'");
+    }
+    let flag = |on: bool, off: bool| match (on, off) {
+        (true, _) => Some(true),
+        (_, true) => Some(false),
+        _ => None,
+    };
+    crate::plugins::lastgenre::command(
+        cfg,
+        lib,
+        crate::plugins::lastgenre::CmdOpts {
+            pretend: a.pretend,
+            force: flag(a.force, a.no_force),
+            keep_existing: flag(a.keep_existing, a.no_keep_existing),
+            source: a.source,
+            album: !a.items,
+            query: a.query,
+        },
+    )
+}

@@ -376,3 +376,86 @@ fn print_lines(out: &mut impl Write, lines: Vec<String>) -> Result<()> {
 #[cfg(test)]
 #[path = "info_tests.rs"]
 mod tests;
+
+// ---------------------------------------------------------------- registry
+
+inventory::submit! {
+    crate::plugin_registry::PluginDef {
+        name: "info",
+        order: 11,
+        defaults: r#""#,
+        config_keys: &["info"],
+        redacted: &[],
+        make: Some(registry_make),
+        fatal: false,
+        commands: &[
+            crate::plugin_registry::PluginCommand {
+                order: 160,
+                plugin: "info",
+                build: build_info,
+                run: run_info,
+            },
+        ],
+    }
+}
+
+fn registry_make(_cfg: &crate::config::Config) -> anyhow::Result<Box<dyn crate::plugins::Plugin>> {
+    Ok(Box::new(InfoPlugin))
+}
+
+// ---------------------------------------------------------------- command
+
+#[derive(clap::Args)]
+pub struct InfoArgs {
+    /// Match albums instead of tracks
+    #[arg(short = 'a', long)]
+    album: bool,
+    /// Show library fields instead of tags
+    #[arg(short = 'l', long)]
+    library: bool,
+    /// Summarize the tags of all files
+    #[arg(short = 's', long)]
+    summarize: bool,
+    /// Comma separated list of keys to show
+    #[arg(short = 'i', long = "include-keys", value_name = "INCLUDED_KEYS")]
+    included_keys: Vec<String>,
+    /// Show only the keys
+    #[arg(short = 'k', long = "keys-only")]
+    keys_only: bool,
+    /// Print with custom format
+    #[arg(short = 'f', long)]
+    format: Option<String>,
+    /// Limit query results
+    #[arg(long)]
+    limit: Option<usize>,
+    #[arg(allow_hyphen_values = true)]
+    args: Vec<String>,
+}
+
+pub fn build_info() -> clap::Command {
+    use clap::Args as _;
+    InfoArgs::augment_args(clap::Command::new("info").about("Show file metadata (plugin: info)"))
+}
+
+pub fn run_info(
+    _cfg: &crate::config::Config,
+    lib: &crate::library::Library,
+    _plugins: &[Box<dyn crate::plugins::Plugin>],
+    m: &clap::ArgMatches,
+) -> anyhow::Result<()> {
+    use clap::FromArgMatches as _;
+    let a = InfoArgs::from_arg_matches(m)?;
+    crate::plugins::info::command(
+        lib,
+        crate::plugins::info::CmdOpts {
+            album: a.album,
+            library: a.library,
+            summarize: a.summarize,
+            included_keys: a.included_keys,
+            keys_only: a.keys_only,
+            format: a.format,
+            limit: a.limit,
+            args: a.args,
+        },
+    )
+}

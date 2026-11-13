@@ -205,3 +205,91 @@ pub fn run(
 #[cfg(test)]
 #[path = "random_tests.rs"]
 mod tests;
+
+// ---------------------------------------------------------------- registry
+
+inventory::submit! {
+    crate::plugin_registry::PluginDef {
+        name: "random",
+        order: 34,
+        defaults: r#""#,
+        config_keys: &["random"],
+        redacted: &[],
+        make: Some(registry_make),
+        fatal: false,
+        commands: &[
+            crate::plugin_registry::PluginCommand {
+                order: 340,
+                plugin: "random",
+                build: build_random,
+                run: run_random,
+            },
+        ],
+    }
+}
+
+fn registry_make(_cfg: &crate::config::Config) -> anyhow::Result<Box<dyn crate::plugins::Plugin>> {
+    Ok(Box::new(RandomPlugin))
+}
+
+// ---------------------------------------------------------------- command
+
+#[derive(clap::Args)]
+pub struct RandomArgs {
+    /// Show matching albums instead of tracks
+    #[arg(short = 'a', long)]
+    album: bool,
+    /// Each field has the same chance
+    #[arg(short = 'e', long = "equal-chance")]
+    equal_chance: bool,
+    /// Field to use for equal chance sampling (default: albumartist)
+    #[arg(long, default_value = "albumartist")]
+    field: String,
+    /// Number of objects to choose
+    #[arg(short = 'n', long, default_value_t = 1)]
+    number: i64,
+    /// Total length in minutes of objects to choose
+    #[arg(short = 't', long)]
+    time: Option<f64>,
+    /// Print paths for matched items or albums
+    #[arg(short = 'p', long)]
+    path: bool,
+    /// Print with a custom format template
+    #[arg(short = 'f', long)]
+    format: Option<String>,
+    /// Limit query results
+    #[arg(short = 'l', long)]
+    limit: Option<usize>,
+    #[arg(allow_hyphen_values = true)]
+    query: Vec<String>,
+}
+
+pub fn build_random() -> clap::Command {
+    use clap::Args as _;
+    RandomArgs::augment_args(
+        clap::Command::new("random").about("Choose a random track or album (plugin: random)"),
+    )
+}
+
+pub fn run_random(
+    cfg: &crate::config::Config,
+    lib: &crate::library::Library,
+    _plugins: &[Box<dyn crate::plugins::Plugin>],
+    m: &clap::ArgMatches,
+) -> anyhow::Result<()> {
+    use clap::FromArgMatches as _;
+    let a = RandomArgs::from_arg_matches(m)?;
+    crate::plugins::random::command(
+        cfg,
+        lib,
+        crate::plugins::random::CmdOpts {
+            album: a.album,
+            equal_chance: a.equal_chance,
+            field: a.field,
+            limit: a.limit,
+            number: a.number,
+            time: a.time,
+            query: a.query,
+        },
+    )
+}

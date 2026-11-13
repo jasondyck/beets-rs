@@ -219,333 +219,6 @@ match:
     singleton_disambig_fields: data_source index track_alt album
 "#;
 
-/// The bundled plugins' defaults, added as beets' plugins do when they
-/// load (`config.add`). `beet config -d` shows them for the enabled plugins.
-pub const PLUGIN_DEFAULTS: &str = r#"fetchart:
-    auto: yes
-    fetch_for_asis: no
-    minwidth: 0
-    maxwidth: 0
-    quality: 0
-    max_filesize: 0
-    enforce_ratio: no
-    cautious: no
-    cover_names: [cover, front, art, album, folder]
-    fallback: null
-    sources: [filesystem, coverart, itunes, amazon, albumart, cover_art_url]
-    store_source: no
-    high_resolution: no
-    deinterlace: no
-    cover_format: null
-    google_key: null
-    google_engine: '001442825323518660753:hrh5ch1gjzm'
-    lastfm_key: null
-    fanarttv_key: null
-
-embedart:
-    maxwidth: 0
-    auto: yes
-    compare_threshold: 0
-    ifempty: no
-    remove_art_file: no
-    quality: 0
-    clearart_on_import: no
-
-lyrics:
-    auto: yes
-    auto_ignore: null
-    translate:
-        api_key: null
-        from_languages: []
-        to_language: null
-    dist_thresh: 0.11
-    google_API_key: null
-    google_engine_ID: '009217259823014548361:lndtuqkycfu'
-    genius_api_key: Ryq93pUGm8bM6eUWwD_M3NOFFDAtp2yEE7W76V-uFL5jks5dNvcGCdarqFjDhP9c
-    lrcmux:
-        url: https://api.lrcmux.dev
-        sources: []
-    fallback: null
-    force: no
-    keep_synced: no
-    local: no
-    print: no
-    rest_directory: null
-    synced: no
-    # Musixmatch and Tekstowo are disabled by default as they currently
-    # block requests with the beets user agent.
-    sources: [lrclib, google, genius, lrcmux]
-
-lastgenre:
-    whitelist: yes
-    min_weight: 10
-    count: 1
-    fallback: null
-    canonical: no
-    cleanup_existing: no
-    source: album
-    force: no
-    keep_existing: no
-    auto: yes
-    prefer_specific: no
-    title_case: yes
-    pretend: no
-    ignorelist: {}
-    aliases: yes
-
-duplicates:
-    album: no
-    checksum: ''
-    copy: ''
-    count: no
-    delete: no
-    format: ''
-    full: no
-    keys: []
-    merge: no
-    move: ''
-    path: no
-    tiebreak: {}
-    strict: no
-    tag: ''
-    remove: no
-
-smartplaylist:
-    dest_regen: no
-    relative_to:
-    playlist_dir: .
-    auto: yes
-    playlists: []
-    uri_format:
-    fields: []
-    forward_slash: no
-    prefix: ''
-    urlencode: no
-    format: $artist - $title
-    output: m3u
-    pretend: no
-
-importadded:
-    preserve_mtimes: no
-    preserve_write_mtimes: no
-
-permissions:
-    file: '644'
-    dir: '755'
-
-hook:
-    hooks: []
-
-ihate:
-    warn: []
-    skip: []
-
-filefilter:
-    path: .*
-
-badfiles:
-    check_on_import: no
-    import_action_on_warning: ask
-    import_action_on_error: ask
-
-unimported:
-    ignore_extensions: []
-    ignore_subdirectories: []
-
-missing:
-    count: no
-    total: no
-    album: no
-    release_types: [album]
-
-the:
-    the: yes
-    a: yes
-    format: '{}, {}'
-    strip: no
-    patterns: []
-
-zero:
-    auto: yes
-    fields: []
-    keep_fields: []
-    update_database: no
-    omit_single_disc: no
-
-replaygain:
-    overwrite: no
-    auto: yes
-    backend: command
-    threads: CPU_COUNT
-    parallel_on_import: no
-    per_disc: no
-    peak: 'true'
-    targetlevel: 89
-    r128: [Opus]
-    r128_targetlevel: 84
-    command: ''
-    noclip: yes
-
-chroma:
-    search_limit: 5
-    data_source_mismatch_penalty: 0.5
-    auto: yes
-
-ftintitle:
-    auto: yes
-    drop: no
-    format: feat. {}
-    keep_in_artist: no
-    preserve_album_artist: yes
-    custom_words: []
-    bracket_keywords:
-    - abridged
-    - acapella
-    - club
-    - demo
-    - edit
-    - edition
-    - extended
-    - instrumental
-    - live
-    - mix
-    - radio
-    - release
-    - remaster
-    - remastered
-    - remix
-    - rmx
-    - unabridged
-    - unreleased
-    - version
-    - vip
-
-scrub:
-    auto: yes
-
-convert:
-    dest:
-    pretend: no
-    link: no
-    hardlink: no
-    threads: CPU_COUNT
-    format: mp3
-    id3v23: inherit
-    write_metadata: yes
-    formats:
-        aac:
-            command: ffmpeg -i $source -y -vn -acodec aac -aq 1 $dest
-            extension: m4a
-        alac:
-            command: ffmpeg -i $source -y -vn -acodec alac $dest
-            extension: m4a
-        flac: ffmpeg -i $source -y -vn -acodec flac $dest
-        mp3: ffmpeg -i $source -y -vn -aq 2 $dest
-        opus: ffmpeg -i $source -y -vn -acodec libopus -ab 96k $dest
-        ogg: ffmpeg -i $source -y -vn -acodec libvorbis -aq 3 $dest
-        wma: ffmpeg -i $source -y -vn -acodec wmav2 -vn $dest
-    max_bitrate:
-    auto: no
-    auto_keep: no
-    tmpdir:
-    quiet: no
-    embed: yes
-    paths: {}
-    no_convert: ''
-    never_convert_lossy_files: no
-    copy_album_art: no
-    album_art_maxwidth: 0
-    delete_originals: no
-    playlist:
-    force: no
-    refresh: no
-    keep_new: no
-
-edit:
-    albumfields: album albumartist
-    itemfields: track title artist album
-    ignore_fields: id path
-
-web:
-    host: 127.0.0.1
-    port: 8337
-    cors: ''
-    cors_supports_credentials: no
-    reverse_proxy: no
-    include_paths: no
-    readonly: yes
-
-pathfields: {}
-item_fields: {}
-album_fields: {}
-
-bucket:
-    bucket_year: []
-    bucket_alpha: []
-    bucket_alpha_regex: {}
-    extrapolate: no
-
-albumtypes:
-    types:
-    - [ep, EP]
-    - [single, Single]
-    - [soundtrack, OST]
-    - [live, Live]
-    - [compilation, Anthology]
-    - [remix, Remix]
-    ignore_va: [compilation]
-    bracket: '[]'
-
-parentwork:
-    auto: no
-    force: no
-
-playlist:
-    auto: no
-    playlist_dir: .
-    relative_to: library
-    forward_slash: no
-
-export:
-    default_format: json
-    json:
-        formatting:
-            ensure_ascii: no
-            indent: 4
-            separators: [',', ': ']
-            sort_keys: yes
-    jsonlines:
-        formatting:
-            ensure_ascii: no
-            separators: [',', ': ']
-            sort_keys: yes
-    csv:
-        formatting:
-            delimiter: ','
-            dialect: excel
-    xml:
-        formatting: {}
-
-musicbrainz:
-    host: musicbrainz.org
-    https: no
-    ratelimit: 1
-    ratelimit_interval: 1
-    search_limit: 5
-    data_source_mismatch_penalty: 0.5
-    search_query_ascii: no
-    genres: no
-    genres_tag: genre
-    external_ids:
-        discogs: no
-        bandcamp: no
-        spotify: no
-        deezer: no
-        tidal: no
-    extra_tags: []
-    aliases_as_credits: no
-"#;
-
 /// confuse's `ConfigError`: a bad setting, reported as
 /// "configuration error: MESSAGE".
 #[derive(Debug)]
@@ -577,72 +250,10 @@ pub struct Config {
 }
 
 /// Keys whose values `beet config` hides unless `--clear`, per plugin
-/// (beets' `redact` flags, set when the plugin loads).
-pub const REDACTED_KEYS: &[(&str, &str)] = &[
-    ("fetchart", "fetchart.google_key"),
-    ("fetchart", "fetchart.google_engine"),
-    ("fetchart", "fetchart.fanarttv_key"),
-    ("fetchart", "fetchart.lastfm_key"),
-    ("lyrics", "lyrics.translate.api_key"),
-    ("lyrics", "lyrics.google_API_key"),
-    ("lyrics", "lyrics.google_engine_ID"),
-    ("lyrics", "lyrics.genius_api_key"),
-    ("smartplaylist", "smartplaylist.prefix"),
-    ("chroma", "acoustid.apikey"),
-];
-
-/// Plugins whose default settings are in `DEFAULT_CONFIG`: beets adds a
-/// plugin's defaults when it loads, so `beet config` shows them for the
-/// enabled ones.
-const PLUGIN_SECTIONS: &[&str] = &[
-    "fetchart",
-    "embedart",
-    "lyrics",
-    "lastgenre",
-    "missing",
-    "the",
-    "zero",
-    "chroma",
-    "ftintitle",
-    "replaygain",
-    "duplicates",
-    "scrub",
-    "smartplaylist",
-    "bucket",
-    "albumtypes",
-    "importadded",
-    "permissions",
-    "hook",
-    "ihate",
-    "filefilter",
-    "badfiles",
-    "unimported",
-    "convert",
-    "edit",
-    "web",
-    "export",
-    "playlist",
-    "parentwork",
-    "musicbrainz",
-];
-
-/// Plugins whose defaults are top-level keys (beets' `config.add`).
-const PLUGIN_TOP_KEYS: &[(&str, &[&str])] =
-    &[("inline", &["pathfields", "item_fields", "album_fields"])];
-
-/// `DEFAULT_CONFIG` parsed, with the defaults computed at run time
-/// (replaygain's `threads`: `os.cpu_count()`).
+/// `DEFAULT_CONFIG` parsed, with the defaults the plugins' own files
+/// register (beets adds them when the plugins load).
 fn default_tree() -> Y {
-    // The core defaults (beets' `config_default.yaml`) plus the bundled
-    // plugins' sections, which beets' plugins add when they load.
-    let core: Y =
-        serde_yaml::from_str(&yaml11_bools(DEFAULT_CONFIG)).expect("default config parses");
-    let plugins: Y = serde_yaml::from_str(&yaml11_bools(&PLUGIN_DEFAULTS.replace(
-        "threads: CPU_COUNT",
-        &format!("threads: {}", crate::plugins::replaygain::cpu_count()),
-    )))
-    .expect("plugin defaults parse");
-    merge(core, plugins)
+    merge(core_tree(), crate::plugin_registry::default_tree())
 }
 
 /// confuse's `ConfigReadError`: "PATH could not be read: REASON".
@@ -705,7 +316,7 @@ pub fn default_config_dir() -> PathBuf {
 
 /// Deep-merge `over` onto `base`. Mapping keys from `over` come first so a
 /// user's `paths:` entries take priority over the defaults' order.
-fn merge(base: Y, over: Y) -> Y {
+pub(crate) fn merge(base: Y, over: Y) -> Y {
     match (base, over) {
         (Y::Mapping(base), Y::Mapping(over)) => {
             let mut out = Mapping::new();
@@ -743,7 +354,7 @@ fn flatten_sources(sources: &[&Y]) -> Y {
 /// YAML 1.1 booleans: serde_yaml reads unquoted `yes`/`no`/`on`/`off`/
 /// `true`/`false` as strings, but beets' loader (and PyYAML) read them as
 /// booleans (`peak: 'true'` stays a string).
-fn yaml11_bools(text: &str) -> String {
+pub(crate) fn yaml11_bools(text: &str) -> String {
     fn bool_of(v: &str) -> Option<&'static str> {
         match v {
             "yes" | "Yes" | "YES" | "true" | "True" | "TRUE" | "on" | "On" | "ON" => Some("true"),
@@ -998,11 +609,13 @@ impl Config {
             let disabled = self.list("disabled_plugins");
             let enabled =
                 |p: &str| plugins.iter().any(|x| x == p) && !disabled.iter().any(|x| x == p);
-            for (plugin, key) in REDACTED_KEYS {
-                if !enabled(plugin) {
+            for def in crate::plugin_registry::defs() {
+                if !enabled(def.name) {
                     continue;
                 }
-                set_redacted(&mut out, key);
+                for key in def.redacted {
+                    set_redacted(&mut out, key);
+                }
             }
         }
         if out.as_mapping().is_none_or(|m| m.is_empty()) {
@@ -1020,12 +633,10 @@ impl Config {
         out.insert(Y::String("disabled_plugins".into()), Y::Sequence(vec![]));
         let defaults = default_tree();
         for name in crate::plugins::names(self) {
-            let keys: Vec<&str> = match PLUGIN_TOP_KEYS.iter().find(|(p, _)| *p == name) {
-                Some((_, keys)) => keys.to_vec(),
-                None if PLUGIN_SECTIONS.contains(&name.as_str()) => vec![name.as_str()],
-                None => continue,
+            let Some(def) = crate::plugin_registry::find(&name) else {
+                continue;
             };
-            for k in keys {
+            for k in def.config_keys {
                 if let Some(v) = defaults.get(k) {
                     out.insert(Y::String(k.to_string()), v.clone());
                 }

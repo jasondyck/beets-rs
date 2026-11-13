@@ -8,7 +8,7 @@ use crate::logging::debug;
 use crate::media;
 use crate::model::{ALBUM_FIELDS, Album, FieldType, ITEM_FIELDS, Item, Kind, Record, Value};
 use crate::paths::PathFormatter;
-use crate::plugins::{self, PluginCtx};
+use crate::plugins::{self, Plugin};
 use crate::query::Query;
 use crate::template::Template;
 use crate::ui;
@@ -19,13 +19,54 @@ use serde_yaml::Value as Y;
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
-pub fn run(cli: Cli) -> Result<()> {
-    crate::logging::set_verbosity(cli.verbose);
-    // As beets, `config -e` works even when the configuration is broken.
-    if let Some(Cmd::Config { edit: true, .. }) = &cli.cmd {
-        return config_edit(&cli.config);
+/// The command line's global options: beets' `config.set_args` applies them
+/// before the command runs (also when the command came from a plugin).
+pub struct Globals {
+    pub library: Option<PathBuf>,
+    pub directory: Option<PathBuf>,
+    pub verbose: u8,
+    pub config: Vec<PathBuf>,
+    pub plugins: Option<String>,
+    pub disable_plugins: Option<String>,
+    pub version: bool,
+}
+
+impl Globals {
+    fn from_cli(cli: &Cli) -> Globals {
+        Globals {
+            library: cli.library.clone(),
+            directory: cli.directory.clone(),
+            verbose: cli.verbose,
+            config: cli.config.clone(),
+            plugins: cli.plugins.clone(),
+            disable_plugins: cli.disable_plugins.clone(),
+            version: cli.version,
+        }
     }
-    let mut cfg = match Config::load(&cli.config) {
+
+    /// The same from clap's matches for the augmented command (whose
+    /// global arguments are the derived ones).
+    pub fn from_matches(m: &clap::ArgMatches) -> Globals {
+        Globals {
+            library: m.get_one::<PathBuf>("library").cloned(),
+            directory: m.get_one::<PathBuf>("directory").cloned(),
+            verbose: m.get_one::<u8>("verbose").copied().unwrap_or(0),
+            config: m
+                .get_many::<PathBuf>("config")
+                .map(|v| v.cloned().collect())
+                .unwrap_or_default(),
+            plugins: m.get_one::<String>("plugins").cloned(),
+            disable_plugins: m.get_one::<String>("disable_plugins").cloned(),
+            version: m.get_flag("version"),
+        }
+    }
+}
+
+/// Load and layer the configuration (beets' `config` global before the
+/// command runs), applying the command line's overrides.
+fn load_config(g: &Globals) -> Result<Config> {
+    crate::logging::set_verbosity(g.verbose);
+    let mut cfg = match Config::load(&g.config) {
         Ok(c) => c,
         Err(e) => {
             eprintln!("configuration error: {e:#}");
@@ -46,43 +87,81 @@ pub fn run(cli: Cli) -> Result<()> {
     debug!("data directory: {}", cfg.config_dir.display());
     // beets' `config.set_args`: the command line is the highest-priority
     // source, its keys in option order (`beet config` shows them).
-    if let Some(l) = &cli.library {
+    if let Some(l) = &g.library {
         cfg.set("library", Y::String(l.to_string_lossy().into()));
     }
-    if let Some(d) = &cli.directory {
+    if let Some(d) = &g.directory {
         cfg.set("directory", Y::String(d.to_string_lossy().into()));
     }
-    if cli.verbose > 0 {
-        cfg.set("verbose", Y::Number(cli.verbose.into()));
+    if g.verbose > 0 {
+        cfg.set("verbose", Y::Number(g.verbose.into()));
     }
     cfg.set(
         "configs",
         Y::Sequence(
-            cli.config
+            g.config
                 .iter()
                 .map(|p| Y::String(p.to_string_lossy().into()))
                 .collect(),
         ),
     );
     let csl = |s: &str| Y::Sequence(crate::comma_list(s).into_iter().map(Y::String).collect());
-    if let Some(p) = &cli.plugins {
+    if let Some(p) = &g.plugins {
         cfg.set("plugins", csl(p));
     }
-    if let Some(p) = &cli.disable_plugins {
+    if let Some(p) = &g.disable_plugins {
         cfg.set("disabled_plugins", csl(p));
     }
     if let Err(e) = crate::formatted::configure(&cfg) {
         eprintln!("configuration error: {e:#}");
         std::process::exit(1);
     }
+    Ok(cfg)
+}
+
+/// Open the library and load the plugins (beets' `_setup`), sending the
+/// `pluginload` and `library_opened` events.
+fn open_library(cfg: &Config) -> Result<(Library, Vec<Box<dyn Plugin>>)> {
+    let lib = Library::open_with(
+        &cfg.library_path(),
+        Some(&cfg.directory()),
+        cfg.bool("create_backup_before_migrations"),
+    )?;
+    debug!(
+        "library database: {}\nlibrary directory: {}",
+        cfg.library_path().display(),
+        cfg.directory().display()
+    );
+    let plugins = plugins::load(cfg)?;
+    // The plugins' flexible attribute types (the types plugin's settings).
+    if let Err(e) = plugins::types::configure(cfg) {
+        if e.to_string().starts_with("configuration error") {
+            eprintln!("{e}");
+            std::process::exit(1);
+        }
+        return Err(e);
+    }
+    // beets' `pluginload` (once the plugins are set up) and
+    // `library_opened`.
+    crate::events::send("pluginload", &[]);
+    crate::events::send("library_opened", &[("lib", crate::events::Arg::Lib(&lib))]);
+    Ok((lib, plugins))
+}
+
+pub fn run(cli: Cli) -> Result<()> {
+    let g = Globals::from_cli(&cli);
+    // As beets, `config -e` works even when the configuration is broken.
+    if let Some(Cmd::Config { edit: true, .. }) = &cli.cmd {
+        return config_edit(&g.config);
+    }
+    let cfg = load_config(&g)?;
     // As beets: `--version` runs the version command, and no command at
     // all shows the help.
     let cmd = match cli.cmd {
-        _ if cli.version => Cmd::Version,
+        _ if g.version => Cmd::Version,
         Some(cmd) => cmd,
         None => Cmd::Help { command: None },
     };
-
     // Commands that don't need the library.
     match &cmd {
         Cmd::Help { command } => return help(command.as_deref()),
@@ -109,30 +188,7 @@ pub fn run(cli: Cli) -> Result<()> {
         }
         _ => {}
     }
-
-    let lib = Library::open_with(
-        &cfg.library_path(),
-        Some(&cfg.directory()),
-        cfg.bool("create_backup_before_migrations"),
-    )?;
-    debug!(
-        "library database: {}\nlibrary directory: {}",
-        cfg.library_path().display(),
-        cfg.directory().display()
-    );
-    let plugins = plugins::load(&cfg)?;
-    // The plugins' flexible attribute types (the types plugin's settings).
-    if let Err(e) = plugins::types::configure(&cfg) {
-        if e.to_string().starts_with("configuration error") {
-            eprintln!("{e}");
-            std::process::exit(1);
-        }
-        return Err(e);
-    }
-    // beets' `pluginload` (once the plugins are set up) and
-    // `library_opened`.
-    crate::events::send("pluginload", &[]);
-    crate::events::send("library_opened", &[("lib", crate::events::Arg::Lib(&lib))]);
+    let (lib, plugins) = open_library(&cfg)?;
     let result = match cmd {
         Cmd::Import {
             copy,
@@ -380,504 +436,6 @@ pub fn run(cli: Cli) -> Result<()> {
             limit,
             query,
         } => stats(&lib, exact, limit, &query),
-        Cmd::Fetchart {
-            force,
-            quiet,
-            limit,
-            query,
-        } => {
-            require_plugin(&cfg, "fetchart")?;
-            let ctx = art_ctx(&cfg, &lib);
-            plugins::fetchart::command(
-                &ctx,
-                &lib,
-                plugins::fetchart::CmdOpts {
-                    force,
-                    quiet,
-                    limit,
-                    query,
-                },
-            )
-        }
-        Cmd::Embedart {
-            file,
-            yes,
-            url,
-            limit,
-            query,
-        } => {
-            require_plugin(&cfg, "embedart")?;
-            let ctx = art_ctx(&cfg, &lib);
-            plugins::embedart::embed_command(
-                &ctx,
-                plugins::embedart::EmbedCmd {
-                    file,
-                    url,
-                    yes,
-                    limit,
-                    query,
-                },
-            )
-        }
-        Cmd::Extractart {
-            outpath,
-            filename,
-            associate,
-            limit,
-            query,
-        } => {
-            require_plugin(&cfg, "embedart")?;
-            let ctx = art_ctx(&cfg, &lib);
-            plugins::embedart::extract_command(
-                &ctx,
-                plugins::embedart::ExtractCmd {
-                    outpath,
-                    filename,
-                    associate,
-                    limit,
-                    query,
-                },
-            )
-        }
-        Cmd::Clearart { yes, limit, query } => {
-            require_plugin(&cfg, "embedart")?;
-            let ctx = art_ctx(&cfg, &lib);
-            plugins::embedart::clear_command(&ctx, yes, limit, &query)
-        }
-        Cmd::Lyrics {
-            print,
-            rest_directory,
-            force,
-            keep_synced,
-            no_keep_synced,
-            local,
-            limit,
-            query,
-        } => {
-            require_plugin(&cfg, "lyrics")?;
-            let keep_synced = if keep_synced {
-                Some(true)
-            } else if no_keep_synced {
-                Some(false)
-            } else {
-                None
-            };
-            plugins::lyrics::command(
-                &cfg,
-                &lib,
-                plugins::lyrics::CmdOpts {
-                    print,
-                    rest_directory,
-                    force,
-                    keep_synced,
-                    local,
-                    limit,
-                    query,
-                },
-            )
-        }
-        Cmd::Ftintitle { drop, limit, query } => {
-            require_plugin(&cfg, "ftintitle")?;
-            plugins::ftintitle::command(&cfg, &lib, drop, limit, &query)
-        }
-        Cmd::Convert {
-            pretend,
-            threads,
-            refresh,
-            keep_new,
-            dest,
-            format,
-            yes,
-            link,
-            hardlink,
-            playlist,
-            force,
-            album,
-            limit,
-            query,
-        } => {
-            require_plugin(&cfg, "convert")?;
-            plugins::convert::command(
-                &cfg,
-                &lib,
-                plugins::convert::CmdOpts {
-                    pretend,
-                    threads,
-                    refresh,
-                    keep_new,
-                    dest,
-                    format,
-                    yes,
-                    link,
-                    hardlink,
-                    playlist,
-                    force,
-                    album,
-                    limit,
-                    query,
-                },
-            )
-        }
-        Cmd::Edit {
-            field,
-            all,
-            album,
-            query,
-        } => {
-            require_plugin(&cfg, "edit")?;
-            plugins::edit::command(&cfg, &lib, album, &field, all, &query)
-        }
-        Cmd::Scrub {
-            nowrite,
-            limit,
-            query,
-        } => {
-            require_plugin(&cfg, "scrub")?;
-            plugins::scrub::command(&lib, !nowrite, limit, &query)
-        }
-        Cmd::Zero { limit, query } => {
-            require_plugin(&cfg, "zero")?;
-            plugins::zero::command(&cfg, &lib, &plugins, limit, &query)
-        }
-        Cmd::Lastgenre {
-            pretend,
-            force,
-            no_force,
-            keep_existing,
-            no_keep_existing,
-            source,
-            items,
-            albums: _,
-            query,
-        } => {
-            require_plugin(&cfg, "lastgenre")?;
-            if !plugins.iter().any(|p| p.name() == "lastgenre") {
-                // It failed to load (and said why).
-                bail!("unknown command 'lastgenre'");
-            }
-            let flag = |on: bool, off: bool| match (on, off) {
-                (true, _) => Some(true),
-                (_, true) => Some(false),
-                _ => None,
-            };
-            plugins::lastgenre::command(
-                &cfg,
-                &lib,
-                plugins::lastgenre::CmdOpts {
-                    pretend,
-                    force: flag(force, no_force),
-                    keep_existing: flag(keep_existing, no_keep_existing),
-                    source,
-                    album: !items,
-                    query,
-                },
-            )
-        }
-        Cmd::Info {
-            album,
-            library,
-            summarize,
-            included_keys,
-            keys_only,
-            format,
-            limit,
-            args,
-        } => {
-            require_plugin(&cfg, "info")?;
-            plugins::info::command(
-                &lib,
-                plugins::info::CmdOpts {
-                    album,
-                    library,
-                    summarize,
-                    included_keys,
-                    keys_only,
-                    format,
-                    limit,
-                    args,
-                },
-            )
-        }
-        Cmd::Replaygain {
-            album,
-            threads,
-            force,
-            write,
-            nowrite,
-            limit,
-            query,
-        } => {
-            require_plugin(&cfg, "replaygain")?;
-            if !plugins.iter().any(|p| p.name() == "replaygain") {
-                // It failed to load (and said why).
-                bail!("unknown command 'replaygain'");
-            }
-            // Set up again (it said what it had to when it loaded).
-            let rg = crate::logging::capture(|| plugins::replaygain::ReplayGain::new(&cfg)).0?;
-            let write = match (write, nowrite) {
-                (true, _) => Some(true),
-                (_, true) => Some(false),
-                _ => None,
-            };
-            rg.command(
-                &cfg,
-                &lib,
-                plugins::replaygain::CmdOpts {
-                    album,
-                    force,
-                    threads,
-                    write,
-                    limit,
-                    query,
-                },
-            )
-        }
-        Cmd::Duplicates {
-            count,
-            checksum,
-            delete,
-            full,
-            strict,
-            keys,
-            merge,
-            move_to,
-            copy_to,
-            tag,
-            remove,
-            album,
-            path,
-            format,
-            limit,
-            query,
-        } => {
-            require_plugin(&cfg, "duplicates")?;
-            plugins::duplicates::command(
-                &cfg,
-                &lib,
-                plugins::duplicates::CmdOpts {
-                    count,
-                    checksum,
-                    delete,
-                    full,
-                    strict,
-                    keys,
-                    merge,
-                    move_to,
-                    copy_to,
-                    tag,
-                    remove,
-                    album,
-                    path,
-                    format,
-                    limit,
-                    query,
-                },
-            )
-        }
-        Cmd::Mbsync {
-            pretend,
-            mv,
-            nomove,
-            nowrite,
-            format,
-            limit,
-            query,
-        } => {
-            require_plugin(&cfg, "mbsync")?;
-            plugins::mbsync::command(
-                &cfg,
-                &lib,
-                plugins::mbsync::CmdOpts {
-                    pretend,
-                    // The last of -m/-M given wins (clap's overrides).
-                    mv: if mv {
-                        Some(true)
-                    } else if nomove {
-                        Some(false)
-                    } else {
-                        None
-                    },
-                    write: nowrite.then_some(false),
-                    format,
-                    limit,
-                    query,
-                },
-            )
-        }
-        Cmd::Web { debug, args } => {
-            require_plugin(&cfg, "web")?;
-            plugins::web::command(&cfg, &lib, plugins::web::CmdOpts { debug, args })
-        }
-        Cmd::Splupdate {
-            pretend,
-            format,
-            playlist_dir,
-            dest_regen,
-            relative_to,
-            prefix,
-            forward_slash,
-            urlencode,
-            uri_format,
-            output,
-            names,
-        } => {
-            require_plugin(&cfg, "smartplaylist")?;
-            plugins::smartplaylist::command(
-                &cfg,
-                &lib,
-                plugins::smartplaylist::CmdOpts {
-                    pretend,
-                    format,
-                    playlist_dir,
-                    dest_regen,
-                    relative_to,
-                    prefix,
-                    forward_slash,
-                    urlencode,
-                    uri_format,
-                    output,
-                    names,
-                },
-            )
-        }
-        Cmd::Bad {
-            verbose,
-            limit,
-            query,
-        } => {
-            require_plugin(&cfg, "badfiles")?;
-            plugins::badfiles::command(&cfg, &lib, verbose, limit, &query)
-        }
-        Cmd::Unimported => {
-            require_plugin(&cfg, "unimported")?;
-            plugins::unimported::command(&cfg, &lib)
-        }
-        Cmd::Missing {
-            count,
-            total,
-            album,
-            release_types,
-            format,
-            limit,
-            query,
-        } => {
-            require_plugin(&cfg, "missing")?;
-            plugins::missing::command(
-                &cfg,
-                &lib,
-                plugins::missing::CmdOpts {
-                    count,
-                    total,
-                    album,
-                    release_types,
-                    format,
-                    limit,
-                    query,
-                },
-            )
-        }
-        Cmd::Submit { limit, query } => {
-            require_plugin(&cfg, "chroma")?;
-            plugins::chroma::submit_command(&cfg, &lib, limit, &query)
-        }
-        Cmd::Fingerprint { limit, query } => {
-            require_plugin(&cfg, "chroma")?;
-            plugins::chroma::fingerprint_command(&cfg, &lib, limit, &query)
-        }
-        Cmd::Chromasearch {
-            path,
-            format,
-            search,
-            count,
-            full,
-            write,
-            limit,
-            query,
-        } => {
-            require_plugin(&cfg, "chroma")?;
-            plugins::chroma::chromasearch_command(
-                &cfg,
-                &lib,
-                plugins::chroma::SearchOpts {
-                    search,
-                    count,
-                    full,
-                    write,
-                    path,
-                    format,
-                    limit,
-                    query,
-                },
-            )
-        }
-        Cmd::Parentwork {
-            force,
-            limit,
-            query,
-        } => {
-            require_plugin(&cfg, "parentwork")?;
-            plugins::parentwork::command(
-                &cfg,
-                &lib,
-                plugins::parentwork::CmdOpts {
-                    force: force.then_some(true),
-                    limit,
-                    query,
-                },
-            )
-        }
-        Cmd::Export {
-            album,
-            library,
-            append,
-            included_keys,
-            output,
-            format,
-            limit,
-            query,
-        } => {
-            require_plugin(&cfg, "export")?;
-            plugins::export::command(
-                &cfg,
-                &lib,
-                plugins::export::CmdOpts {
-                    album,
-                    library,
-                    append,
-                    included_keys,
-                    limit,
-                    output,
-                    format,
-                    query,
-                },
-            )
-        }
-        Cmd::Random {
-            album,
-            equal_chance,
-            field,
-            number,
-            time,
-            path: _,
-            format: _,
-            limit,
-            query,
-        } => {
-            require_plugin(&cfg, "random")?;
-            plugins::random::command(
-                &cfg,
-                &lib,
-                plugins::random::CmdOpts {
-                    album,
-                    equal_chance,
-                    field,
-                    limit,
-                    number,
-                    time,
-                    query,
-                },
-            )
-        }
         Cmd::Fields => fields(&lib),
         Cmd::MigrateBeets {
             beets_config,
@@ -902,15 +460,34 @@ pub fn run(cli: Cli) -> Result<()> {
     result
 }
 
+/// Run one of the registry's plugin subcommands (clap only knows them at
+/// run time; the global options come from the same matches).
+pub fn run_plugin(
+    command: &'static crate::plugin_registry::PluginCommand,
+    g: Globals,
+    m: &clap::ArgMatches,
+) -> Result<()> {
+    let cfg = load_config(&g)?;
+    if g.version {
+        return version(&cfg);
+    }
+    let (lib, plugins) = open_library(&cfg)?;
+    require_plugin(&cfg, command.plugin)?;
+    let result = (command.run)(&cfg, &lib, &plugins, m);
+    if result.is_ok() {
+        crate::events::send("cli_exit", &[("lib", crate::events::Arg::Lib(&lib))]);
+    }
+    result
+}
+
 /// `beet help [COMMAND]`: the main help, or a command's (by name or alias),
 /// exactly as `beet COMMAND --help` shows it.
 fn help(command: Option<&str>) -> Result<()> {
-    use clap::CommandFactory;
     let Some(name) = command else {
-        crate::Cli::command().print_help()?;
+        crate::cli().print_help()?;
         return Ok(());
     };
-    match crate::parse_cli(["beet", name, "--help"]) {
+    match crate::cli().try_get_matches_from(["beet", name, "--help"]) {
         Err(e) if e.kind() == clap::error::ErrorKind::DisplayHelp => {
             e.print()?;
             Ok(())
@@ -2311,16 +1888,6 @@ fn require_plugin(cfg: &Config, name: &str) -> Result<()> {
         bail!("the {name} plugin is not enabled; add it to `plugins:` in your config");
     }
     Ok(())
-}
-
-/// The plugin context for the art commands: tags are written as
-/// `import.write` says (beets' `ui.should_write()`).
-fn art_ctx<'a>(cfg: &'a Config, lib: &'a Library) -> PluginCtx<'a> {
-    PluginCtx {
-        cfg,
-        lib,
-        write: cfg.bool("import.write"),
-    }
 }
 
 /// beets' `write_items`: write the database's tags to files whose tags

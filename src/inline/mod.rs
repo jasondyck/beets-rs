@@ -404,3 +404,25 @@ pub fn load(cfg: &Config) -> InlinePlugin {
 
 #[cfg(test)]
 mod tests;
+
+// ---------------------------------------------------------------- registry
+
+inventory::submit! {
+    crate::plugin_registry::PluginDef {
+        name: "inline",
+        order: 12,
+        defaults: r#"pathfields: {}
+item_fields: {}
+album_fields: {}
+"#,
+        config_keys: &["pathfields", "item_fields", "album_fields"],
+        redacted: &[],
+        make: Some(registry_make),
+        fatal: false,
+        commands: &[],
+    }
+}
+
+fn registry_make(cfg: &crate::config::Config) -> anyhow::Result<Box<dyn crate::plugins::Plugin>> {
+    Ok(Box::new(crate::inline::load(cfg)))
+}

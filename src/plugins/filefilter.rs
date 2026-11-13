@@ -90,3 +90,25 @@ pub fn for_import(cfg: &Config) -> Option<Arc<FileFilter>> {
 #[cfg(test)]
 #[path = "filefilter_tests.rs"]
 mod tests;
+
+// ---------------------------------------------------------------- registry
+
+inventory::submit! {
+    crate::plugin_registry::PluginDef {
+        name: "filefilter",
+        order: 6,
+        defaults: r#"filefilter:
+    path: .*
+"#,
+        config_keys: &["filefilter"],
+        redacted: &[],
+        make: Some(registry_make),
+        fatal: false,
+        commands: &[],
+    }
+}
+
+fn registry_make(cfg: &crate::config::Config) -> anyhow::Result<Box<dyn crate::plugins::Plugin>> {
+    FileFilter::new(cfg)?;
+    Ok(Box::new(FileFilterPlugin))
+}

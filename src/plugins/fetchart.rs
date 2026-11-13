@@ -1799,3 +1799,103 @@ pub fn command(ctx: &PluginCtx, lib: &Library, opts: CmdOpts) -> Result<()> {
 #[cfg(test)]
 #[path = "fetchart_tests.rs"]
 mod tests;
+
+// ---------------------------------------------------------------- registry
+
+inventory::submit! {
+    crate::plugin_registry::PluginDef {
+        name: "fetchart",
+        order: 5,
+        defaults: r#"fetchart:
+    auto: yes
+    fetch_for_asis: no
+    minwidth: 0
+    maxwidth: 0
+    quality: 0
+    max_filesize: 0
+    enforce_ratio: no
+    cautious: no
+    cover_names: [cover, front, art, album, folder]
+    fallback: null
+    sources: [filesystem, coverart, itunes, amazon, albumart, cover_art_url]
+    store_source: no
+    high_resolution: no
+    deinterlace: no
+    cover_format: null
+    google_key: null
+    google_engine: '001442825323518660753:hrh5ch1gjzm'
+    lastfm_key: null
+    fanarttv_key: null
+"#,
+        config_keys: &["fetchart"],
+        redacted: &["fetchart.google_key", "fetchart.google_engine", "fetchart.fanarttv_key", "fetchart.lastfm_key"],
+        make: Some(registry_make),
+        fatal: false,
+        commands: &[crate::plugin_registry::PluginCommand {
+            order: 100,
+            plugin: "fetchart",
+            build: build_command,
+            run: run_command,
+        }],
+    }
+}
+
+fn registry_make(cfg: &crate::config::Config) -> anyhow::Result<Box<dyn crate::plugins::Plugin>> {
+    Ok(Box::new(FetchArt::new(cfg)?))
+}
+
+// ---------------------------------------------------------------- command
+
+// `beet fetchart`.
+#[derive(clap::Args)]
+pub struct FetchartArgs {
+    /// Re-download art when already present
+    #[arg(short = 'f', long)]
+    force: bool,
+    /// Quiet mode: do not output albums that already have artwork
+    #[arg(short = 'q', long)]
+    quiet: bool,
+    /// Limit query results
+    #[arg(short = 'l', long)]
+    limit: Option<usize>,
+    #[arg(allow_hyphen_values = true)]
+    query: Vec<String>,
+}
+
+pub fn build_command() -> clap::Command {
+    use clap::Args as _;
+    FetchartArgs::augment_args(
+        clap::Command::new("fetchart").about("Download album art (plugin: fetchart)"),
+    )
+}
+
+pub fn run_command(
+    cfg: &crate::config::Config,
+    lib: &crate::library::Library,
+    _plugins: &[Box<dyn crate::plugins::Plugin>],
+    m: &clap::ArgMatches,
+) -> anyhow::Result<()> {
+    use clap::FromArgMatches as _;
+    let a = FetchartArgs::from_arg_matches(m)?;
+    crate::plugins::fetchart::command(
+        &ctx(cfg, lib),
+        lib,
+        crate::plugins::fetchart::CmdOpts {
+            force: a.force,
+            quiet: a.quiet,
+            limit: a.limit,
+            query: a.query,
+        },
+    )
+}
+
+fn ctx<'a>(
+    cfg: &'a crate::config::Config,
+    lib: &'a crate::library::Library,
+) -> crate::plugins::PluginCtx<'a> {
+    crate::plugins::PluginCtx {
+        cfg,
+        lib,
+        write: cfg.bool("import.write"),
+    }
+}

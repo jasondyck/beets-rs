@@ -171,3 +171,25 @@ impl Listener for Perms {
 #[cfg(test)]
 #[path = "permissions_tests.rs"]
 mod tests;
+
+// ---------------------------------------------------------------- registry
+
+inventory::submit! {
+    crate::plugin_registry::PluginDef {
+        name: "permissions",
+        order: 18,
+        defaults: r#"permissions:
+    file: '644'
+    dir: '755'
+"#,
+        config_keys: &["permissions"],
+        redacted: &[],
+        make: Some(registry_make),
+        fatal: false,
+        commands: &[],
+    }
+}
+
+fn registry_make(cfg: &crate::config::Config) -> anyhow::Result<Box<dyn crate::plugins::Plugin>> {
+    Ok(Box::new(load(cfg)))
+}
