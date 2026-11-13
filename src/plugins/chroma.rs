@@ -490,6 +490,64 @@ pub fn item_candidates(cfg: &Config, mb: &MusicBrainz, item: &Item) -> Vec<Track
 
 // ------------------------------------------------------------- the plugin
 
+/// The plugin as a metadata source (beets' `AcoustidPlugin`): its
+/// candidates resolve through MusicBrainz, and it has no id lookups.
+pub struct CandidateSource;
+
+impl crate::metadata_plugins::MetadataSource for CandidateSource {
+    fn data_source(&self) -> &'static str {
+        "Acoustid"
+    }
+
+    /// "Lookup by fingerprint ID does not make too much sense."
+    fn album_for_id(
+        &self,
+        _ctx: &crate::metadata_plugins::SourceCtx,
+        _id: &str,
+    ) -> Result<Option<AlbumInfo>> {
+        Ok(None)
+    }
+
+    fn track_for_id(
+        &self,
+        _ctx: &crate::metadata_plugins::SourceCtx,
+        _id: &str,
+    ) -> Result<Option<TrackInfo>> {
+        Ok(None)
+    }
+
+    fn candidates(
+        &self,
+        ctx: &crate::metadata_plugins::SourceCtx,
+        items: &[Item],
+        _artist: &str,
+        _album: &str,
+        _va_likely: bool,
+    ) -> Result<Vec<AlbumInfo>> {
+        Ok(album_candidates(ctx.cfg, ctx.mb, items))
+    }
+
+    fn item_candidates(
+        &self,
+        ctx: &crate::metadata_plugins::SourceCtx,
+        item: &Item,
+        _artist: &str,
+        _title: &str,
+    ) -> Result<Vec<TrackInfo>> {
+        Ok(item_candidates(ctx.cfg, ctx.mb, item))
+    }
+}
+
+inventory::submit! {
+    crate::metadata_plugins::MetadataSourceDef {
+        order: 1,
+        plugin: "chroma",
+        data_source: "Acoustid",
+        configured: |_cfg| true,
+        make: |_cfg| Ok(Box::new(CandidateSource) as Box<dyn crate::metadata_plugins::MetadataSource>),
+    }
+}
+
 pub struct Chroma;
 
 impl Plugin for Chroma {

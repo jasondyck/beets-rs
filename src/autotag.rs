@@ -19,9 +19,6 @@ use std::sync::{Arc, LazyLock};
 /// Artist names meaning "various artists" (beets' `VA_ARTISTS`).
 const VA_ARTISTS: [&str; 5] = ["", "various artists", "various", "va", "unknown"];
 
-/// The plugins that are beets `MetadataSourcePlugin`s.
-const METADATA_SOURCES: &[&str] = &["musicbrainz", "chroma", "tidal"];
-
 /// What the distance functions read from the config, gathered once per
 /// lookup (beets caches the same values).
 #[derive(Debug, Clone)]
@@ -32,8 +29,8 @@ pub struct Ctx {
     preferred_media: Vec<Regex>,
     preferred_countries: Vec<Regex>,
     original_year: bool,
-    /// The MusicBrainz source's `data_source_mismatch_penalty`.
-    source_penalty: f64,
+    /// Each metadata source's `data_source_mismatch_penalty`.
+    penalties: Arc<HashMap<String, f64>>,
     /// How many metadata source plugins are enabled (beets'
     /// `find_metadata_source_plugins()`).
     metadata_sources: usize,
@@ -61,13 +58,6 @@ impl Ctx {
             .into_iter()
             .map(|(k, v)| (k, v.parse().unwrap_or(0.0)))
             .collect();
-        // The MusicBrainz plugin's penalty: `source_weight` (deprecated)
-        // over `data_source_mismatch_penalty`.
-        let source_penalty = if cfg.get("musicbrainz.source_weight").is_some() {
-            cfg.f64("musicbrainz.source_weight")
-        } else {
-            cfg.f64("musicbrainz.data_source_mismatch_penalty")
-        };
         Ctx {
             weights: Arc::new(weights),
             length_grace: cfg.f64("match.track_length_grace"),
@@ -83,11 +73,8 @@ impl Ctx {
                 .filter_map(|p| pref_regex(p))
                 .collect(),
             original_year: cfg.bool("match.preferred.original_year"),
-            source_penalty,
-            metadata_sources: METADATA_SOURCES
-                .iter()
-                .filter(|p| crate::plugins::enabled(cfg, p))
-                .count(),
+            penalties: Arc::new(crate::metadata_plugins::penalties(cfg)),
+            metadata_sources: crate::metadata_plugins::count(cfg),
             required: cfg.list("match.required"),
             ignored: cfg.list("match.ignored"),
             max_rec: cfg
@@ -186,11 +173,11 @@ impl Distance {
     /// enabled (chroma alongside musicbrainz, say).
     fn add_data_source(&mut self, ctx: &Ctx, before: &str, after: &str) {
         if before != after && (!before.is_empty() || ctx.metadata_sources > 1) {
-            let penalty = if after == "MusicBrainz" {
-                ctx.source_penalty
-            } else {
-                0.5
-            };
+            let penalty = ctx
+                .penalties
+                .get(after)
+                .copied()
+                .unwrap_or(crate::metadata_plugins::DEFAULT_DATA_SOURCE_MISMATCH_PENALTY);
             self.add("data_source", penalty);
         }
     }
@@ -649,7 +636,11 @@ fn add_candidate(
         crate::logging::debug!("No tracks.");
         return;
     }
-    if !info.album_id.is_empty() && out.iter().any(|m| m.info.album_id == info.album_id) {
+    if !info.album_id.is_empty()
+        && out
+            .iter()
+            .any(|m| m.info.album_id == info.album_id && m.info.data_source == info.data_source)
+    {
         crate::logging::debug!("Duplicate.");
         return;
     }
@@ -677,39 +668,6 @@ fn sort_by_distance<T>(v: &mut [T], d: impl Fn(&T) -> f64) {
 
 /// beets' `maybe_handle_plugin_error`: a metadata source's failure is logged
 /// and counts as no result, unless `raise_on_error`.
-fn metadata_error(cfg: &Config, source: &str, method: &str, e: anyhow::Error) -> Result<()> {
-    if cfg.bool("raise_on_error") {
-        return Err(e);
-    }
-    crate::logging::emit(format!("Error in '{source}.{method}': {e:#}"));
-    Ok(())
-}
-
-fn metadata_single<T>(
-    cfg: &Config,
-    source: &str,
-    method: &str,
-    r: Result<Option<T>>,
-) -> Result<Option<T>> {
-    match r {
-        Ok(v) => Ok(v),
-        Err(e) => {
-            metadata_error(cfg, source, method, e)?;
-            Ok(None)
-        }
-    }
-}
-
-fn metadata_list<T>(cfg: &Config, source: &str, method: &str, r: Result<Vec<T>>) -> Result<Vec<T>> {
-    match r {
-        Ok(v) => Ok(v),
-        Err(e) => {
-            metadata_error(cfg, source, method, e)?;
-            Ok(vec![])
-        }
-    }
-}
-
 /// beets' `tag_album`: the release candidates for a group of items and a
 /// recommendation. With `ids`, only those releases; otherwise the items'
 /// own release (when they agree on one), returned alone if it's a strong
@@ -723,19 +681,19 @@ pub fn album_candidates(
     ids: &[String],
 ) -> Result<(Vec<AlbumMatch>, Recommendation)> {
     // As beets with no metadata source plugin: nothing to search.
-    let mb_on = crate::plugins::enabled(cfg, "musicbrainz");
-    let tidal_on = crate::plugins::enabled(cfg, "tidal");
-    if !mb_on && !tidal_on {
+    if crate::metadata_plugins::count(cfg) == 0 {
         return Ok((vec![], Recommendation::None));
     }
     let ctx = Ctx::new(cfg);
+    let mb_on = crate::plugins::enabled(cfg, "musicbrainz");
     let cur = current_metadata(items);
     let rec_of = |c: &[AlbumMatch]| {
         let dists: Vec<&Distance> = c.iter().map(|m| &m.distance).collect();
         recommend(&ctx, &dists)
     };
     let mut cands = vec![];
-    // beets' `albums_for_ids`: each lookup's error is logged, not fatal.
+    // beets' `albums_for_ids`: every metadata source's `album_for_id` for
+    // the id; each lookup's error is logged, not fatal.
     let add_ids = |cands: &mut Vec<AlbumMatch>, ids: &[String]| -> Result<()> {
         for id in ids {
             if mb_on {
@@ -748,18 +706,8 @@ pub fn album_candidates(
                     Err(e) => crate::logging::emit(format!("warning: {e:#}")),
                 }
             }
-            if tidal_on {
-                // The tidal plugin's `album_for_id` (beets' `albums_for_ids`
-                // asks every metadata source; each extracts the IDs it
-                // knows, here `tidal.com/album/<n>` URLs and numeric IDs).
-                if let Some(info) = metadata_single(
-                    cfg,
-                    "Tidal",
-                    "album_for_id",
-                    crate::plugins::tidal::album_for_id(cfg, id),
-                )? {
-                    add_candidate(&ctx, &cur, items, cands, info);
-                }
+            for info in crate::metadata_plugins::albums_for_ids(cfg, mb, id) {
+                add_candidate(&ctx, &cur, items, cands, info);
             }
         }
         Ok(())
@@ -767,7 +715,7 @@ pub fn album_candidates(
     if !ids.is_empty() {
         add_ids(&mut cands, ids)?;
     } else {
-        if !cur.mb_albumid.is_empty() && cur.id_consensus {
+        if mb_on && !cur.mb_albumid.is_empty() && cur.id_consensus {
             add_ids(&mut cands, std::slice::from_ref(&cur.mb_albumid))?;
         }
         if !cands.is_empty() && !ctx.timid && rec_of(&cands) == Recommendation::Strong {
@@ -783,21 +731,12 @@ pub fn album_candidates(
         if mb_on {
             let release_ids = mb.search_releases(items, &artist, &album, va_likely)?;
             add_ids(&mut cands, &release_ids)?;
-            // The other metadata source's candidates (beets queries every
-            // source's `candidates`).
-            for info in crate::plugins::chroma::album_candidates(cfg, mb, items) {
-                add_candidate(&ctx, &cur, items, &mut cands, info);
-            }
         }
-        if tidal_on {
-            for info in metadata_list(
-                cfg,
-                "Tidal",
-                "candidates",
-                crate::plugins::tidal::album_candidates(cfg, items),
-            )? {
-                add_candidate(&ctx, &cur, items, &mut cands, info);
-            }
+        // The other metadata sources' candidates (beets queries every
+        // source's `candidates`).
+        for info in crate::metadata_plugins::candidates(cfg, mb, items, &artist, &album, va_likely)?
+        {
+            add_candidate(&ctx, &cur, items, &mut cands, info);
         }
     }
     sort_by_distance(&mut cands, |m| m.distance.distance());
@@ -824,23 +763,23 @@ pub fn item_candidates(
     search: Option<(&str, &str)>,
     ids: &[String],
 ) -> Result<(Vec<TrackMatch>, Recommendation)> {
-    let mb_on = crate::plugins::enabled(cfg, "musicbrainz");
-    let tidal_on = crate::plugins::enabled(cfg, "tidal");
-    if !mb_on && !tidal_on {
+    // As beets with no metadata source plugin: nothing to search.
+    if crate::metadata_plugins::count(cfg) == 0 {
         return Ok((vec![], Recommendation::None));
     }
     let ctx = Ctx::new(cfg);
+    let mb_on = crate::plugins::enabled(cfg, "musicbrainz");
     let mut cands: Vec<TrackMatch> = vec![];
     let push = |cands: &mut Vec<TrackMatch>, info: TrackInfo| {
         let m = TrackMatch {
             distance: track_distance(&ctx, item, &info, true),
             info,
         };
-        // Keyed by recording, as beets' candidates dict: a repeat replaces.
-        match cands
-            .iter_mut()
-            .find(|c| c.info.track_id == m.info.track_id)
-        {
+        // Keyed by (data_source, id), as beets' candidates dict: a repeat
+        // replaces.
+        match cands.iter_mut().find(|c| {
+            c.info.track_id == m.info.track_id && c.info.data_source == m.info.data_source
+        }) {
             Some(c) => *c = m,
             None => cands.push(m),
         }
@@ -867,14 +806,7 @@ pub fn item_candidates(
                     Err(e) => crate::logging::emit(format!("warning: {e:#}")),
                 }
             }
-            if tidal_on
-                && let Some(t) = metadata_single(
-                    cfg,
-                    "Tidal",
-                    "track_for_id",
-                    crate::plugins::tidal::track_for_id(cfg, id),
-                )?
-            {
+            for t in crate::metadata_plugins::tracks_for_ids(cfg, mb, id) {
                 push(&mut cands, t);
             }
         }
@@ -902,19 +834,9 @@ pub fn item_candidates(
         for t in mb.search_recordings(artist, title)? {
             push(&mut cands, t);
         }
-        for t in crate::plugins::chroma::item_candidates(cfg, mb, item) {
-            push(&mut cands, t);
-        }
     }
-    if tidal_on {
-        for t in metadata_list(
-            cfg,
-            "Tidal",
-            "item_candidates",
-            crate::plugins::tidal::item_candidates(cfg, item),
-        )? {
-            push(&mut cands, t);
-        }
+    for t in crate::metadata_plugins::item_candidates(cfg, mb, item, artist, title)? {
+        push(&mut cands, t);
     }
     let rec = rec_of(&mut cands);
     Ok((cands, rec))
@@ -1249,6 +1171,101 @@ mod tests {
                 assert_eq!(d, scaled, "{item_source} {info_source} {settings} {weight}");
             }
         }
+    }
+
+    /// A plugin metadata source's own `data_source_mismatch_penalty` is
+    /// used for its candidates (beets' `get_penalty` per source).
+    #[test]
+    fn data_source_penalty_per_source() {
+        let cfg = config(
+            "plugins: [musicbrainz, deezer]\n\
+             deezer:\n  data_source_mismatch_penalty: 1.0\n",
+        );
+        let ctx = Ctx::new(&cfg);
+        assert_eq!(ctx.metadata_sources, 2);
+        assert_eq!(ctx.penalties.get("Deezer"), Some(&1.0));
+        assert_eq!(ctx.penalties.get("MusicBrainz"), Some(&0.5));
+        // An unloaded source keeps beets' default.
+        assert_eq!(ctx.penalties.get("Discogs"), Some(&0.5));
+        let it = item("title", "artist");
+        let penalty = |source: &str| {
+            let info = TrackInfo {
+                data_source: source.into(),
+                ..Default::default()
+            };
+            track_distance(&ctx, &it, &info, false).get("data_source")
+        };
+        assert!(penalty("Deezer") > 0.0);
+        assert!((penalty("Deezer") / penalty("MusicBrainz") - 2.0).abs() < 1e-9);
+    }
+
+    /// A plugin metadata source's candidates and id lookups reach the
+    /// autotagger (beets' `metadata_plugins`): with only `deezer` enabled,
+    /// a search, an album id and a track id all come from its fake API.
+    #[test]
+    fn candidates_from_a_plugin_source() {
+        use crate::plugins::requests::testserver::{Reply, serve};
+        use serde_json::json;
+
+        static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+        let _guard = LOCK.lock().unwrap_or_else(|e| e.into_inner());
+
+        let track = |id: i64, title: &str, position: i64| {
+            json!({
+                "id": id, "title": title, "duration": 100,
+                "link": format!("https://www.deezer.com/track/{id}"),
+                "track_position": position, "disk_number": 1,
+                "artist": {"id": 100, "name": "Artist"}, "album": {"id": 1}
+            })
+        };
+        let server = serve(move |seen: &crate::plugins::requests::testserver::Seen| {
+            let path = seen.target.split('?').next().unwrap_or("");
+            match path {
+                "/album/1" => Reply::json(json!({
+                    "title": "Plugin Album", "link": "https://www.deezer.com/album/1",
+                    "record_type": "album", "label": "Label", "release_date": "2017-01-01",
+                    "artist": {"id": 100, "name": "Artist"},
+                    "contributors": [{"id": 100, "name": "Artist"}],
+                    "cover_xl": null
+                })),
+                "/album/1/tracks" => Reply::json(json!({"data": [
+                    track(1001, "One", 1), track(1002, "Two", 2)
+                ]})),
+                "/track/1001" => Reply::json(track(1001, "One", 1)),
+                "/search/album" => Reply::json(json!({"data": [{"id": 1}]})),
+                "/search/track" => Reply::json(json!({"data": [{"id": 1001}]})),
+                _ => Reply::status(404),
+            }
+        });
+        // SAFETY: no other test builds a Deezer source from a config.
+        unsafe { std::env::set_var("BEETSRS_DEEZER_API_URL", &server.base) };
+        let result = std::panic::catch_unwind(|| {
+            let cfg = config("plugins: [deezer]\n");
+            let mb = MusicBrainz::new(&cfg);
+            let mut items = vec![];
+            for (title, n) in [("One", 1), ("Two", 2)] {
+                let mut it = item(title, "Artist");
+                it.set_str("album", "Plugin Album");
+                it.set_int("track", n);
+                it.set("length", Value::Float(100.0));
+                items.push(it);
+            }
+            let (cands, rec) = album_candidates(&cfg, &mb, &items, None, &[]).unwrap();
+            assert_eq!(cands.len(), 1);
+            assert_eq!(cands[0].info.data_source, "Deezer");
+            assert_eq!(cands[0].info.album, "Plugin Album");
+            assert_eq!(cands[0].info.album_id, "1");
+            assert_ne!(rec, Recommendation::None);
+            let (cands, _) = album_candidates(&cfg, &mb, &items, None, &["1".to_string()]).unwrap();
+            assert_eq!(cands.len(), 1);
+            let (tracks, _) =
+                item_candidates(&cfg, &mb, &items[0], None, &["1001".to_string()]).unwrap();
+            assert_eq!(tracks.len(), 1);
+            assert_eq!(tracks[0].info.data_source, "Deezer");
+            assert_eq!(tracks[0].info.track_id, "1001");
+        });
+        unsafe { std::env::remove_var("BEETSRS_DEEZER_API_URL") };
+        result.unwrap();
     }
 
     fn album_items() -> Vec<Item> {

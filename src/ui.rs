@@ -282,7 +282,10 @@ pub mod script {
     }
 }
 
-pub fn read_line(prompt: &str) -> Option<String> {
+/// `read_line`, but the end of input is None instead of ending the
+/// process: plugins' logins (beets' plugin loader catches the error and
+/// leaves the plugin out).
+pub fn read_line_or_eof(prompt: &str) -> Option<String> {
     #[cfg(test)]
     if let Some(answer) = script::next(prompt) {
         return answer;
@@ -291,13 +294,20 @@ pub fn read_line(prompt: &str) -> Option<String> {
     std::io::stdout().flush().ok();
     let mut line = String::new();
     match std::io::stdin().lock().read_line(&mut line) {
+        Ok(0) | Err(_) => None,
+        Ok(_) => Some(line.trim().to_string()),
+    }
+}
+
+pub fn read_line(prompt: &str) -> Option<String> {
+    match read_line_or_eof(prompt) {
         // beets' `input_`: a UserError, which ends the command (state
         // already saved stays saved, as when beets raises it).
-        Ok(0) | Err(_) => {
+        None => {
             eprintln!("error: stdin stream ended while input required");
             std::process::exit(1);
         }
-        Ok(_) => Some(line.trim().to_string()),
+        Some(line) => Some(line),
     }
 }
 
