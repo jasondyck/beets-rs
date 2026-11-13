@@ -945,9 +945,12 @@ fn sc_encode(gain: f64, peak: f64) -> String {
 
 // ------------------------------------------------------------------ genres
 
-/// mutagen's ID3v1 genre names (`mutagen._constants.GENRES`; lofty's
-/// table words some of them differently).
-const GENRES: [&str; 192] = [
+// The genre list behind ID3v1's one-byte genre and ID3v2's TCON frame.
+// genre_name() indexes it, genre_index() is its inverse for writing an
+// ID3v1 tag.
+
+/// The ID3v1 genre list, numbers 0-79 (ID3v1 specification, "Genre").
+const ID3V1_GENRES: [&str; 80] = [
     "Blues",
     "Classic Rock",
     "Country",
@@ -1028,6 +1031,10 @@ const GENRES: [&str; 192] = [
     "Musical",
     "Rock & Roll",
     "Hard Rock",
+];
+
+/// The Winamp genre extensions, numbers 80-191 (Winamp's published genre list).
+const WINAMP_GENRES: [&str; 112] = [
     "Folk",
     "Folk-Rock",
     "National Folk",
@@ -1142,59 +1149,139 @@ const GENRES: [&str; 192] = [
     "Psybient",
 ];
 
-/// mutagen's `TCON.genres`, which mutagen applies to every ID3 tag it
-/// loads (and before saving ID3v2.3): ID3v1 genre numbers become names
-/// ("17" or "(17)" is "Rock", past the table "Unknown"), "RX"/"CR" are
-/// "Remix"/"Cover", "(17)Rock" is one genre.
+/// The name of genre number `index` (None beyond the Winamp list).
+fn genre_name(index: usize) -> Option<&'static str> {
+    match index.checked_sub(ID3V1_GENRES.len()) {
+        None => ID3V1_GENRES.get(index).copied(),
+        Some(i) => WINAMP_GENRES.get(i).copied(),
+    }
+}
+
+/// The genre number of `name`, for ID3v1's one-byte genre field (None
+/// if it is not in the list).
+fn genre_index(name: &str) -> Option<u8> {
+    let index = ID3V1_GENRES
+        .iter()
+        .chain(WINAMP_GENRES.iter())
+        .position(|g| *g == name)?;
+    u8::try_from(index).ok()
+}
+
+/// The names a TCON frame's values stand for.
+///
+/// ID3v2.3's TCON (`Content type`) was a text frame whose value could
+/// be a genre number in parentheses, optionally followed by a
+/// refinement: "(17)", "(4)Eurodisco". "(RX)" and "(CR)" stand for
+/// "Remix" and "Cover", and a value starting with a literal "(" is
+/// escaped by doubling that parenthesis. ID3v2.4 allows several of
+/// these in one frame, NUL separated, and a bare genre number is also
+/// accepted; that form and NUL splitting are what the tag reader feeds
+/// us, so both versions are accepted here and turned into the genre
+/// names beets stores (unknown genre numbers become "Unknown").
 fn tcon_genres(values: &[String]) -> Vec<String> {
-    static GENRE_RE: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
-        regex::Regex::new(r"^((?:\((?:[0-9]+|RX|CR)\))*)(.+)?").unwrap()
-    });
-    let name = |i: usize| GENRES.get(i).copied().unwrap_or("Unknown").to_string();
-    let mut genres = vec![];
+    let mut genres = Vec::new();
     for value in values {
-        // `str.isdecimal()` (ASCII digits here: Python also takes other
-        // scripts' decimal digits).
-        let decimal: Option<usize> = (!value.is_empty()
-            && value.chars().all(|c| c.is_ascii_digit()))
-        .then(|| value.parse().ok())
-        .flatten();
-        match decimal {
-            Some(i) if i < 256 => genres.push(name(i)),
-            _ if value == "CR" => genres.push("Cover".into()),
-            _ if value == "RX" => genres.push("Remix".into()),
-            _ if value.is_empty() => {}
-            _ => {
-                let c = GENRE_RE.captures(value).unwrap();
-                let ids = c.get(1).map_or("", |m| m.as_str());
-                let mut new: Vec<String> = vec![];
-                if !ids.is_empty() {
-                    for gid in ids[1..ids.len() - 1].split(")(") {
-                        new.push(match gid {
-                            "CR" => "Cover".into(),
-                            "RX" => "Remix".into(),
-                            _ => match gid.parse::<usize>() {
-                                Ok(i) if i < GENRES.len() => GENRES[i].into(),
-                                _ => "Unknown".into(),
-                            },
-                        });
-                    }
-                }
-                if let Some(rest) = c.get(2) {
-                    let mut rest = rest.as_str();
-                    // "Unescaping" the first parenthesis.
-                    if rest.starts_with("((") {
-                        rest = &rest[1..];
-                    }
-                    if !new.iter().any(|g| g == rest) {
-                        new.push(rest.to_string());
-                    }
-                }
-                genres.extend(new);
-            }
-        }
+        parse_tcon_value(value, &mut genres);
     }
     genres
+}
+
+/// Add the genres of one NUL-separated TCON value to `genres`.
+fn parse_tcon_value(value: &str, genres: &mut Vec<String>) {
+    if value.is_empty() {
+        return;
+    }
+
+    // A bare number below 256 names a genre (ID3v2.4's deprecated
+    // numeric form; ID3v2.3 already allowed "(17)" without refinement).
+    if value.bytes().all(|b| b.is_ascii_digit())
+        && let Ok(number) = value.parse::<usize>()
+    {
+        if number < 256 {
+            genres.push(genre_name(number).unwrap_or(UNKNOWN_GENRE).to_string());
+            return;
+        }
+        // Past the one-byte range it is no genre reference, just text.
+        genres.push(value.to_string());
+        return;
+    }
+
+    // The two special references, when they appear on their own.
+    match value {
+        "RX" => {
+            genres.push(REMIX_GENRE.to_string());
+            return;
+        }
+        "CR" => {
+            genres.push(COVER_GENRE.to_string());
+            return;
+        }
+        _ => {}
+    }
+
+    let (references, rest) = leading_genre_refs(value);
+    if references.is_empty() {
+        // No "(...)" prefix: the whole value is the genre, with an
+        // escaped leading parenthesis.
+        genres.push(unescape_paren(value).to_string());
+        return;
+    }
+    // A refinement after the references is the genre text (unless it
+    // merely repeats a reference, as in "(17)Rock").
+    let refinement = rest
+        .map(unescape_paren)
+        .filter(|text| !references.iter().any(|g| g == text));
+    genres.extend(references);
+    if let Some(text) = refinement {
+        genres.push(text.to_string());
+    }
+}
+
+const REMIX_GENRE: &str = "Remix";
+const COVER_GENRE: &str = "Cover";
+const UNKNOWN_GENRE: &str = "Unknown";
+
+/// Split a TCON value into its leading "(...)" genre references and the
+/// refinement text that follows them. A parenthesised token that is not
+/// a number, "RX" or "CR" ends the reference list (it is text, as in
+/// "(foo) bar").
+fn leading_genre_refs(value: &str) -> (Vec<String>, Option<&str>) {
+    let mut references = Vec::new();
+    let mut rest = value;
+    while let Some(after_paren) = rest.strip_prefix('(') {
+        let Some(close) = after_paren.find(')') else {
+            break;
+        };
+        let Some(genre) = genre_reference(&after_paren[..close]) else {
+            break;
+        };
+        references.push(genre.to_string());
+        rest = &after_paren[close + 1..];
+    }
+    (references, (!rest.is_empty()).then_some(rest))
+}
+
+/// The genre a parenthesised TCON reference stands for: a genre number,
+/// "RX" (remix) or "CR" (cover). Out-of-range numbers are "Unknown".
+fn genre_reference(token: &str) -> Option<&'static str> {
+    match token {
+        "RX" => Some(REMIX_GENRE),
+        "CR" => Some(COVER_GENRE),
+        _ if !token.is_empty() && token.bytes().all(|b| b.is_ascii_digit()) => Some(
+            token
+                .parse::<usize>()
+                .ok()
+                .and_then(genre_name)
+                .unwrap_or(UNKNOWN_GENRE),
+        ),
+        _ => None,
+    }
+}
+
+/// Drop one parenthesis from a value whose first character is an
+/// escaped "(" (ID3v2.3: "((foo)" is the genre "(foo)").
+fn unescape_paren(value: &str) -> &str {
+    value.strip_prefix("((").map_or(value, |_| &value[1..])
 }
 
 // -------------------------------------------------------------------- tags
@@ -1205,7 +1292,8 @@ enum Tags {
         tag: Id3v2Tag,
         /// The tag on disk is ID3v2.3 (MediaFile's `split_v23`).
         v23: bool,
-        /// An existing ID3v1 tag (mutagen merges it in and updates it).
+        /// An existing ID3v1 tag (its fields stand in for missing ID3v2
+        /// frames and are updated on save).
         v1: Option<Id3v1Tag>,
     },
     Mp4(Ilst),
@@ -1298,7 +1386,7 @@ impl Tags {
     }
 
     /// A text frame's values (`frame.text`), the ID3v1 tag standing in
-    /// for missing frames as in mutagen.
+    /// for missing frames as beets' MediaFile does.
     fn id3_text(&self, id: &str) -> Option<Vec<String>> {
         let Tags::Id3 { tag, v1, .. } = self else {
             return None;
@@ -1341,7 +1429,8 @@ impl Tags {
         let tag = self.id3_mut();
         let _ = tag.remove(&fid(id)).count();
         if values.is_empty() || values.iter().all(String::is_empty) && values.len() == 1 {
-            // mutagen drops frames without text when saving.
+            // A frame with no text is not stored (beets' MediaFile does
+            // not save empty text frames).
             return;
         }
         let value = values.join("\0");
@@ -1585,28 +1674,40 @@ impl Tags {
     }
 
     /// A `trkn`/`disk` pair (0 for missing halves).
+    ///
+    /// Apple's iTunes metadata stores both in one "data" atom as
+    /// big-endian 16-bit integers after two reserved bytes: `trkn` is
+    /// the 8-byte form "reserved, number, total, reserved", `disk` the
+    /// 6-byte form "reserved, number, total". The atom's data type is
+    /// binary, not the integer type used by `tmpo`.
     fn mp4_tuple(&self, key: &str) -> Option<(u16, u16)> {
+        /// Offset of the number in the data atom's payload.
+        const NUMBER: usize = 2;
+        /// Offset of a pair's total, if the atom has one.
+        const TOTAL: usize = 4;
         let atom = self.mp4().get(&mp4_ident(key))?;
         atom.data().find_map(|d| match d {
-            AtomData::Unknown { data, .. } if data.len() >= 4 => {
-                let num = u16::from_be_bytes([data[2], data[3]]);
-                let total = if data.len() >= 6 {
-                    u16::from_be_bytes([data[4], data[5]])
+            AtomData::Unknown { data, .. } if data.len() >= TOTAL => {
+                let number = u16::from_be_bytes([data[NUMBER], data[NUMBER + 1]]);
+                let total = if data.len() >= TOTAL + 2 {
+                    u16::from_be_bytes([data[TOTAL], data[TOTAL + 1]])
                 } else {
                     0
                 };
-                Some((num, total))
+                Some((number, total))
             }
             _ => None,
         })
     }
 
-    /// mutagen's `trkn` (8 bytes) and `disk` (6 bytes) encoding.
-    fn mp4_set_tuple(&mut self, key: &str, (num, total): (u16, u16)) {
+    /// Write a `trkn`/`disk` pair in the iTunes metadata layout (see
+    /// `mp4_tuple`), as a binary atom.
+    fn mp4_set_tuple(&mut self, key: &str, (number, total): (u16, u16)) {
         let mut data = vec![0, 0];
-        data.extend(num.to_be_bytes());
+        data.extend(number.to_be_bytes());
         data.extend(total.to_be_bytes());
         if key == "trkn" {
+            // The 8-byte track form ends with two more unused bytes.
             data.extend([0, 0]);
         }
         self.mp4_set_data(
@@ -1808,7 +1909,9 @@ impl Tags {
                 self.mp4_set_data(key, AtomData::Bool(v.int() != 0));
             }
             Mp4Int(key) => {
-                // mutagen writes `tmpo` as a 16-bit integer.
+                // `tmpo` is the tempo in BPM as a big-endian signed
+                // 16-bit integer (iTunes metadata data type 21), so it
+                // is clamped to that range.
                 let n = v.int().clamp(i16::MIN as i64, i16::MAX as i64) as i16;
                 self.mp4_set_data(
                     key,
@@ -1973,7 +2076,7 @@ impl MediaFile {
             std::fs::File::open(path).with_context(|| format!("reading {}", path.display()))?;
         // Pictures are read too: saving the tag writes back what it holds.
         let opts = ParseOptions::new().read_properties(read_properties);
-        // mutagen leaves "DISCNUMBER=2/3" alone (lofty would split it).
+        // beets leaves "DISCNUMBER=2/3" alone (lofty would split it).
         let vorbis_opts = ParseOptions::new()
             .read_properties(read_properties)
             .implicit_conversions(false);
@@ -2550,24 +2653,32 @@ fn store_sylt(tag: &mut Id3v2Tag, lines: &[(String, u32)], opts: WriteOptions) -
     Ok(())
 }
 
-/// mutagen's ID3v2.3 save: multiple values joined with "/" (`v23_sep`).
-/// (lofty converts dates, `TIPL` and drops the v2.4-only frames, as
-/// mutagen's `update_to_v23` does.)
+/// Downgrade the in-memory tag to what ID3v2.3 can store.
+///
+/// ID3v2.4 allows a text information frame to hold several values,
+/// NUL separated, while ID3v2.3 stores one string per frame and uses
+/// "/" between the parts of a value that has several (ID3v2.3 §4.2,
+/// "Text information frames"; compare v2.4 §4.2). The same applies to
+/// a frame's description/content pair (TXXX, COMM). TCON is handled
+/// first, through the genre rules, so that its references become the
+/// genre names v2.3 can carry; the writer in turn applies the date
+/// frame conversion that v2.4 Appendix A prescribes for saving as
+/// v2.3 (TDRC to TYER/TDAT/TIME, TDOR to TORY, IPLS to TIPL) and
+/// drops frames that only exist in v2.4.
 fn to_v23(tag: &mut Id3v2Tag) {
     tag.retain_mut(|fr| {
         match fr {
-            // `update_to_v23` first rewrites the genres (`TCON.genres`).
             Frame::Text(t) if t.id().as_str() == "TCON" => {
                 t.value = Cow::Owned(tcon_genres(&id3_split(&t.value)).join("/"));
             }
             Frame::Text(t) if t.value.contains('\0') => {
-                t.value = Cow::Owned(id3_split(&t.value).join("/"));
+                t.value = Cow::Owned(downgrade_values(&t.value));
             }
             Frame::UserText(t) if t.content.contains('\0') => {
-                t.content = Cow::Owned(id3_split(&t.content).join("/"));
+                t.content = Cow::Owned(downgrade_values(&t.content));
             }
             Frame::Comment(t) if t.content.contains('\0') => {
-                t.content = Cow::Owned(id3_split(&t.content).join("/"));
+                t.content = Cow::Owned(downgrade_values(&t.content));
             }
             _ => {}
         }
@@ -2575,9 +2686,14 @@ fn to_v23(tag: &mut Id3v2Tag) {
     });
 }
 
+/// One v2.3 string from a v2.4 NUL-separated list.
+fn downgrade_values(value: &str) -> String {
+    id3_split(value).join("/")
+}
+
 /// lofty writes an ID3v2.3 `TCON` its own way (a number or "Remix" in
-/// parentheses, "(80)"), where mutagen writes the text as it is ("80").
-/// So the genre goes out under an unused text frame ID, which
+/// parentheses, "(80)"), where beets writes the genre text as it is
+/// ("80"). So the genre goes out under an unused text frame ID, which
 /// `rename_v23_frame` turns back into `TCON` in the file. Returns that ID
 /// (None without a genre, or for an unsynchronised tag, where frame
 /// headers can't be found by walking them).
@@ -2645,31 +2761,50 @@ fn rename_v23_frame(path: &Path, from: &[u8], to: &[u8]) -> Result<()> {
     )
 }
 
-/// mutagen's `MakeID3v1`: an existing ID3v1 tag is updated from the
-/// ID3v2 frames.
+/// Update an existing ID3v1 tag from the ID3v2 frames before saving.
+///
+/// ID3v1 (§"The ID3v1 tag") stores title, artist, album and a comment
+/// in 30-character text fields, then a four-digit year and a one-byte
+/// genre number from the ID3v1 genre list. ID3v1.1 takes the last two
+/// bytes of the comment field for a track number: a zero byte
+/// followed by the number. The ID3v2 tag is the source of truth here:
+/// its text frames fill those fields, TRCK's first number (the part
+/// before "/") becomes the v1.1 track, TCON's first genre name its
+/// number, and TDRC its first four characters the year. An ID3v2
+/// comment cannot fill the v1 comment field (that field would have to
+/// give up its track number), so the v1 comment is left clear.
 fn update_v1(v1: &mut Id3v1Tag, tag: &Id3v2Tag) {
-    let text = |id: &str| -> Option<String> {
+    /// The first text value of an ID3v2 text frame (or its timestamp).
+    fn first_text(tag: &Id3v2Tag, id: &str) -> Option<String> {
         tag.iter().find_map(|f| match f {
             Frame::Text(t) if f.id_str() == id => id3_split(&t.value).into_iter().next(),
             Frame::Timestamp(t) if f.id_str() == id => Some(t.timestamp.to_string()),
             _ => None,
         })
-    };
-    let clip = |s: Option<String>| {
-        s.filter(|s| !s.is_empty())
-            .map(|s| s.chars().take(30).collect::<String>())
-    };
-    v1.title = clip(text("TIT2"));
-    v1.artist = clip(text("TPE1"));
-    v1.album = clip(text("TALB"));
-    // mutagen looks up "COMM" exactly, which no comment frame is keyed as.
+    }
+
+    /// An ID3v1 text field: empty values are not written and the text
+    /// is cut to the field's 30 characters.
+    fn v1_text(tag: &Id3v2Tag, id: &str) -> Option<String> {
+        const V1_TEXT_LEN: usize = 30;
+        first_text(tag, id)
+            .filter(|s| !s.is_empty())
+            .map(|s| s.chars().take(V1_TEXT_LEN).collect())
+    }
+
+    v1.title = v1_text(tag, "TIT2");
+    v1.artist = v1_text(tag, "TPE1");
+    v1.album = v1_text(tag, "TALB");
     v1.comment = None;
-    v1.track_number = text("TRCK").and_then(|t| t.split('/').next()?.trim().parse::<u8>().ok());
-    v1.genre = text("TCON").and_then(|g| {
+    v1.track_number =
+        first_text(tag, "TRCK").and_then(|t| t.split('/').next()?.trim().parse::<u8>().ok());
+    v1.genre = first_text(tag, "TCON").and_then(|g| {
         let first = tcon_genres(&id3_split(&g)).into_iter().next()?;
-        GENRES.iter().position(|n| *n == first).map(|i| i as u8)
+        genre_index(&first)
     });
-    v1.year = text("TDRC").and_then(|y| y.chars().take(4).collect::<String>().parse().ok());
+    // The ID3v1 year is four digits ("YYYY").
+    v1.year =
+        first_text(tag, "TDRC").and_then(|y| y.chars().take(4).collect::<String>().parse().ok());
 }
 
 #[cfg(test)]
@@ -2992,7 +3127,7 @@ mod tests {
         assert_eq!(read(&p).str("barcode"), "999");
     }
 
-    /// An MP3 with only an ID3v1 tag reads through it, as mutagen merges
+    /// An MP3 with only an ID3v1 tag reads through it, as beets merges
     /// it; writing updates it.
     #[test]
     fn id3v1_tags_are_read_and_updated() {
@@ -3029,6 +3164,11 @@ mod tests {
             ("Old", "Art", 1999, 4)
         );
         it.set_str("title", "New");
+        it.set_str("artist", "NewArt");
+        it.set_str("album", "NewAlb");
+        it.set_int("year", 2001);
+        it.set_int("track", 3);
+        it.set_list("genres", &["Pop"]);
         crate::media::write(&it).unwrap();
         let f = lofty::mpeg::MpegFile::read_from(
             &mut std::fs::File::open(&p).unwrap(),
@@ -3037,11 +3177,47 @@ mod tests {
         .unwrap();
         assert_eq!(f.id3v1().unwrap().title.as_deref(), Some("New"));
         assert_eq!(read(&p).str("title"), "New");
+        // The ID3v1 field layout (title, artist, album, year, comment
+        // with the v1.1 track number, genre number).
+        let raw = std::fs::read(&p).unwrap();
+        let v1 = &raw[raw.len() - 128..];
+        assert_eq!(&v1[..3], b"TAG");
+        assert_eq!(
+            &v1[3..33],
+            b"New\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0"
+        );
+        assert_eq!(
+            &v1[33..63],
+            b"NewArt\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0"
+        );
+        assert_eq!(
+            &v1[63..93],
+            b"NewAlb\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0"
+        );
+        assert_eq!(&v1[93..97], b"2001");
+        assert_eq!(v1[125], 0, "v1.1 track marker");
+        assert_eq!(v1[126], 3, "v1.1 track number");
+        assert_eq!(v1[127], 13, "genre 13 = Pop");
     }
 
-    /// mutagen's `TCON.genres` (expected values from mutagen).
+    /// The genre tables cover ID3v1's 80 numbers and Winamp's 112
+    /// extensions, and genre_index() inverts genre_name().
     #[test]
-    fn tcon_genres_as_mutagen() {
+    fn genre_table_covers_both_lists() {
+        assert_eq!(ID3V1_GENRES.len(), 80);
+        assert_eq!(WINAMP_GENRES.len(), 112);
+        for (i, name) in ID3V1_GENRES.iter().chain(WINAMP_GENRES.iter()).enumerate() {
+            assert_eq!(genre_name(i), Some(*name), "{i}");
+            assert_eq!(genre_index(name), Some(i as u8), "{name}");
+        }
+        assert_eq!(genre_name(192), None);
+        assert_eq!(genre_index("No Such Genre"), None);
+    }
+
+    /// TCON values to genre names (expected values checked against
+    /// beets 2.14.1, which reads and writes every ID3v1/Winamp genre).
+    #[test]
+    fn tcon_genre_parsing() {
         let g = |v: &[&str]| tcon_genres(&v.iter().map(ToString::to_string).collect::<Vec<_>>());
         assert_eq!(g(&["80"]), ["Folk"]);
         assert_eq!(g(&["255"]), ["Unknown"]);
@@ -3080,11 +3256,11 @@ mod tests {
         panic!("no TCON")
     }
 
-    /// ID3v2.3 genres as mutagen saves them: through `TCON.genres` and
-    /// joined with "/", without lofty's "(80)"/"(RX)" forms; read back
-    /// (in any version) through `TCON.genres` too.
+    /// ID3v2.3 genres as beets writes them: genre names joined with
+    /// "/", without lofty's "(80)"/"(RX)" reference forms; read back
+    /// (in any version) through the genre rules too.
     #[test]
-    fn id3v23_genres_as_mutagen() {
+    fn id3v23_genre_conversion() {
         let d = tempfile::tempdir().unwrap();
         let Some(p) = make(d.path(), "t.mp3", &[]) else {
             return;

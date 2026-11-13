@@ -13,8 +13,8 @@ us to keep. Rust crate dependencies (crates.io, pinned in `Cargo.lock`) are not
 ## ⚠ Copyleft-derived code — needs a decision
 
 **mutagen — GPL-2.0-or-later** (<https://mutagen.readthedocs.io>, GPLv2 text in
-mutagen's `COPYING`). Its audio-property parsers and tag rules are followed
-closely, name by name, in:
+mutagen's `COPYING`). Its audio-property parsers are followed closely, name by
+name, in:
 
 - `src/props.rs` — re-implements mutagen's `info.length` / `info.bitrate` per
   format from mutagen's own code: `MPEGInfo` and `_parse_vbr_header` (Xing/Info,
@@ -23,15 +23,6 @@ closely, name by name, in:
   `WavPackInfo`, `MonkeysAudioInfo`, `WaveStreamInfo`, AiffInfo. The comments
   cite each class/method; the parsing logic (not just the file-format specs)
   is translated from mutagen.
-- `src/mediafile.rs` — `GENRES` is mutagen's `_constants.GENRES` (the 192
-  ID3v1 genre names, copied verbatim); `TCON.genres` and ID3v1 genre handling,
-  `MakeID3v1` (`make_id3v1`/`update_id3v1`), ID3v2.3 `update_to_v23`
-  separators, `trkn`/`disk`/`tmpo` encodings and several save/merge rules
-  ("mutagen drops frames without text", ID3v1 merged in, ...) are ports of
-  mutagen's code.
-- `src/plugins/scrub.rs` — the per-format tag stripping follows mutagen's
-  `delete()` semantics (implemented through lofty; no mutagen code is
-  textually copied, but the per-format rules come from it).
 
 These parts should be treated as derived from a GPL-2.0-or-later work. Until
 that is decided, the project as a whole cannot honestly be distributed under
@@ -59,6 +50,24 @@ mutagen installed; mutagen is never embedded or shipped, and no mutagen code
 is used at build or run time.
 
 **Not copyleft-derived (checked):**
+
+- **`src/mediafile.rs` tag rules** — rewritten from the format specifications
+  rather than from mutagen: the 192 ID3v1/Winamp genre names (`ID3V1_GENRES`,
+  `WINAMP_GENRES`) from the ID3v1 genre list and Winamp's published extension
+  list (the combined table the ID3v2 specifications refer to as the ID3v1
+  genre list); `TCON` parsing from the
+  ID3v2.3/2.4 “Content type” sections (§4.2.2 in both, including parenthesised
+  genre references, `RX`/`CR` and the escaped leading parenthesis); the ID3v1
+  tag build/merge from the ID3v1 and ID3v1.1 tag layouts (30-character fields,
+  v1.1 track in the comment field, one-byte genre); ID3v2.3 multi-value
+  conversion (NUL-separated v2.4 values to "/"-joined v2.3 strings, ID3v2.3
+  §4.2; date frames TDRC→TYER/TDAT/TIME and TDOR→TORY per v2.4 Appendix A,
+  applied by the tag writer); and the iTunes `trkn`/`disk`/`tmpo` atom layouts
+  from Apple's iTunes metadata format. Behaviour was checked against beets
+  2.14.1 black-box (reading and writing all genres, TCON forms, ID3v1 and
+  ID3v2.3 tags, MP4 atoms); no mutagen source was used.
+- **`src/plugins/scrub.rs`** — behaviour-following only: the per-format tag
+  stripping is implemented through lofty; no mutagen code is copied.
 
 - **Unidecode — GPL-2.0-or-later**: not embedded. beets uses Python
   Unidecode; beets-rs uses the `deunicode` crate (BSD-3-Clause) in `src/template.rs`,
