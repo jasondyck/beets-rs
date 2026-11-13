@@ -8,6 +8,7 @@ use crate::plugins::{Plugin, PluginLog};
 use anyhow::{Context, Result};
 use chrono::Local;
 use std::cell::RefCell;
+use std::io::Write;
 use std::path::{Component, Path, PathBuf};
 
 pub struct ImportFeeds {
@@ -140,7 +141,6 @@ fn write_m3u(path: &Path, paths: &[PathBuf]) -> Result<()> {
         std::fs::create_dir_all(parent)
             .with_context(|| format!("creating {}", parent.display()))?;
     }
-    use std::io::Write;
     let mut f = std::fs::OpenOptions::new()
         .create(true)
         .append(true)

@@ -81,7 +81,7 @@ pub struct CmdOpts {
     pub query: Vec<String>,
 }
 
-pub fn command(cfg: &Config, lib: &crate::library::Library, opts: CmdOpts) -> anyhow::Result<()> {
+pub fn command(cfg: &Config, lib: &crate::library::Library, opts: &CmdOpts) -> anyhow::Result<()> {
     use crate::model::{Kind, Record};
     use crate::template::Template;
     let kind = if opts.album { Kind::Album } else { Kind::Item };
@@ -179,7 +179,7 @@ pub fn run_bareasc(
     crate::plugins::bareasc::command(
         cfg,
         lib,
-        crate::plugins::bareasc::CmdOpts {
+        &crate::plugins::bareasc::CmdOpts {
             album: a.album,
             path: a.path,
             format: a.format,

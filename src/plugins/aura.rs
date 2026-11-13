@@ -184,7 +184,7 @@ impl Doc<'_, '_> {
     }
 
     /// `make_response(document, status)` for a JSON:API document.
-    fn json_response(&self, body: Json, status: u16) -> Response {
+    fn json_response(&self, body: &Json, status: u16) -> Response {
         Response::new(status, JSONAPI_MIMETYPE, body.to_flask_json().into_bytes())
     }
 
@@ -196,7 +196,7 @@ impl Doc<'_, '_> {
             .and_then(|c| c.parse().ok())
             .unwrap_or(500);
         self.json_response(
-            Json::Obj(vec![(
+            &Json::Obj(vec![(
                 "errors".into(),
                 Json::List(vec![Json::Obj(vec![
                     ("status".into(), Json::Str(status.into())),
@@ -227,7 +227,7 @@ impl Doc<'_, '_> {
             ),
         ));
         self.json_response(
-            Json::Obj(vec![(
+            &Json::Obj(vec![(
                 "data".into(),
                 Json::Obj(vec![
                     ("type".into(), Json::Str("server".into())),
@@ -358,7 +358,7 @@ impl Doc<'_, '_> {
         if let Some(include) = self.arg("include") {
             doc.push(("included".into(), Json::List(self.get_included(&data, include))));
         }
-        Ok(self.json_response(Json::Obj(doc), 200))
+        Ok(self.json_response(&Json::Obj(doc), 200))
     }
 
     fn resource_object(&self, kind: Kind, rec: &Record) -> Json {
@@ -437,15 +437,15 @@ impl Doc<'_, '_> {
     }
 
     /// beets' `single_resource_document`.
-    fn single_resource_document(&self, object: Json) -> Response {
+    fn single_resource_document(&self, object: &Json) -> Response {
         let mut doc = vec![("data".to_string(), object.clone())];
         if let Some(include) = self.arg("include") {
             doc.push((
                 "included".into(),
-                Json::List(self.get_included(std::slice::from_ref(&object), include)),
+                Json::List(self.get_included(std::slice::from_ref(object), include)),
             ));
         }
-        self.json_response(Json::Obj(doc), 200)
+        self.json_response(&Json::Obj(doc), 200)
     }
 
     // ---------------------------------------------------------- endpoints
@@ -489,7 +489,7 @@ impl Doc<'_, '_> {
                 Json::List(self.get_included(&data, include)),
             ));
         }
-        Ok(self.json_response(Json::Obj(doc), 200))
+        Ok(self.json_response(&Json::Obj(doc), 200))
     }
 
     fn single_track(&self, id: Option<i64>) -> Response {
@@ -497,7 +497,7 @@ impl Doc<'_, '_> {
             return web::abort(404, None);
         };
         match self.lib().get_item(id) {
-            Ok(Some(item)) => self.single_resource_document(track_resource(self.lib(), &item)),
+            Ok(Some(item)) => self.single_resource_document(&track_resource(self.lib(), &item)),
             _ => self.error(
                 "404 Not Found",
                 "No track with the requested id.",
@@ -511,7 +511,7 @@ impl Doc<'_, '_> {
             return web::abort(404, None);
         };
         match self.lib().get_album(id) {
-            Ok(Some(album)) => self.single_resource_document(album_resource(self.lib(), &album)),
+            Ok(Some(album)) => self.single_resource_document(&album_resource(self.lib(), &album)),
             _ => self.error(
                 "404 Not Found",
                 "No album with the requested id.",
@@ -522,7 +522,7 @@ impl Doc<'_, '_> {
 
     fn single_artist(&self, artist_id: &str) -> Response {
         match artist_resource(self.lib(), artist_id) {
-            Some(resource) => self.single_resource_document(resource),
+            Some(resource) => self.single_resource_document(&resource),
             None => self.error(
                 "404 Not Found",
                 "No artist with the requested id.",
@@ -533,7 +533,7 @@ impl Doc<'_, '_> {
 
     fn single_image(&self, image_id: &str) -> Response {
         match image_resource(self.lib(), image_id) {
-            Some(resource) => self.single_resource_document(resource),
+            Some(resource) => self.single_resource_document(&resource),
             None => self.error(
                 "404 Not Found",
                 "No image with the requested id.",
@@ -547,15 +547,12 @@ impl Doc<'_, '_> {
         let Some(id) = id else {
             return web::abort(404, None);
         };
-        let track = match self.lib().get_item(id) {
-            Ok(Some(t)) => t,
-            _ => {
-                return self.error(
-                    "404 Not Found",
-                    "No track with the requested id.",
-                    &format!("There is no track with an id of {id} in the library."),
-                );
-            }
+        let Some(track) = self.lib().get_item(id).ok().flatten() else {
+            return self.error(
+                "404 Not Found",
+                "No track with the requested id.",
+                &format!("There is no track with an id of {id} in the library."),
+            );
         };
         let path = track.path();
         if !path.is_file() {
@@ -971,7 +968,7 @@ pub struct CmdOpts {
 }
 
 /// `beet aura`: serve the library until interrupted.
-pub fn command(cfg: &Config, lib: &Library, opts: CmdOpts) -> Result<()> {
+pub fn command(cfg: &Config, lib: &Library, opts: &CmdOpts) -> Result<()> {
     let host = match opts.args.first() {
         Some(h) => h.clone(),
         None => cfg.str("aura.host"),
@@ -1072,7 +1069,7 @@ pub fn run_aura(
     crate::plugins::aura::command(
         cfg,
         lib,
-        crate::plugins::aura::CmdOpts {
+        &crate::plugins::aura::CmdOpts {
             debug: a.debug,
             args: a.args,
         },

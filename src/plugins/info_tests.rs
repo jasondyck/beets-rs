@@ -87,15 +87,15 @@ impl Env {
         Some(out)
     }
 
-    fn run(&self, opts: CmdOpts) -> String {
+    fn run(&self, opts: &CmdOpts) -> String {
         let mut out = vec![];
         run(&self.lib, opts, &mut out).unwrap();
         String::from_utf8(out).unwrap()
     }
 
     fn info(&self, args: &[&str]) -> String {
-        self.run(CmdOpts {
-            args: args.iter().map(|s| s.to_string()).collect(),
+        self.run(&CmdOpts {
+            args: args.iter().map(ToString::to_string).collect(),
             ..Default::default()
         })
     }
@@ -156,7 +156,7 @@ fn item_library_query() {
     item.set_str("album", "xxxx");
     env.lib.store(&item).unwrap();
 
-    let out = env.run(CmdOpts {
+    let out = env.run(&CmdOpts {
         library: true,
         args: vec!["album:xxxx".into()],
         ..Default::default()
@@ -192,7 +192,7 @@ fn item_and_path(multi: bool) -> Option<(Env, PathBuf)> {
 }
 
 fn summarize(env: &Env, path: &Path) -> String {
-    env.run(CmdOpts {
+    env.run(&CmdOpts {
         summarize: true,
         args: vec!["album:AAA".into(), path.to_str().unwrap().into()],
         ..Default::default()
@@ -229,7 +229,7 @@ fn custom_format() {
     if env.add_items(1).is_none() {
         return;
     }
-    let out = env.run(CmdOpts {
+    let out = env.run(&CmdOpts {
         library: true,
         format: Some("$track. $title - $artist ($length)".into()),
         ..Default::default()
@@ -321,7 +321,7 @@ fn included_keys_and_dates() {
         it.set_int("year", 2001);
         it.set_str("title", "T");
     });
-    let out = env.run(CmdOpts {
+    let out = env.run(&CmdOpts {
         included_keys: vec!["title,date,nope,images".into(), "path,art".into()],
         args: vec![path.to_str().unwrap().into()],
         ..Default::default()
@@ -341,7 +341,7 @@ fn unreadable_file_is_skipped() {
     };
     let bad = env.dir.path().join("bad.mp3");
     std::fs::write(&bad, b"").unwrap();
-    let out = env.run(CmdOpts {
+    let out = env.run(&CmdOpts {
         included_keys: vec!["format".into()],
         args: vec![bad.to_str().unwrap().into(), good.to_str().unwrap().into()],
         ..Default::default()
@@ -356,7 +356,7 @@ fn mono_wavpack_channels_is_true() {
     if mp3(&p, "wv").is_none() {
         return;
     }
-    let out = env.run(CmdOpts {
+    let out = env.run(&CmdOpts {
         included_keys: vec!["channels".into()],
         args: vec![p.to_str().unwrap().into()],
         ..Default::default()

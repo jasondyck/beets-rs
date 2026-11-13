@@ -124,7 +124,7 @@ fn sanitize_choices(choices: &[String], all: &[&str]) -> Vec<String> {
                 out.extend(
                     all.iter()
                         .filter(|a| !choices.iter().any(|c| c == *a))
-                        .map(|a| a.to_string()),
+                        .map(ToString::to_string),
                 );
             }
         }
@@ -547,7 +547,7 @@ impl Plugin for LyricsPlugin {
 }
 
 /// The `lyrics` command.
-pub fn command(cfg: &Config, lib: &Library, opts: CmdOpts) -> Result<()> {
+pub fn command(cfg: &Config, lib: &Library, opts: &CmdOpts) -> Result<()> {
     let mut conf = Conf::new(cfg);
     // The options default to the settings.
     conf.force |= opts.force;
@@ -557,16 +557,16 @@ pub fn command(cfg: &Config, lib: &Library, opts: CmdOpts) -> Result<()> {
         conf.keep_synced = k;
     }
     if opts.rest_directory.is_some() {
-        conf.rest_directory = opts.rest_directory.clone();
+        conf.rest_directory.clone_from(&opts.rest_directory);
     }
     let plugin = LyricsPlugin::with_conf(conf, Urls::default());
-    run_command(&plugin, lib, cfg.bool("import.write"), &opts)
+    run_command(&plugin, lib, cfg.bool("import.write"), opts)
 }
 
 fn run_command(p: &LyricsPlugin, lib: &Library, write: bool, opts: &CmdOpts) -> Result<()> {
     let mut items = lib.items(&Query::parse(Kind::Item, &opts.query)?)?;
     items.truncate(opts.limit.unwrap_or(usize::MAX));
-    for item in items.iter_mut() {
+    for item in &mut items {
         p.add_item_lyrics(lib, item, write)?;
         if p.conf.print && !item.str("lyrics").is_empty() {
             println!("{}", item.str("lyrics"));
@@ -705,7 +705,7 @@ pub fn run_lyrics(
     crate::plugins::lyrics::command(
         cfg,
         lib,
-        crate::plugins::lyrics::CmdOpts {
+        &crate::plugins::lyrics::CmdOpts {
             print: a.print,
             rest_directory: a.rest_directory,
             force: a.force,

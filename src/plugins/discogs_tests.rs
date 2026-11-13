@@ -8,7 +8,7 @@ use crate::plugins::requests::testserver::{Reply, Seen, Server, serve};
 use serde_json::{Value as J, json};
 
 /// `_artist`.
-fn artist(name: &str, extra: J) -> J {
+fn artist(name: &str, extra: &J) -> J {
     let mut base = json!({
         "id": 1,
         "name": name,
@@ -34,7 +34,7 @@ fn audio_track(title: &str, position: &str, duration: &str) -> J {
     })
 }
 
-fn index_track(title: &str, sub_tracks: Vec<J>) -> J {
+fn index_track(title: &str, sub_tracks: &[J]) -> J {
     json!({
         "type_": "index",
         "position": "",
@@ -53,13 +53,13 @@ fn heading_track(title: &str) -> J {
     })
 }
 
-fn release(tracks: Vec<J>) -> J {
+fn release(tracks: &[J]) -> J {
     json!({
         "id": 11111111,
         "uri": "https://www.discogs.com/release/111111111",
         "title": "ALBUM TITLE",
         "year": 3001,
-        "artists": [artist("ARTIST NAME", json!({"join": ","}))],
+        "artists": [artist("ARTIST NAME", &json!({"join": ","}))],
         "formats": [{"descriptions": ["FORMAT DESC 1", "FORMAT DESC 2"], "name": "FORMAT", "qty": 1}],
         "genres": ["STYLE1", "STYLE2"],
         "styles": ["GENRE1", "GENRE2"],
@@ -73,8 +73,8 @@ fn release_from_positions(positions: &[&str]) -> J {
         .iter()
         .enumerate()
         .map(|(i, p)| audio_track(&format!("TITLE{}", i + 1), p, ""))
-        .collect();
-    release(tracks)
+        .collect::<Vec<_>>();
+    release(&tracks)
 }
 
 fn conf(base: &str) -> Conf {
@@ -208,7 +208,7 @@ fn minimal_release() {
         "id": 123,
         "uri": "https://www.discogs.com/release/123456-something",
         "tracklist": [audio_track("A", "1", "01:01")],
-        "artists": [artist("ARTIST NAME", json!({"id": 321}))],
+        "artists": [artist("ARTIST NAME", &json!({"id": 321}))],
         "title": "TITLE"
     });
     let info = plugin().get_album_info(&data).unwrap();
@@ -268,11 +268,11 @@ fn disambiguation_release() -> J {
             "position": "A",
             "type_": "track",
             "duration": "5:44",
-            "artists": [artist("TEST ARTIST (5)", json!({"id": 11146}))]
+            "artists": [artist("TEST ARTIST (5)", &json!({"id": 11146}))]
         }],
         "artists": [
-            artist("ARTIST NAME (2)", json!({"id": 321, "join": "&"})),
-            artist("OTHER ARTIST (5)", json!({"id": 322}))
+            artist("ARTIST NAME (2)", &json!({"id": 321, "join": "&"})),
+            artist("OTHER ARTIST (5)", &json!({"id": 322}))
         ],
         "title": "title",
         "labels": [{"name": "LABEL NAME (5)", "catno": "catalog number"}]
@@ -353,7 +353,7 @@ fn index_tracks_and_disc_titles() {
                 audio_track("TITLE ONE", "1", ""),
                 index_track(
                     "TRACK GROUP TITLE",
-                    vec![
+                    &[
                         audio_track("SUBTITLE ONE", "2.1", "01:01"),
                         audio_track("SUBTITLE TWO", "2.2", "02:02"),
                     ],
@@ -373,7 +373,7 @@ fn index_tracks_and_disc_titles() {
                 audio_track("TITLE ONE", "1", ""),
                 index_track(
                     "TRACK GROUP TITLE",
-                    vec![
+                    &[
                         audio_track("SUBTITLE ONE", "2", "01:01"),
                         audio_track("SUBTITLE TWO", "3", "02:02"),
                     ],
@@ -394,7 +394,7 @@ fn index_tracks_and_disc_titles() {
                 audio_track("TITLE ONE", "1", ""),
                 index_track(
                     "TRACK GROUP TITLE",
-                    vec![
+                    &[
                         audio_track("SUBTITLE ONE", "2", "01:01"),
                         audio_track("SUBTITLE TWO", "3", "02:02"),
                     ],
@@ -427,7 +427,7 @@ fn index_tracks_and_disc_titles() {
         ),
     ] {
         let p = index_plugin(index_tracks);
-        let info = p.get_album_info(&release(tracks)).unwrap();
+        let info = p.get_album_info(&release(&tracks)).unwrap();
         assert_eq!(info.mediums, mediums);
         let got: Vec<(&str, Option<&str>)> = info
             .tracks
@@ -449,10 +449,10 @@ fn index_track_inherits_artists() {
     let group_artist = "GROUP ARTIST";
     let tracks = vec![index_track(
         "TRACK GROUP TITLE",
-        vec![
+        &[
             {
                 let mut t = audio_track("TRACK ONE", "2", "");
-                t["artists"] = json!([artist(track_artist, json!({}))]);
+                t["artists"] = json!([artist(track_artist, &json!({}))]);
                 t
             },
             audio_track("SUBTITLE TWO", "3", ""),
@@ -460,8 +460,8 @@ fn index_track_inherits_artists() {
     )
     .to_owned()];
     let mut tracks = tracks;
-    tracks[0]["artists"] = json!([artist(group_artist, json!({}))]);
-    let info = plugin().get_album_info(&release(tracks)).unwrap();
+    tracks[0]["artists"] = json!([artist(group_artist, &json!({}))]);
+    let info = plugin().get_album_info(&release(&tracks)).unwrap();
     assert_eq!(info.mediums, 1);
     let artists: std::collections::BTreeSet<String> =
         info.tracks.iter().map(|t| t.artist.clone()).collect();
@@ -477,7 +477,7 @@ fn index_track_inherits_artists() {
 fn coalesce_logical_index_as_audio_track() {
     let mut index = index_track(
         "TRACK GROUP TITLE",
-        vec![
+        &[
             audio_track("SUBTITLE ONE", "2.1", ""),
             audio_track("SUBTITLE TWO", "2.2", ""),
         ],
@@ -501,15 +501,15 @@ fn anv_release() -> J {
             "type_": "track",
             "duration": "5:44",
             "artists": [
-                artist("ARTIST", json!({"id": 11146, "anv": "ART", "join": "Feat."})),
-                artist("PERFORMER", json!({"id": 787}))
+                artist("ARTIST", &json!({"id": 11146, "anv": "ART", "join": "Feat."})),
+                artist("PERFORMER", &json!({"id": 787}))
             ],
-            "extraartists": [artist("PERFORMER", json!({"id": 787, "role": "Featuring"}))]
+            "extraartists": [artist("PERFORMER", &json!({"id": 787, "role": "Featuring"}))]
         }],
         "artists": [
-            artist("DRUMMER", json!({"id": 445, "anv": "DRUM", "join": ", "})),
-            artist("ARTIST (4)", json!({"id": 321, "anv": "ARTY", "join": "&"})),
-            artist("SOLOIST", json!({"id": 446, "anv": "SOLO"}))
+            artist("DRUMMER", &json!({"id": 445, "anv": "DRUM", "join": ", "})),
+            artist("ARTIST (4)", &json!({"id": 321, "anv": "ARTY", "join": "&"})),
+            artist("SOLOIST", &json!({"id": 446, "anv": "SOLO"}))
         ],
         "title": "title"
     })
@@ -588,7 +588,7 @@ fn anv_album_artist_only_for_the_album() {
         "tracklist": [{
             "title": "track", "position": "A", "type_": "track", "duration": "5:44"
         }],
-        "artists": [artist("ARTIST (4)", json!({"id": 321, "anv": "VARIATION"}))],
+        "artists": [artist("ARTIST (4)", &json!({"id": 321, "anv": "VARIATION"}))],
         "title": "title"
     });
     let info = anv_plugin(true, false, false).get_album_info(&data).unwrap();
@@ -608,18 +608,18 @@ fn featured_artists() {
         "position": "1",
         "duration": "5:00",
         "artists": [
-            artist("NEW ARTIST", json!({"id": 11146, "join": "&"})),
-            artist("VOCALIST", json!({"id": 344, "join": "feat."}))
+            artist("NEW ARTIST", &json!({"id": 11146, "join": "&"})),
+            artist("VOCALIST", &json!({"id": 344, "join": "feat."}))
         ],
         "extraartists": [
-            artist("SOLOIST", json!({"id": 3, "role": "Featuring"})),
-            artist("PERFORMER (1)", json!({"id": 5, "role": "Other Role, Featuring"})),
-            artist("RANDOM", json!({"id": 8, "role": "Written-By"})),
-            artist("MUSICIAN", json!({"id": 10, "role": "Featuring [Uncredited]"}))
+            artist("SOLOIST", &json!({"id": 3, "role": "Featuring"})),
+            artist("PERFORMER (1)", &json!({"id": 5, "role": "Other Role, Featuring"})),
+            artist("RANDOM", &json!({"id": 8, "role": "Written-By"})),
+            artist("MUSICIAN", &json!({"id": 10, "role": "Featuring [Uncredited]"}))
         ]
     });
     let p = plugin();
-    let state = p.artist_state(vec![Artist::from_data(&artist("ARTIST", json!({})))], false);
+    let state = p.artist_state(vec![Artist::from_data(&artist("ARTIST", &json!({})))], false);
     let (t, _, _) = p.get_track_info(&track, 1, &[], &state);
     assert_eq!(
         t.artist,
@@ -640,16 +640,16 @@ fn extraartist_roles() {
         "title": "track",
         "position": "1",
         "duration": "5:00",
-        "artists": [artist("TRACK ARTIST", json!({"id": 11}))],
+        "artists": [artist("TRACK ARTIST", &json!({"id": 11}))],
         "extraartists": [
-            artist("LYRICIST", json!({"id": 2, "role": "Lyrics By"})),
-            artist("ARRANGER", json!({"id": 3, "role": "Arranged By"})),
-            artist("REMIXER", json!({"id": 5, "role": "Remixed By"})),
-            artist("COMPOSER", json!({"id": 6, "role": "Written-By"}))
+            artist("LYRICIST", &json!({"id": 2, "role": "Lyrics By"})),
+            artist("ARRANGER", &json!({"id": 3, "role": "Arranged By"})),
+            artist("REMIXER", &json!({"id": 5, "role": "Remixed By"})),
+            artist("COMPOSER", &json!({"id": 6, "role": "Written-By"}))
         ]
     });
     let p = plugin();
-    let state = p.artist_state(vec![Artist::from_data(&artist("ARTIST", json!({})))], false);
+    let state = p.artist_state(vec![Artist::from_data(&artist("ARTIST", &json!({})))], false);
     let (t, _, _) = p.get_track_info(&track, 1, &[], &state);
     assert_eq!(t.artist, "TRACK ARTIST");
     assert_eq!(t.artists, ["TRACK ARTIST"]);
@@ -666,7 +666,7 @@ fn various_artists_uses_the_configured_name() {
         DiscogsClient::with_token("http://127.0.0.1:1", "t", "token"),
         "VARIOUS ARTISTS",
     );
-    let state = p.artist_state(vec![Artist::from_data(&artist("Various", json!({})))], false);
+    let state = p.artist_state(vec![Artist::from_data(&artist("Various", &json!({})))], false);
     let info = state.info();
     assert_eq!(info.artist, "VARIOUS ARTISTS");
     assert_eq!(info.artist_id, "1");

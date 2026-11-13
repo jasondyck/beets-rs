@@ -106,13 +106,13 @@ impl Settings {
 }
 
 /// `beet duplicates`, printing to stdout.
-pub fn command(cfg: &Config, lib: &Library, opts: CmdOpts) -> Result<()> {
+pub fn command(cfg: &Config, lib: &Library, opts: &CmdOpts) -> Result<()> {
     run(cfg, lib, opts, &mut std::io::stdout().lock())
 }
 
 /// `beet duplicates`, writing to `out`.
-pub fn run(cfg: &Config, lib: &Library, opts: CmdOpts, out: &mut impl Write) -> Result<()> {
-    let s = Settings::new(cfg, &opts);
+pub fn run(cfg: &Config, lib: &Library, opts: &CmdOpts, out: &mut impl Write) -> Result<()> {
+    let s = Settings::new(cfg, opts);
     let d = Dup {
         cfg,
         lib,
@@ -397,7 +397,7 @@ impl Dup<'_> {
             self.s.format.clone()
         };
         let mut keys: Vec<String> = if self.s.keys.is_empty() {
-            default_keys.iter().map(|k| k.to_string()).collect()
+            default_keys.iter().map(ToString::to_string).collect()
         } else {
             self.s.keys.clone()
         };
@@ -839,7 +839,7 @@ pub fn run_duplicates(
     crate::plugins::duplicates::command(
         cfg,
         lib,
-        crate::plugins::duplicates::CmdOpts {
+        &crate::plugins::duplicates::CmdOpts {
             count: a.count,
             checksum: a.checksum,
             delete: a.delete,

@@ -74,7 +74,7 @@ impl MusicBrainzApi {
     }
 
     fn throttle(&self) {
-        let mut last = self.last.lock().unwrap_or_else(|e| e.into_inner());
+        let mut last = self.last.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         if let Some(t) = *last {
             let elapsed = t.elapsed();
             if elapsed < self.interval {

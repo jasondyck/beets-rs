@@ -314,12 +314,12 @@ pub(crate) fn collect_entries(
 }
 
 /// `InfoPlugin.run`, printing to stdout.
-pub fn command(lib: &Library, opts: CmdOpts) -> Result<()> {
+pub fn command(lib: &Library, opts: &CmdOpts) -> Result<()> {
     run(lib, opts, &mut std::io::stdout().lock())
 }
 
 /// `InfoPlugin.run`, writing to `out`.
-pub fn run(lib: &Library, opts: CmdOpts, out: &mut impl Write) -> Result<()> {
+pub fn run(lib: &Library, opts: &CmdOpts, out: &mut impl Write) -> Result<()> {
     let log = PluginLog::new("info");
     let mut keys: Vec<String> = vec![];
     for k in &opts.included_keys {
@@ -448,7 +448,7 @@ pub fn run_info(
     let a = InfoArgs::from_arg_matches(m)?;
     crate::plugins::info::command(
         lib,
-        crate::plugins::info::CmdOpts {
+        &crate::plugins::info::CmdOpts {
             album: a.album,
             library: a.library,
             summarize: a.summarize,

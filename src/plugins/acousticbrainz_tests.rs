@@ -5,9 +5,9 @@ use crate::config::Config;
 use crate::library::Library;
 use serde_json::json;
 
-fn mapping(data: J) -> std::collections::BTreeSet<(String, String)> {
+fn mapping(data: &J) -> std::collections::BTreeSet<(String, String)> {
     let mut warn = |_: &str| {};
-    map_data_to_scheme(&data, scheme(), &mut warn)
+    map_data_to_scheme(data, scheme(), &mut warn)
         .into_iter()
         .map(|(k, v)| {
             let v = match v {
@@ -113,7 +113,7 @@ fn realistic() {
             "voice_instrumental": {"value": "instrumental"}
         }
     });
-    let got = mapping(data);
+    let got = mapping(&data);
     assert_eq!(
         got,
         expected(&[

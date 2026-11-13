@@ -351,7 +351,7 @@ fn password_auth() {
             .command("commands")
             .values("command")
             .iter()
-            .map(|s| s.to_string())
+            .map(ToString::to_string)
             .collect();
         assert_eq!(names.len(), SAFE_COMMANDS.len());
         let r = c.command("password wrong");

@@ -76,7 +76,7 @@ pub fn decode(path: &Path) -> Result<Decoded> {
     let mut channels = track
         .codec_params
         .channels
-        .map(|c| c.count())
+        .map(symphonia::core::audio::Channels::count)
         .unwrap_or(1);
     loop {
         let packet = match format.next_packet() {
@@ -183,7 +183,7 @@ pub fn resample_kaiser_fast(x: &[f32], sr_orig: u32, sr_new: u32) -> Vec<f32> {
     let n_out = (x.len() as f64 * sr_new as f64 / sr_orig as f64) as usize;
     let (mut interp_win, num_table) = kaiser_fast_window();
     if sample_ratio < 1.0 {
-        for w in interp_win.iter_mut() {
+        for w in &mut interp_win {
             *w *= sample_ratio;
         }
     }
@@ -352,7 +352,7 @@ pub fn melspectrogram(y: &[f32], sr: u32, n_fft: usize, hop: usize, n_mels: usiz
             }
         }
         let spec = rfft(&buf, n_fft);
-        let power: Vec<f64> = spec.iter().map(|c| c.norm_sqr()).collect();
+        let power: Vec<f64> = spec.iter().map(Complex::norm_sqr).collect();
         for m in 0..n_mels {
             out[m][frame] = filters[m]
                 .iter()
@@ -380,7 +380,7 @@ pub fn power_to_db(s: &[Vec<f64>], top_db: f64) -> Vec<Vec<f64>> {
         .iter()
         .flat_map(|r| r.iter())
         .fold(f64::NEG_INFINITY, |a, &b| a.max(b));
-    for row in out.iter_mut() {
+    for row in &mut out {
         for v in row.iter_mut() {
             *v = v.max(max - top_db);
         }

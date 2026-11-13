@@ -341,7 +341,7 @@ fn get_track_length(duration: &str) -> Option<f64> {
 /// release's own `year` fills in what `released` doesn't say).
 pub fn parse_release_date(released: Option<&str>, year: Option<i64>) -> (Option<i64>, Option<i64>, Option<i64>) {
     let re = regex::Regex::new(r"^(\d{4})(?:-(\d{1,2})(?:-(\d{1,2}))?)?$").unwrap();
-    let Some(caps) = released.map(|r| r.trim()).and_then(|r| re.captures(r)) else {
+    let Some(caps) = released.map(str::trim).and_then(|r| re.captures(r)) else {
         return (year, None, None);
     };
     let num = |i: usize| {
@@ -446,7 +446,7 @@ impl DiscogsClient {
     /// `Master.fetch("year")`: a master release's year.
     pub fn master_year(&self, id: &str) -> Result<Option<i64>, DiscogsError> {
         let data = self.get(&format!("/masters/{id}"), &[])?;
-        Ok(data.get("year").and_then(|y| y.as_i64()))
+        Ok(data.get("year").and_then(serde_json::Value::as_i64))
     }
 
     /// `client.search(query, **filters)`: the first page's result data.
@@ -905,7 +905,7 @@ impl Discogs {
         let mut index_count = 0usize;
         let mut side_count = 0usize;
         let mut sides_per_medium = 1usize;
-        let all_some = t.mediums.iter().all(|m| m.is_some());
+        let all_some = t.mediums.iter().all(Option::is_some);
         if all_some {
             let mut m: Vec<String> = t
                 .mediums
@@ -1006,7 +1006,7 @@ impl Discogs {
         let va = albumartist.main_artists().first().is_some_and(|a| a.name == self.va_name);
         let (year, month, day) = parse_release_date(
             data.get("released").and_then(|r| r.as_str()),
-            data.get("year").and_then(|y| y.as_i64()),
+            data.get("year").and_then(serde_json::Value::as_i64),
         );
         let mediums: Vec<usize> = tracks.iter().map(|t| t.medium).collect();
         let country = data.get("country").and_then(|c| c.as_str()).map(String::from);
@@ -1347,9 +1347,8 @@ fn authenticate(conf: &Conf) -> Result<(String, String)> {
     let auth_url = format!("{base}/oauth/authorize?oauth_token={token}");
     println!("To authenticate with Discogs, visit:");
     println!("{auth_url}");
-    let code = match crate::ui::read_line_or_eof("Enter the code:") {
-        Some(c) => c,
-        None => bail!("Discogs authorization failed"),
+    let Some(code) = crate::ui::read_line_or_eof("Enter the code:") else {
+        bail!("Discogs authorization failed");
     };
     let mut oauth = oauth.with_token(&token, &token_secret);
     let access_url = format!("{base}/oauth/access_token");
@@ -1466,8 +1465,8 @@ impl MetadataSource for Discogs {
                 if score > 0.3 {
                     continue;
                 }
-                track.artist = album.artist.clone();
-                track.artist_id = album.artist_id.clone();
+                track.artist.clone_from(&album.artist);
+                track.artist_id.clone_from(&album.artist_id);
                 track.extra.push(("album".to_string(), V::Str(album.album.clone())));
                 out.push(track);
             }

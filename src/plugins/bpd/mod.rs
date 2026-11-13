@@ -544,7 +544,7 @@ impl<'a> State<'a> {
             }
             "idle" => {
                 let watched: Vec<String> = if cmd.args.is_empty() {
-                    SUBSYSTEMS.iter().map(|s| s.to_string()).collect()
+                    SUBSYSTEMS.iter().map(ToString::to_string).collect()
                 } else {
                     cmd.args.clone()
                 };
@@ -1154,7 +1154,7 @@ impl<'a> State<'a> {
         info: bool,
     ) -> Result<Vec<String>, BpdError> {
         let mut lines = vec![];
-        for (name, id) in node.files.iter() {
+        for (name, id) in &node.files {
             let newpath = vfs::path_join(basepath, name);
             if info {
                 if let Some(item) = self.get_item(*id)? {
@@ -1164,7 +1164,7 @@ impl<'a> State<'a> {
                 lines.push(format!("file: {newpath}"));
             }
         }
-        for (name, subdir) in node.dirs.iter() {
+        for (name, subdir) in &node.dirs {
             let newpath = vfs::path_join(basepath, name);
             lines.push(format!("directory: {newpath}"));
             lines.extend(self.listall_node(&newpath, subdir, info)?);
@@ -1696,7 +1696,7 @@ impl<'a> Server<'a> {
                         break;
                     }
                 };
-                if !self.handle_line(i, line) {
+                if !self.handle_line(i, &line) {
                     break;
                 }
             }
@@ -1705,7 +1705,7 @@ impl<'a> Server<'a> {
     }
 
     /// Handle one line from client `i`; false stops reading it this round.
-    fn handle_line(&mut self, i: usize, line: String) -> bool {
+    fn handle_line(&mut self, i: usize, line: &str) -> bool {
         let line = line.trim().to_string();
         let client = &mut self.state.clients[i];
         if !client.idle.is_empty() {
@@ -1794,7 +1794,7 @@ impl<'a> Server<'a> {
             Ok(Outcome::Idle(subsystems)) => Err(Failure::Idle(subsystems)),
             Ok(Outcome::Shutdown) => Err(Failure::Shutdown),
             Err(mut e) => {
-                e.cmd_name = command.name.clone();
+                e.cmd_name.clone_from(&command.name);
                 e.index = index;
                 Err(Failure::Bpd(e))
             }
@@ -1827,7 +1827,7 @@ impl<'a> Server<'a> {
                 }
                 Err(Failure::Idle(_)) => {
                     let mut e = BpdError::new(ERROR_SYSTEM, "server error");
-                    e.cmd_name = command.name.clone();
+                    e.cmd_name.clone_from(&command.name);
                     e.index = index;
                     let response = e.response();
                     self.state.clients[i].send_line(&response);
@@ -1957,14 +1957,14 @@ pub fn command(cfg: &Config, lib: &Library, opts: &CmdOpts) -> Result<()> {
     };
     let port: u16 = if args.is_empty() {
         cfg.get("bpd.port")
-            .and_then(|v| v.as_f64())
+            .and_then(serde_yaml::Value::as_f64)
             .unwrap_or(6600.0) as u16
     } else {
         args.remove(0).trim().parse()?
     };
     let ctrl_port: u16 = if args.is_empty() {
         cfg.get("bpd.control_port")
-            .and_then(|v| v.as_f64())
+            .and_then(serde_yaml::Value::as_f64)
             .unwrap_or(6601.0) as u16
     } else {
         args.remove(0).trim().parse()?
@@ -1975,7 +1975,7 @@ pub fn command(cfg: &Config, lib: &Library, opts: &CmdOpts) -> Result<()> {
     let password = cfg.str("bpd.password");
     let volume = cfg
         .get("bpd.volume")
-        .and_then(|v| v.as_f64())
+        .and_then(serde_yaml::Value::as_f64)
         .unwrap_or(VOLUME_MAX as f64) as i64;
     log.info("Starting server...");
     let mut server = Server::new(cfg, lib, password, volume)?;

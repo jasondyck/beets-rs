@@ -175,7 +175,7 @@ fn albums(lib: &Library, q: &[String], limit: Option<usize>) -> Result<Vec<Album
 }
 
 /// The `embedart` command.
-pub fn embed_command(ctx: &PluginCtx, opts: EmbedCmd) -> Result<()> {
+pub fn embed_command(ctx: &PluginCtx, opts: &EmbedCmd) -> Result<()> {
     let ea = EmbedArt::new(ctx.cfg);
     ea.log.set_base_level(INFO);
     let log = &ea.log;
@@ -252,7 +252,7 @@ pub struct ExtractCmd {
 }
 
 /// The `extractart` command.
-pub fn extract_command(ctx: &PluginCtx, opts: ExtractCmd) -> Result<()> {
+pub fn extract_command(ctx: &PluginCtx, opts: &ExtractCmd) -> Result<()> {
     let log = PluginLog::new("embedart");
     if let Some(out) = &opts.outpath {
         let items = items(ctx.lib, &opts.query, opts.limit)?;
@@ -397,7 +397,7 @@ mod tests {
         fn embed(&self, file: Option<&Path>, yes: bool) {
             embed_command(
                 &self.ctx(),
-                EmbedCmd {
+                &EmbedCmd {
                     file: file.map(Path::to_path_buf),
                     url: None,
                     yes,
@@ -435,7 +435,7 @@ mod tests {
         assert_eq!(env.art(1).unwrap(), std::fs::read(&img).unwrap());
         let err = embed_command(
             &env.ctx(),
-            EmbedCmd {
+            &EmbedCmd {
                 file: Some(env.path("nope.jpg")),
                 url: None,
                 yes: true,
@@ -563,7 +563,7 @@ mod tests {
         std::fs::create_dir_all(out.parent().unwrap()).unwrap();
         extract_command(
             &env.ctx(),
-            ExtractCmd {
+            &ExtractCmd {
                 outpath: Some(out.clone()),
                 filename: None,
                 associate: false,
@@ -580,7 +580,7 @@ mod tests {
         let (_, logs) = crate::logging::capture(|| {
             extract_command(
                 &env.ctx(),
-                ExtractCmd {
+                &ExtractCmd {
                     outpath: None,
                     filename: Some("sub/x".into()),
                     associate: true,
@@ -588,7 +588,7 @@ mod tests {
                     query: vec![],
                 },
             )
-            .unwrap()
+            .unwrap();
         });
         assert_eq!(
             logs,
@@ -597,7 +597,7 @@ mod tests {
         // Without -o or -a nothing is written.
         extract_command(
             &env.ctx(),
-            ExtractCmd {
+            &ExtractCmd {
                 outpath: None,
                 filename: Some("front".into()),
                 associate: false,
@@ -610,7 +610,7 @@ mod tests {
         // -a: written next to the album's files and set as its art.
         extract_command(
             &env.ctx(),
-            ExtractCmd {
+            &ExtractCmd {
                 outpath: None,
                 filename: None,
                 associate: true,
@@ -662,7 +662,7 @@ mod tests {
             crate::logging::capture(|| {
                 embed_command(
                     &env.ctx(),
-                    EmbedCmd {
+                    &EmbedCmd {
                         file: None,
                         url: Some(format!("{}{path}", s.base)),
                         yes: true,
@@ -670,7 +670,7 @@ mod tests {
                         query: vec![],
                     },
                 )
-                .unwrap()
+                .unwrap();
             })
             .1
         };
@@ -836,7 +836,7 @@ pub fn run_embedart(
     };
     crate::plugins::embedart::embed_command(
         &ctx,
-        crate::plugins::embedart::EmbedCmd {
+        &crate::plugins::embedart::EmbedCmd {
             file: a.file,
             url: a.url,
             yes: a.yes,
@@ -889,7 +889,7 @@ pub fn run_extractart(
     };
     crate::plugins::embedart::extract_command(
         &ctx,
-        crate::plugins::embedart::ExtractCmd {
+        &crate::plugins::embedart::ExtractCmd {
             outpath: a.outpath,
             filename: a.filename,
             associate: a.associate,

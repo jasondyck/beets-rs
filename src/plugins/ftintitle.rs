@@ -162,7 +162,7 @@ pub fn insert_ft_into_title(title: &str, feat_part: &str, keywords: Option<&[Str
         None => {
             defaults = DEFAULT_BRACKET_KEYWORDS
                 .iter()
-                .map(|s| s.to_string())
+                .map(ToString::to_string)
                 .collect();
             &defaults
         }
@@ -383,7 +383,7 @@ pub fn command(
     let write = cfg.bool("import.write");
     let mut items = lib.items(&Query::parse(Kind::Item, query)?)?;
     items.truncate(limit.unwrap_or(usize::MAX));
-    for item in items.iter_mut() {
+    for item in &mut items {
         let albumartist = item.str("albumartist").to_string();
         if core.ft_in_title(item, &albumartist, &log) {
             lib.store(item)?;

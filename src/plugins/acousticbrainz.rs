@@ -249,7 +249,7 @@ impl AcousticPlugin {
             self.log
                 .info(&format!("getting data for: {}", Self::show(cfg, lib, item)));
             let data = self.get_data(item.str("mb_trackid"));
-            if data.as_object().is_none_or(|m| m.is_empty()) {
+            if data.as_object().is_none_or(serde_json::Map::is_empty) {
                 continue;
             }
             let mut warn = |k: &str| {

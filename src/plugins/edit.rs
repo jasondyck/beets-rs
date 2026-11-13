@@ -155,7 +155,7 @@ pub fn apply_doc(obj: &mut Record, data: &Doc) {
                 PyVal::None => obj.set(key, Value::Null),
                 PyVal::Int(i) => obj.set(key, Value::Int(*i as i64)),
                 PyVal::Bool(b) if obj.field_type(key) == Some(FieldType::Bool) => {
-                    obj.set(key, Value::Bool(*b))
+                    obj.set(key, Value::Bool(*b));
                 }
                 PyVal::Bool(b) => obj.set(key, Value::Int(*b as i64)),
                 PyVal::Float(f) => obj.set(key, Value::Float(*f)),
@@ -198,7 +198,7 @@ pub fn load(s: &str) -> Result<Vec<Doc>, String> {
     for d in docs {
         match d {
             PyVal::Map(pairs) => {
-                out.push(pairs.into_iter().map(|(k, v)| (k.py_str(), v)).collect())
+                out.push(pairs.into_iter().map(|(k, v)| (k.py_str(), v)).collect());
             }
             other => {
                 return Err(format!(

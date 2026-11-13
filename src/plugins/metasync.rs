@@ -69,7 +69,7 @@ fn parse_plist(path: &Path) -> Result<Plist> {
     let root = doc.root_element();
     let node = root
         .children()
-        .find(|n| n.is_element())
+        .find(roxmltree::Node::is_element)
         .ok_or_else(|| anyhow::anyhow!("empty plist"))?;
     Ok(parse_node(node))
 }
@@ -82,7 +82,7 @@ fn parse_node(n: Node) -> Plist {
     match n.tag_name().name() {
         "dict" => {
             let mut map = HashMap::new();
-            let kids: Vec<Node> = n.children().filter(|c| c.is_element()).collect();
+            let kids: Vec<Node> = n.children().filter(roxmltree::Node::is_element).collect();
             for pair in kids.chunks(2) {
                 if pair.len() == 2 {
                     let key = node_text(pair[0]);
@@ -91,7 +91,7 @@ fn parse_node(n: Node) -> Plist {
             }
             Plist::Dict(map)
         }
-        "array" => Plist::Array(n.children().filter(|c| c.is_element()).map(parse_node).collect()),
+        "array" => Plist::Array(n.children().filter(roxmltree::Node::is_element).map(parse_node).collect()),
         "string" => Plist::Str(node_text(n)),
         "integer" => Plist::Int(node_text(n).parse().unwrap_or(0)),
         "real" => Plist::Real(node_text(n).parse().unwrap_or(0.0)),
@@ -409,9 +409,8 @@ impl Amarok {
                 dbus_ints(&v, &mut first);
             }
             if first.len() >= 6 && first[0] != 0 {
-                let first_played = match date_from_ints(&first) {
-                    Some(d) => d,
-                    None => continue,
+                let Some(first_played) = date_from_ints(&first) else {
+                    continue;
                 };
                 let mut last = vec![];
                 if let Some(v) = get("xesam:lastUsed") {
@@ -458,7 +457,12 @@ pub struct CmdOpts {
     pub format: Option<String>,
 }
 
-pub fn command(cfg: &Config, lib: &Library, opts: CmdOpts) -> Result<()> {
+enum Source {
+    Itunes(Itunes),
+    Amarok(Amarok),
+}
+
+pub fn command(cfg: &Config, lib: &Library, opts: &CmdOpts) -> Result<()> {
     // beets' `-f` callback (`ui._set_format`) sets the global
     // `format_item`, which `str(item)` in the sources' warnings and the
     // change display use.
@@ -482,10 +486,6 @@ pub fn command(cfg: &Config, lib: &Library, opts: CmdOpts) -> Result<()> {
     if items.is_empty() {
         log.info("No items found matching query");
         return Ok(());
-    }
-    enum Source {
-        Itunes(Itunes),
-        Amarok(Amarok),
     }
     let mut loaded = vec![];
     for player in &sources {
@@ -599,7 +599,7 @@ pub fn run_metasync(
     crate::plugins::metasync::command(
         cfg,
         lib,
-        crate::plugins::metasync::CmdOpts {
+        &crate::plugins::metasync::CmdOpts {
             pretend: a.pretend,
             sources: a.sources,
             limit: a.limit,

@@ -61,7 +61,7 @@ impl Env {
             .len()
     }
 
-    fn run(&self, opts: CmdOpts) -> String {
+    fn run(&self, opts: &CmdOpts) -> String {
         let mut out = vec![];
         run(&self.cfg, &self.lib, opts, &mut out).unwrap();
         String::from_utf8(out).unwrap()
@@ -108,7 +108,7 @@ fn missing_artist_albums() {
         library_album(&env, "Album", "Artist", "release_group_in_lib");
         let server = rg_server(json!([rg]));
         env.mb(&server);
-        assert_eq!(env.run(albums_opts(|_| {})), expected);
+        assert_eq!(env.run(&albums_opts(|_| {})), expected);
         let seen = server.requests();
         assert_eq!(seen.len(), 1);
         assert!(
@@ -129,7 +129,7 @@ fn missing_albums_custom_format() {
         {"id": "other", "title": "Other Album", "primary-type": "Album"}
     ]));
     env.mb(&server);
-    let out = env.run(albums_opts(|o| {
+    let out = env.run(&albums_opts(|o| {
         o.format = Some("$mb_releasegroupid | $albumtype | $album".into());
     }));
     assert_eq!(out, "other | album | Other Album\n");
@@ -144,11 +144,11 @@ fn release_types_filters_and_commas() {
         {"id": "compilation_id", "title": "compilation"}
     ]));
     env.mb(&server);
-    let out = env.run(albums_opts(|o| {
+    let out = env.run(&albums_opts(|o| {
         o.release_types = vec!["compilation".into()];
     }));
     assert!(out.contains("artist - compilation"), "{out}");
-    let out = env.run(albums_opts(|o| {
+    let out = env.run(&albums_opts(|o| {
         o.release_types = vec!["compilation,album".into(), "ep".into()];
     }));
     assert!(out.contains("artist - compilation"), "{out}");
@@ -174,7 +174,7 @@ fn empty_release_types_config_sends_empty_type() {
         .set("missing.release_types", serde_yaml::from_str("[]").unwrap());
     let server = rg_server(json!([]));
     env.mb(&server);
-    assert_eq!(env.run(albums_opts(|_| {})), "");
+    assert_eq!(env.run(&albums_opts(|_| {})), "");
     assert!(server.requests()[0].target.contains("&type=&"));
 }
 
@@ -187,7 +187,7 @@ fn missing_albums_total() {
         {"id": "other_id", "title": "other"}
     ]));
     env.mb(&server);
-    assert_eq!(env.run(albums_opts(|o| o.total = true)), "1\n");
+    assert_eq!(env.run(&albums_opts(|o| o.total = true)), "1\n");
 }
 
 #[test]
@@ -200,7 +200,7 @@ fn albums_without_artist_mbid_are_skipped() {
     ]]);
     let server = rg_server(json!([{"id": "z", "title": "z"}]));
     env.mb(&server);
-    assert_eq!(env.run(albums_opts(|o| o.total = true)), "0\n");
+    assert_eq!(env.run(&albums_opts(|o| o.total = true)), "0\n");
     assert!(server.requests().is_empty());
 }
 
@@ -230,12 +230,12 @@ fn tracks_env(plugins: &str) -> Env {
 #[test]
 fn missing_tracks_total_and_count() {
     let env = tracks_env("[missing]");
-    let total = env.run(CmdOpts {
+    let total = env.run(&CmdOpts {
         total: true,
         ..Default::default()
     });
     assert_eq!(total, "1\n");
-    let count = env.run(CmdOpts {
+    let count = env.run(&CmdOpts {
         count: true,
         ..Default::default()
     });
@@ -273,7 +273,7 @@ fn missing_tracks_listed_from_musicbrainz() {
         .unwrap();
     items[0].set_str("mb_trackid", "00000000-0000-0000-0001-000000000001");
     env.lib.store(&items[0]).unwrap();
-    let out = env.run(CmdOpts {
+    let out = env.run(&CmdOpts {
         format: Some("$title|$track|$tracktotal|$disc|$disctotal|$length|$album_id".into()),
         ..Default::default()
     });
@@ -285,7 +285,7 @@ fn missing_tracks_listed_from_musicbrainz() {
          Interview|05|05|02|02|10:00|1\n"
     );
     // The default format.
-    let out = env.run(CmdOpts::default());
+    let out = env.run(&CmdOpts::default());
     assert!(
         out.starts_with("Fixture Artist - Fixture Album - Hidden Intro\n"),
         "{out}"
@@ -299,7 +299,7 @@ fn missing_tracks_need_the_source_plugin() {
     let mut env = tracks_env("[missing]");
     let server = fixture_server();
     env.mb(&server);
-    assert_eq!(env.run(CmdOpts::default()), "");
+    assert_eq!(env.run(&CmdOpts::default()), "");
     let mut env = tracks_env("[missing, musicbrainz]");
     env.mb(&server);
     let mut album = env
@@ -309,7 +309,7 @@ fn missing_tracks_need_the_source_plugin() {
         .remove(0);
     album.flex.insert("data_source".into(), "Discogs".into());
     env.lib.store(&album).unwrap();
-    assert_eq!(env.run(CmdOpts::default()), "");
+    assert_eq!(env.run(&CmdOpts::default()), "");
     assert!(server.requests().is_empty());
 }
 
@@ -323,7 +323,7 @@ fn complete_albums_are_not_looked_up() {
     ]]);
     let server = fixture_server();
     env.mb(&server);
-    assert_eq!(env.run(CmdOpts::default()), "");
+    assert_eq!(env.run(&CmdOpts::default()), "");
     assert!(server.requests().is_empty());
 }
 

@@ -66,7 +66,7 @@ impl Env {
 
     fn run(&self, answers: &[&str], args: &[&str], album: bool) {
         script::set(answers.iter().map(|a| (*a, None)).collect());
-        let q: Vec<String> = args.iter().map(|s| s.to_string()).collect();
+        let q: Vec<String> = args.iter().map(ToString::to_string).collect();
         command(&self.cfg, &self.lib, album, &[], false, &q).unwrap();
     }
 

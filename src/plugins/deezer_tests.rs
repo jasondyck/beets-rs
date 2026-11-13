@@ -26,7 +26,7 @@ fn no_server() -> Server {
     serve(|_| Reply::status(500))
 }
 
-fn track_data(extra: serde_json::Value) -> serde_json::Value {
+fn track_data(extra: &serde_json::Value) -> serde_json::Value {
     let mut base = json!({
         "id": 1,
         "title": "Title",
@@ -73,13 +73,13 @@ fn search_query_is_free_text_for_tracks() {
 fn track_artist_from_contributors_or_artist() {
     let s = no_server();
     let p = plugin(&s);
-    let t = p.get_track(&track_data(json!({
+    let t = p.get_track(&track_data(&json!({
         "contributors": [{"id": 2, "name": "Artist"}]
     })));
     assert_eq!((t.artist.as_str(), t.artist_id.as_str()), ("Artist", "2"));
-    let t = p.get_track(&track_data(json!({"artist": {"id": 2, "name": "Artist"}})));
+    let t = p.get_track(&track_data(&json!({"artist": {"id": 2, "name": "Artist"}})));
     assert_eq!((t.artist.as_str(), t.artist_id.as_str()), ("Artist", "2"));
-    let t = p.get_track(&track_data(json!({})));
+    let t = p.get_track(&track_data(&json!({})));
     assert_eq!((t.artist.as_str(), t.artist_id.as_str()), ("", ""));
     assert!(t.nulls.contains("isrc"));
     let data = t.to_data();

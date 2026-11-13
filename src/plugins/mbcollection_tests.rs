@@ -29,7 +29,7 @@ fn cfg(server: &str) -> Config {
     cfg
 }
 
-fn collections_response(collections: serde_json::Value) -> Reply {
+fn collections_response(collections: &serde_json::Value) -> Reply {
     Reply::json(json!({"collections": collections}))
 }
 
@@ -42,7 +42,7 @@ fn album(lib: &Library, mb_albumid: &str) {
 
 #[test]
 fn no_collections_is_an_error() {
-    let server = serve(|_| collections_response(json!([])));
+    let server = serve(|_| collections_response(&json!([])));
     let plugin = MusicBrainzCollectionPlugin::new(&cfg(&server.base));
     match plugin.collection() {
         Err(Failure::User(m)) => assert_eq!(m, "no collections exist for user"),
@@ -52,7 +52,7 @@ fn no_collections_is_an_error() {
 
 #[test]
 fn no_release_collections_is_an_error() {
-    let server = serve(|_| collections_response(json!([{"id": "c1", "entity_type": "event"}])));
+    let server = serve(|_| collections_response(&json!([{"id": "c1", "entity_type": "event"}])));
     let plugin = MusicBrainzCollectionPlugin::new(&cfg(&server.base));
     match plugin.collection() {
         Err(Failure::User(m)) => assert_eq!(m, "No release collection found."),
@@ -62,11 +62,11 @@ fn no_release_collections_is_an_error() {
 
 #[test]
 fn an_unknown_configured_id_is_an_error() {
-    let server = serve(|_| collections_response(json!([{"id": "c1", "entity_type": "release"}])));
+    let server = serve(|_| collections_response(&json!([{"id": "c1", "entity_type": "release"}])));
     let plugin = MusicBrainzCollectionPlugin::new(&cfg(&server.base));
     match plugin.collection() {
         Err(Failure::User(m)) => {
-            assert_eq!(m, format!("invalid collection ID: {COLLECTION_ID}"))
+            assert_eq!(m, format!("invalid collection ID: {COLLECTION_ID}"));
         }
         _ => panic!("expected a UserError"),
     }
@@ -75,7 +75,7 @@ fn an_unknown_configured_id_is_an_error() {
 #[test]
 fn a_valid_collection() {
     let server = serve(|_| {
-        collections_response(json!([{
+        collections_response(&json!([{
             "id": COLLECTION_ID,
             "entity_type": "release",
             "release_count": 3
@@ -94,7 +94,7 @@ fn a_valid_collection() {
 #[test]
 fn mbupdate_fetches_pages_and_batches_submissions() {
     let server = serve(|r| match (r.method.as_str(), r.target.as_str()) {
-        ("GET", t) if t.starts_with("/ws/2/collection?") => collections_response(json!([{
+        ("GET", t) if t.starts_with("/ws/2/collection?") => collections_response(&json!([{
             "id": COLLECTION_ID,
             "entity_type": "release",
             "release_count": 3
@@ -155,7 +155,7 @@ fn mbupdate_fetches_pages_and_batches_submissions() {
 #[test]
 fn mbupdate_without_remove_deletes_nothing() {
     let server = serve(|r| match (r.method.as_str(), r.target.as_str()) {
-        ("GET", t) if t.starts_with("/ws/2/collection?") => collections_response(json!([{
+        ("GET", t) if t.starts_with("/ws/2/collection?") => collections_response(&json!([{
             "id": COLLECTION_ID,
             "entity_type": "release",
             "release_count": 0
@@ -191,7 +191,7 @@ fn mbupdate_logs_unauthorized_errors() {
 
 #[test]
 fn an_invalid_collection_id_fails_the_command() {
-    let server = serve(|_| collections_response(json!([{"id": "c1", "entity_type": "release"}])));
+    let server = serve(|_| collections_response(&json!([{"id": "c1", "entity_type": "release"}])));
     let cfg = cfg(&server.base);
     let lib = Library::in_memory().unwrap();
     let err = command(&cfg, &lib, None).unwrap_err();
