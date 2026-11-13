@@ -1,4 +1,4 @@
-//! beets' test/plugins/test_missing.py, with a fake MusicBrainz on
+//! beets' `test/plugins/test_missing.py`, with a fake MusicBrainz on
 //! 127.0.0.1 (a free port) where beets uses `requests_mock`.
 
 use super::*;
@@ -204,7 +204,7 @@ fn albums_without_artist_mbid_are_skipped() {
     assert!(server.requests().is_empty());
 }
 
-/// test_missing_tracks: two of three tracks in the library.
+/// `test_missing_tracks`: two of three tracks in the library.
 fn tracks_env(plugins: &str) -> Env {
     let env = Env::new(plugins);
     let common = |id: &'static str| -> Vec<(&'static str, &'static str)> {

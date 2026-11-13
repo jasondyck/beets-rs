@@ -1,4 +1,4 @@
-//! beets' test/plugins/test_mbcollection.py, against a fake MusicBrainz.
+//! beets' `test/plugins/test_mbcollection.py`, against a fake MusicBrainz.
 
 use super::*;
 use crate::model::Album;

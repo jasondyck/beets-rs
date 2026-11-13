@@ -285,7 +285,7 @@ pub fn hann_periodic(n: usize) -> Vec<f64> {
 }
 
 /// `librosa.filters.mel(sr, n_fft, n_mels=128, fmin=0, fmax=sr/2)` with
-/// htk=False and norm="slaney": the (n_mels, n_fft/2+1) filterbank.
+/// htk=False and norm="slaney": the (`n_mels`, `n_fft/2+1`) filterbank.
 pub fn mel_filterbank(sr: u32, n_fft: usize, n_mels: usize) -> Vec<Vec<f64>> {
     const F_SP: f64 = 200.0 / 3.0;
     const MIN_LOG_HZ: f64 = 1000.0;

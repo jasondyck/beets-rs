@@ -1,4 +1,4 @@
-//! beets' test/plugins/test_duplicates.py, and the plugin's own rules.
+//! beets' `test/plugins/test_duplicates.py`, and the plugin's own rules.
 
 use super::*;
 use crate::model::Item;

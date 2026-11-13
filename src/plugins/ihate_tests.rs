@@ -1,4 +1,4 @@
-//! Ported from beets' test/plugins/test_ihate.py.
+//! Ported from beets' `test/plugins/test_ihate.py`.
 
 use super::*;
 use crate::config::Config;

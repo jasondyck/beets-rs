@@ -1,4 +1,4 @@
-//! Ported from beets' test/plugins/test_embyupdate.py.
+//! Ported from beets' `test/plugins/test_embyupdate.py`.
 
 use super::*;
 use crate::plugins::requests::testserver::serve;

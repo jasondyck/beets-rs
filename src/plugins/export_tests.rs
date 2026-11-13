@@ -1,4 +1,4 @@
-//! beets' test/plugins/test_export.py, plus the format options.
+//! beets' `test/plugins/test_export.py`, plus the format options.
 
 use super::*;
 use crate::model::{Item, Kind, Value};

@@ -1,4 +1,4 @@
-//! Ported from beets' test/plugins/test_badfiles.py (the interactive prompt
+//! Ported from beets' `test/plugins/test_badfiles.py` (the interactive prompt
 //! needs stdin, so its automatic actions are tested instead).
 
 use super::*;

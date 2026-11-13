@@ -574,7 +574,7 @@ pub struct SplupdateArgs {
     /// URL-encode all paths.
     #[arg(long)]
     urlencode: bool,
-    /// Playlist item URI template, e.g. http://beets:8337/item/$id/file.
+    /// Playlist item URI template, e.g. <http://beets:8337/item/$id/file>.
     #[arg(long = "uri-format")]
     uri_format: Option<String>,
     /// Specify the playlist format: m3u|extm3u.

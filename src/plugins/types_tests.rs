@@ -1,4 +1,4 @@
-//! beets' test/plugins/test_types_plugin.py, the plugins' declared types,
+//! beets' `test/plugins/test_types_plugin.py`, the plugins' declared types,
 //! and queries on album computed fields.
 
 use super::*;
@@ -344,7 +344,7 @@ fn missing_is_no_field_without_the_plugin() {
     assert_eq!(env.list(Kind::Album, "albumtotal:3", "$album"), "short");
 }
 
-/// test/dbcore/test_sort.py `test_field_present_in_some_items`.
+/// `test/dbcore/test_sort.py` `test_field_present_in_some_items`.
 #[test]
 fn sort_by_int_field_present_in_some_items() {
     let env = Env::new("[types]", "{myint: int}");

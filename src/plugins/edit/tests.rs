@@ -1,4 +1,4 @@
-//! Ported from beets' test/plugins/test_edit.py (the importer cases are in
+//! Ported from beets' `test/plugins/test_edit.py` (the importer cases are in
 //! importer.rs' tests and diffbeets' import phase). The editor is a shell
 //! script editing the file, as upstream's tests mock it.
 

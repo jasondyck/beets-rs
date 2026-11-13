@@ -66,7 +66,7 @@ pub struct Output {
     pub stderr: Vec<u8>,
 }
 
-/// How running a command went: not found (OSError), or its output.
+/// How running a command went: not found (`OSError`), or its output.
 enum Run {
     NotFound(String),
     Done(Output),
@@ -873,8 +873,8 @@ impl MetaflacBackend {
     }
 }
 
-/// beets' `_parse_gains`: each line is `<path>: <album gain> <album peak>
-/// <track gain> <track peak>`.
+/// beets' `_parse_gains`: each line is
+/// `<path>: <album gain> <album peak> <track gain> <track peak>`.
 pub fn parse_metaflac_gains(text: &str) -> RgResult<Vec<[f64; 4]>> {
     let mut out = vec![];
     for line in text.lines() {

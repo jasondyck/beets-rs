@@ -1,4 +1,4 @@
-//! Ported from beets' test/plugins/test_bpd.py: the MPD protocol over
+//! Ported from beets' `test/plugins/test_bpd.py`: the MPD protocol over
 //! this port's server (no playback). The server runs its event loop on the
 //! test's thread (`poll_once`) while the client sits in a thread of its
 //! own.

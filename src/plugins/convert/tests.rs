@@ -1,4 +1,4 @@
-//! Ported from beets' test/plugins/test_convert.py (with a shell command
+//! Ported from beets' `test/plugins/test_convert.py` (with a shell command
 //! standing in for `convert_stub.py`: it copies the file and appends a
 //! tag), plus the helpers' Python semantics (`shlex.split`,
 //! `Template.safe_substitute`).

@@ -1,4 +1,4 @@
-//! beets' test/plugins/test_replaygain.py (the ffmpeg, command and
+//! beets' `test/plugins/test_replaygain.py` (the ffmpeg, command and
 //! metaflac backends), plus the output parsing on canned tool output.
 
 use super::*;

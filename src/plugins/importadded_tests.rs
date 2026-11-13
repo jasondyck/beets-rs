@@ -1,4 +1,4 @@
-//! Ported from beets' test/plugins/test_importadded.py, with as-is imports
+//! Ported from beets' `test/plugins/test_importadded.py`, with as-is imports
 //! (the plugin doesn't depend on autotagging).
 
 use crate::config::Config;

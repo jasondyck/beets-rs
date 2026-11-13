@@ -1,4 +1,4 @@
-//! Ported from beets' test/plugins/test_importsource.py (the removal prompt
+//! Ported from beets' `test/plugins/test_importsource.py` (the removal prompt
 //! is answered through `ui::script`, the full import through the importer).
 
 use super::*;

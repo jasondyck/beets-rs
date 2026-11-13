@@ -82,7 +82,7 @@ pub(crate) fn set_test_urls(u: Option<Urls>) {
     TEST_URLS.with(|v| *v.borrow_mut() = u);
 }
 
-/// The plugin: the import_begin check and the commands' shared config.
+/// The plugin: the `import_begin` check and the commands' shared config.
 pub struct TidalPlugin {
     token_path: std::path::PathBuf,
 }

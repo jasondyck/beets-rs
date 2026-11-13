@@ -1,4 +1,4 @@
-//! Ported from beets' test/plugins/test_mbsubmit.py, plus the command.
+//! Ported from beets' `test/plugins/test_mbsubmit.py`, plus the command.
 
 use super::*;
 use crate::autotag::Recommendation;

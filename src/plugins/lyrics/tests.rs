@@ -1,4 +1,4 @@
-//! beets' test/plugins/test_lyrics.py, with web services served by a fake
+//! beets' `test/plugins/test_lyrics.py`, with web services served by a fake
 //! server on 127.0.0.1 (port 0) and beets' page fixtures.
 
 use super::backends::{self, Backend, SearchResult};

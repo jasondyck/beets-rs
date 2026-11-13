@@ -1,4 +1,4 @@
-//! Ported from beets' test/plugins/test_zero.py, plus the write-event
+//! Ported from beets' `test/plugins/test_zero.py`, plus the write-event
 //! details MediaFile gives.
 
 use super::*;

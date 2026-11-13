@@ -90,7 +90,7 @@ impl super::Plugin for AlbumTypesPlugin {
 
 #[cfg(test)]
 mod tests {
-    //! Ported from beets' test/plugins/test_albumtypes.py.
+    //! Ported from beets' `test/plugins/test_albumtypes.py`.
     use super::*;
 
     fn plugin(cfg_yaml: Option<&str>) -> AlbumTypes {

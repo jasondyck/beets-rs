@@ -1,4 +1,4 @@
-//! beets' test/plugins/test_mbsync.py (with a fake metadata source where
+//! beets' `test/plugins/test_mbsync.py` (with a fake metadata source where
 //! beets patches `metadata_plugins.album_for_id` / `track_for_id`), and
 //! the track mapping.
 

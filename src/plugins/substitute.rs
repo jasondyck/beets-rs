@@ -57,7 +57,7 @@ impl super::Plugin for SubstitutePlugin {
 
 #[cfg(test)]
 mod tests {
-    //! Ported from beets' test/plugins/test_substitute.py.
+    //! Ported from beets' `test/plugins/test_substitute.py`.
     use super::*;
 
     fn run(rules: &str, cases: &[(&str, &str)]) {

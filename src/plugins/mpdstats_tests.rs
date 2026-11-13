@@ -1,4 +1,4 @@
-//! Ported from beets' test/plugins/test_mpdstats.py (with a mock client in
+//! Ported from beets' `test/plugins/test_mpdstats.py` (with a mock client in
 //! place of beets' patched `MPDClientWrapper`).
 
 use super::*;

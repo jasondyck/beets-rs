@@ -377,7 +377,7 @@ impl super::Plugin for BucketPlugin {
 
 #[cfg(test)]
 mod tests {
-    //! Ported from beets' test/plugins/test_bucket.py.
+    //! Ported from beets' `test/plugins/test_bucket.py`.
     use super::*;
 
     fn setup(year: &[&str], alpha: &[&str], regex: &str, extrapolate: bool) -> Result<Bucket> {

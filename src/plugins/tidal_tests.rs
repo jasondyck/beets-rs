@@ -1,4 +1,4 @@
-//! beets' test/plugins/test_tidal.py, against a fake Tidal API on
+//! beets' `test/plugins/test_tidal.py`, against a fake Tidal API on
 //! 127.0.0.1 (the reference tests patch the Python methods; here the
 //! session's base URLs point at the local server), plus the session's
 //! PKCE/token handling.

@@ -1,4 +1,4 @@
-//! Ported from beets' test/plugins/test_play.py: the player is never run
+//! Ported from beets' `test/plugins/test_play.py`: the player is never run
 //! here; the command line and the playlist it would get are checked.
 
 use super::*;

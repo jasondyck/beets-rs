@@ -1,4 +1,4 @@
-//! beets' test/plugins/test_web.py (driving `App::handle` as beets' tests
+//! beets' `test/plugins/test_web.py` (driving `App::handle` as beets' tests
 //! drive Flask's test client), plus checks of the JSON layout, headers,
 //! CORS, the reverse proxy, ranges, and the HTTP server on 127.0.0.1:0.
 

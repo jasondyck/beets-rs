@@ -1,4 +1,4 @@
-//! Ported from beets' test/plugins/test_scrub.py (the as-is import runs
+//! Ported from beets' `test/plugins/test_scrub.py` (the as-is import runs
 //! the `import_task_files` hook), plus per-format scrubbing as Mutagen does
 //! it.
 

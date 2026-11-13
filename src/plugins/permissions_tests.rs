@@ -1,4 +1,4 @@
-//! Ported from beets' test/plugins/test_permissions.py.
+//! Ported from beets' `test/plugins/test_permissions.py`.
 
 use super::*;
 use crate::config::Config;

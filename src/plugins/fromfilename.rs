@@ -146,7 +146,7 @@ impl super::Plugin for FromFilenamePlugin {
 
 #[cfg(test)]
 mod tests {
-    //! Ported from beets' test/plugins/test_fromfilename.py.
+    //! Ported from beets' `test/plugins/test_fromfilename.py`.
     use super::*;
 
     #[test]

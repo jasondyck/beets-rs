@@ -1,4 +1,4 @@
-//! Ported from beets' test/plugins/test_mbpseudo.py (the release
+//! Ported from beets' `test/plugins/test_mbpseudo.py` (the release
 //! interception and custom tags; the `PseudoAlbumInfo` view has no direct
 //! counterpart: the merged album info plays its role).
 
