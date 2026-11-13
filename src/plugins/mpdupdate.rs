@@ -10,6 +10,7 @@ use crate::config::Config;
 use crate::events::{Event, Listener};
 use crate::plugins::PluginLog;
 use std::cell::Cell;
+use std::fmt::Write as _;
 use std::io::{Read, Write};
 use std::net::TcpStream;
 use std::os::unix::net::UnixStream;
@@ -163,7 +164,7 @@ fn bytes_repr(b: &[u8]) -> String {
             b'\r' => out.push_str("\\r"),
             b'\t' => out.push_str("\\t"),
             0x20..=0x7e => out.push(c as char),
-            _ => out.push_str(&format!("\\x{c:02x}")),
+            _ => write!(out, "\\x{c:02x}").unwrap(),
         }
     }
     out.push('\'');

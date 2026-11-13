@@ -9,6 +9,7 @@ use crate::config::Config;
 use crate::mb::{AlbumInfo, TrackInfo};
 use crate::model::{FieldType, Record, Value};
 use std::collections::BTreeMap;
+use std::fmt::Write as _;
 
 /// A Python value as beets' info dicts hold them.
 #[derive(Debug, Clone, PartialEq)]
@@ -123,7 +124,7 @@ pub fn py_repr(s: &str) -> String {
                 out.push(c);
             }
             c if (c as u32) < 0x20 || c as u32 == 0x7f => {
-                out.push_str(&format!("\\x{:02x}", c as u32))
+                write!(out, "\\x{:02x}", c as u32).unwrap()
             }
             c => out.push(c),
         }

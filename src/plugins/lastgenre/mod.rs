@@ -796,15 +796,17 @@ impl LastGenre {
     /// of a Various Artists album.
     pub fn fetch_va_genres(&self, items: &[Item]) -> Vec<String> {
         let mut genres: Vec<String> = vec![];
+        // Reused for each item's track genres (and the artist fallback).
+        let mut g: Vec<String> = vec![];
         for item in items {
-            let mut g = vec![];
+            g.clear();
             if self.has_source("track") {
-                g = self.fetch(Kind::Track, item, &[]);
+                g.extend(self.fetch(Kind::Track, item, &[]));
             }
             if g.is_empty() {
-                g = self.fetch(Kind::Artist, item, &[]);
+                g.extend(self.fetch(Kind::Artist, item, &[]));
             }
-            genres.extend(g);
+            genres.append(&mut g);
         }
         match plurality(&genres) {
             Some((most, rank)) => {

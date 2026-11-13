@@ -317,15 +317,13 @@ fn set_in(root: &mut Y, key: &str, value: Y) {
             *cur = Y::Mapping(Mapping::new());
         }
         let map = cur.as_mapping_mut().unwrap();
-        let k = Y::String(part.to_string());
         if i == parts.len() - 1 {
-            map.insert(k, value);
+            map.insert(Y::String(part.to_string()), value);
             return;
         }
-        if !map.contains_key(&k) {
-            map.insert(k.clone(), Y::Mapping(Mapping::new()));
-        }
-        cur = map.get_mut(&k).unwrap();
+        cur = map
+            .entry(Y::String(part.to_string()))
+            .or_insert_with(|| Y::Mapping(Mapping::new()));
     }
 }
 

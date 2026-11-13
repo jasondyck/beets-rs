@@ -11,6 +11,7 @@ use crate::config::Config;
 use crate::library::Library;
 use crate::plugins::info::{self, PyVal};
 use anyhow::{Result, bail};
+use std::fmt::Write as _;
 use std::io::Write;
 
 /// The output formats, as `VALID_FORMATS`.
@@ -197,13 +198,13 @@ fn py_json_str(out: &mut String, s: &str, ensure_ascii: bool) {
             '\t' => out.push_str("\\t"),
             '\u{8}' => out.push_str("\\b"),
             '\u{c}' => out.push_str("\\f"),
-            c if (c as u32) < 0x20 => out.push_str(&format!("\\u{:04x}", c as u32)),
+            c if (c as u32) < 0x20 => write!(out, "\\u{:04x}", c as u32).unwrap(),
             ' '..='~' => out.push(c),
             c if !ensure_ascii => out.push(c),
             c => {
                 let mut buf = [0u16; 2];
                 for u in c.encode_utf16(&mut buf) {
-                    out.push_str(&format!("\\u{u:04x}"));
+                    write!(out, "\\u{u:04x}").unwrap();
                 }
             }
         }
@@ -261,9 +262,9 @@ fn xml_doc(rows: &[Vec<(String, String)>]) -> String {
         out.push_str("<track>");
         for (k, v) in row {
             if v.is_empty() {
-                out.push_str(&format!("<{k} />"));
+                write!(out, "<{k} />").unwrap();
             } else {
-                out.push_str(&format!("<{k}>{}</{k}>", xml_escape(v)));
+                write!(out, "<{k}>{}</{k}>", xml_escape(v)).unwrap();
             }
         }
         out.push_str("</track>");

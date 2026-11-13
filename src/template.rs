@@ -7,6 +7,7 @@
 //! call ends the template and the rest is literal text; an unterminated
 //! call is literal text; unknown symbols and functions stay verbatim.
 
+use std::fmt::Write as _;
 use unicode_normalization::UnicodeNormalization;
 
 #[derive(Debug, Clone)]
@@ -352,7 +353,7 @@ pub fn py_repr(s: &str) -> String {
                 out.push(c);
             }
             c if (c as u32) < 0x20 || c as u32 == 0x7f => {
-                out.push_str(&format!("\\x{:02x}", c as u32))
+                write!(out, "\\x{:02x}", c as u32).unwrap()
             }
             c => out.push(c),
         }

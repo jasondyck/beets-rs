@@ -20,6 +20,7 @@ use crate::plugins::{DEBUG, INFO, ImportTask, Plugin, PluginCtx, PluginLog};
 use crate::query::{Obj, Query, normpath};
 use anyhow::{Result, anyhow, bail};
 use serde_yaml::Value as Y;
+use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -736,7 +737,7 @@ fn py_bytes_repr(b: &[u8]) -> String {
             b'\r' => out.push_str("\\r"),
             b'\t' => out.push_str("\\t"),
             0x20..=0x7e => out.push(c as char),
-            _ => out.push_str(&format!("\\x{c:02x}")),
+            _ => write!(out, "\\x{c:02x}").unwrap(),
         }
     }
     out.push('\'');
