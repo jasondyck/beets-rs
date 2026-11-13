@@ -2289,10 +2289,9 @@ impl<'a> Importer<'a> {
                 p.import_task_choice(asis);
                 Ok(())
             });
-            self.send_task_event(
-                "import_task_choice",
-                &self.task_info(items, paths, !album, None),
-            );
+            let mut info = self.task_info(items, paths, !album, None);
+            info.skip = matches!(d, Decision::Skip);
+            self.send_task_event("import_task_choice", &info);
         }
         match d {
             Decision::Skip => self.tag_log("skip", paths),

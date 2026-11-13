@@ -67,6 +67,8 @@ pub struct TaskInfo {
     pub reimported_item_ids: Vec<i64>,
     /// Directories of the albums the task replaced.
     pub replaced_album_paths: Vec<PathBuf>,
+    /// The task was skipped at the match prompt.
+    pub skip: bool,
 }
 
 /// One keyword argument of an event.
