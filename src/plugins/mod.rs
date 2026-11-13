@@ -3,18 +3,24 @@
 //! their own subcommands (wired up in `main.rs`/`commands.rs`).
 
 pub mod art;
+pub mod badfiles;
 pub mod chroma;
 pub mod convert;
 pub mod duplicates;
 pub mod edit;
 pub mod embedart;
 pub mod fetchart;
+pub mod filefilter;
 pub mod ftintitle;
+pub mod hook;
+pub mod ihate;
+pub mod importadded;
 pub mod info;
 pub mod lastgenre;
 pub mod lyrics;
 pub mod mbsync;
 pub mod missing;
+pub mod permissions;
 pub mod replaygain;
 pub mod requests;
 pub mod rewrite;
@@ -27,6 +33,7 @@ pub mod smartplaylist;
 pub mod substitute;
 pub mod the;
 pub mod types;
+pub mod unimported;
 pub mod web;
 // 5.18c: export and media-server plugins.
 pub mod export;
@@ -82,6 +89,17 @@ pub struct ImportTask<'t> {
 pub trait Plugin {
     fn name(&self) -> &'static str;
 
+    /// beets' `import_task_created`: filter the task's items, or drop the
+    /// task entirely (false) before it is looked up.
+    fn import_task_created(
+        &self,
+        _ctx: &PluginCtx,
+        _items: &mut Vec<Item>,
+        _singleton: bool,
+    ) -> Result<bool> {
+        Ok(true)
+    }
+
     fn early_import_stage(&self, _ctx: &PluginCtx, _task: &mut ImportTask) -> Result<()> {
         Ok(())
     }
@@ -127,15 +145,53 @@ pub trait Plugin {
     fn import_task_apply(&self, _ctx: &PluginCtx, _task: &mut ImportTask) -> Result<()> {
         Ok(())
     }
+
+    /// beets' `import_task_choice`, for a listener that may change the
+    /// choice: true turns it into a skip (ihate).
+    fn import_task_choice_skip(&self, _ctx: &PluginCtx, _task: &ChoiceInfo) -> bool {
+        false
+    }
+
+    /// beets' `import_task_start` and `import_task_before_choice` (after
+    /// the task's header, before the match is chosen): a listener may
+    /// skip the task or abort the import (badfiles).
+    fn import_task_before_choice(&self, _ctx: &PluginCtx, _items: &[Item]) -> Result<BeforeChoice> {
+        Ok(BeforeChoice::Continue)
+    }
+}
+
+/// What `import_task_before_choice` decided.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BeforeChoice {
+    Continue,
+    Skip,
+    Abort,
+}
+
+/// What an `import_task_choice` listener sees of the task.
+pub struct ChoiceInfo<'a> {
+    /// `task.imported_items()`: the matched items for an applied match.
+    pub imported_items: &'a [Item],
+    /// An album task (queries are parsed for albums).
+    pub album: bool,
+    /// A match was applied (`Action.APPLY`).
+    pub apply: bool,
+    /// `task.source.desc`: "artist - album" (or "artist - title").
+    pub desc: String,
 }
 
 pub const AVAILABLE: &[&str] = &[
+    "badfiles",
     "chroma",
     "duplicates",
     "edit",
     "embedart",
     "fetchart",
+    "filefilter",
     "ftintitle",
+    "hook",
+    "ihate",
+    "importadded",
     "info",
     "inline",
     "lastgenre",
@@ -143,6 +199,7 @@ pub const AVAILABLE: &[&str] = &[
     "mbsync",
     "missing",
     "musicbrainz",
+    "permissions",
     "replaygain",
     "convert",
     "scrub",
@@ -157,6 +214,7 @@ pub const AVAILABLE: &[&str] = &[
     "bucket",
     "albumtypes",
     "fromfilename",
+    "unimported",
     "random",
     "export",
     "playlist",
@@ -211,7 +269,7 @@ pub fn load(cfg: &Config) -> Result<Vec<Box<dyn Plugin>>> {
             "albumtypes" => out.push(Box::new(albumtypes::AlbumTypesPlugin)),
             "fromfilename" => out.push(Box::new(fromfilename::FromFilenamePlugin)),
             "random" => out.push(Box::new(random::RandomPlugin)),
-            "playlist" => out.push(Box::new(playlist::PlaylistPlugin)),
+            "playlist" => out.push(Box::new(playlist::load(cfg))),
             "parentwork" => out.push(Box::new(parentwork::ParentWorkPlugin::new(cfg))),
             "export" => match export::ExportPlugin::new(cfg) {
                 Ok(p) => out.push(Box::new(p)),
@@ -223,6 +281,19 @@ pub fn load(cfg: &Config) -> Result<Vec<Box<dyn Plugin>>> {
                 rewrite::Rewriter::advanced(cfg)?;
                 out.push(Box::new(rewrite::RewritePlugin("advancedrewrite")));
             }
+            "badfiles" => out.push(Box::new(badfiles::load(cfg))),
+            "filefilter" => match filefilter::FileFilter::new(cfg) {
+                Ok(_) => out.push(Box::new(filefilter::FileFilterPlugin)),
+                Err(e) => crate::logging::emit(format!("** error loading plugin {name}\n{e:#}")),
+            },
+            "hook" => match hook::load(cfg) {
+                Ok(p) => out.push(Box::new(p)),
+                Err(e) => crate::logging::emit(format!("** error loading plugin {name}\n{e:#}")),
+            },
+            "ihate" => out.push(Box::new(ihate::load(cfg))),
+            "importadded" => out.push(Box::new(importadded::load(cfg))),
+            "permissions" => out.push(Box::new(permissions::load(cfg))),
+            "unimported" => out.push(Box::new(unimported::UnimportedPlugin)),
             "ftintitle" => out.push(Box::new(ftintitle::FtInTitle::new(cfg))),
             "duplicates" => out.push(Box::new(duplicates::DuplicatesPlugin)),
             "scrub" => out.push(Box::new(scrub::Scrub::new(cfg))),

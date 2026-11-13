@@ -129,6 +129,10 @@ pub fn run(cli: Cli) -> Result<()> {
         }
         return Err(e);
     }
+    // beets' `pluginload` (once the plugins are set up) and
+    // `library_opened`.
+    crate::events::send("pluginload", &[]);
+    crate::events::send("library_opened", &[("lib", crate::events::Arg::Lib(&lib))]);
     let result = match cmd {
         Cmd::Import {
             copy,
@@ -241,6 +245,15 @@ pub fn run(cli: Cli) -> Result<()> {
                 bail!("can't be both quiet and timid");
             }
             let pretend = opts.pretend;
+            // beets' `import` event: the paths as given (none for -L).
+            let given: Vec<PathBuf> = if library { vec![] } else { paths.clone() };
+            crate::events::send(
+                "import",
+                &[
+                    ("lib", crate::events::Arg::Lib(&lib)),
+                    ("paths", crate::events::Arg::Paths(&given)),
+                ],
+            );
             let mut imp = Importer::new(&cfg, &lib, opts, &plugins)?;
             if library {
                 let query: Vec<String> = paths
@@ -251,22 +264,21 @@ pub fn run(cli: Cli) -> Result<()> {
             } else {
                 imp.run(&paths)?;
             }
-            if pretend {
-                return Ok(());
+            if !pretend {
+                // beets prints no summary after an import; keep ours for -v.
+                let s = &imp.stats;
+                let already = if s.already > 0 {
+                    format!("; {} already imported earlier", s.already)
+                } else {
+                    String::new()
+                };
+                crate::logging::debug!(
+                    "Imported {} album(s), {} item(s); skipped {}{already}.",
+                    s.albums,
+                    s.items,
+                    s.skipped
+                );
             }
-            // beets prints no summary after an import; keep ours for -v.
-            let s = &imp.stats;
-            let already = if s.already > 0 {
-                format!("; {} already imported earlier", s.already)
-            } else {
-                String::new()
-            };
-            crate::logging::debug!(
-                "Imported {} album(s), {} item(s); skipped {}{already}.",
-                s.albums,
-                s.items,
-                s.skipped
-            );
             Ok(())
         }
         Cmd::List {
@@ -728,6 +740,18 @@ pub fn run(cli: Cli) -> Result<()> {
                 },
             )
         }
+        Cmd::Bad {
+            verbose,
+            limit,
+            query,
+        } => {
+            require_plugin(&cfg, "badfiles")?;
+            plugins::badfiles::command(&cfg, &lib, verbose, limit, &query)
+        }
+        Cmd::Unimported => {
+            require_plugin(&cfg, "unimported")?;
+            plugins::unimported::command(&cfg, &lib)
+        }
         Cmd::Missing {
             count,
             total,
@@ -870,9 +894,10 @@ pub fn run(cli: Cli) -> Result<()> {
         ),
         Cmd::Config { .. } | Cmd::Version | Cmd::Help { .. } => unreachable!(),
     };
-    // beets' `cli_exit` event, after a command that succeeded.
+    // beets' `cli_exit`, after a command that didn't fail (the playlist
+    // plugin updates its playlists from it).
     if result.is_ok() {
-        crate::plugins::playlist::cli_exit(&cfg, &lib);
+        crate::events::send("cli_exit", &[("lib", crate::events::Arg::Lib(&lib))]);
     }
     result
 }
@@ -1553,8 +1578,6 @@ pub(crate) fn remove_item(
     with_album: bool,
 ) -> Result<()> {
     lib.remove(item)?;
-    // beets' `item_removed` event, before `rm -d` deletes the file.
-    crate::plugins::playlist::item_removed(cfg, item.path());
     let id = item.int("album_id");
     if with_album
         && id != 0
@@ -1562,6 +1585,10 @@ pub(crate) fn remove_item(
         && lib.album_items(id)?.is_empty()
     {
         remove_album(cfg, lib, &a, delete, false)?;
+    }
+    // beets' `item_removed` event.
+    if crate::events::listening("item_removed") {
+        crate::events::send("item_removed", &[("item", crate::events::Arg::Item(item))]);
     }
     if delete {
         remove_file(item.path());
@@ -1587,6 +1614,13 @@ pub(crate) fn remove_album(
         vec![]
     };
     lib.remove(album)?;
+    // beets' `album_removed` event.
+    if crate::events::listening("album_removed") {
+        crate::events::send(
+            "album_removed",
+            &[("album", crate::events::Arg::Album(album))],
+        );
+    }
     if delete {
         remove_file(album.path_field("artpath"));
     }
@@ -1890,10 +1924,10 @@ pub(crate) fn move_item_file(
     if src == dest {
         return Ok(true);
     }
+    // beets' `Item.move_file` events.
+    crate::events::send_file_op(op, true, item, &src, &dest);
     fileops::transfer(op, &src, &dest)?;
-    if op == FileOp::Move {
-        crate::plugins::playlist::item_moved(cfg, &src, &dest);
-    }
+    crate::events::send_file_op(op, false, item, &src, &dest);
     item.set_path(dest);
     if op == FileOp::Move
         && let Some(p) = src.parent()
@@ -2517,7 +2551,14 @@ mod tests {
 
     #[test]
     fn help_for_unknown_commands_is_an_error() {
-        let e = help(Some("frob")).unwrap_err();
+        // Parsing the full command line (clap builds every subcommand) needs
+        // a deeper stack than a test thread's 2 MiB in debug builds.
+        let e = std::thread::Builder::new()
+            .stack_size(8 << 20)
+            .spawn(|| help(Some("frob")).unwrap_err())
+            .unwrap()
+            .join()
+            .unwrap();
         assert_eq!(e.to_string(), "unknown command 'frob'");
     }
 

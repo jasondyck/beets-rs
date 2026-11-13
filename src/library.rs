@@ -741,6 +741,11 @@ impl Library {
         Self::init(conn, music_dir, backup.then_some(path))
     }
 
+    /// The library directory (beets' `lib.directory`), if set.
+    pub fn music_dir(&self) -> Option<&Path> {
+        self.music_dir.as_deref()
+    }
+
     #[cfg(test)]
     pub fn in_memory() -> Result<Self> {
         Self::init(Connection::open_in_memory()?, None, None)
@@ -832,6 +837,7 @@ impl Library {
         let id = self.conn.last_insert_rowid();
         rec.id = Some(id);
         self.store_flex(rec)?;
+        self.changed(rec);
         Ok(id)
     }
 
@@ -844,7 +850,22 @@ impl Library {
         self.conn
             .prepare_cached(store_sql(rec.kind))?
             .execute(rusqlite::params_from_iter(vals))?;
-        self.store_flex(rec)
+        self.store_flex(rec)?;
+        self.changed(rec);
+        Ok(())
+    }
+
+    /// beets' `database_change` event, after a record is written.
+    fn changed(&self, rec: &Record) {
+        if crate::events::listening("database_change") {
+            crate::events::send(
+                "database_change",
+                &[
+                    ("lib", crate::events::Arg::Lib(self)),
+                    ("model", crate::events::Arg::Model(rec)),
+                ],
+            );
+        }
     }
 
     fn store_flex(&self, rec: &Record) -> Result<()> {
@@ -877,6 +898,7 @@ impl Library {
                 [id],
             )?;
         }
+        self.changed(rec);
         Ok(())
     }
 

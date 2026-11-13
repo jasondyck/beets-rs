@@ -399,6 +399,10 @@ pub fn set_art(ctx: &PluginCtx, album: &mut Album, path: &Path, copy: bool) -> a
         crate::fileops::move_file(path, &artdest)?;
     }
     album.set("artpath", crate::model::Value::Path(artdest));
+    // beets' `art_set` event (embedart embeds it, permissions fixes it).
+    if crate::events::listening("art_set") {
+        crate::events::send("art_set", &[("album", crate::events::Arg::Album(album))]);
+    }
     super::send_art_set(ctx, album);
     Ok(())
 }

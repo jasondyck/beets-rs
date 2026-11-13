@@ -410,6 +410,28 @@ fn write_event(
         l.write(&mut tags);
     }
     let nulls = tags.nulls;
+    // beets' `write` event: the tags about to be written.
+    if crate::events::listening("write") {
+        let mut kv: Vec<(String, String)> = vec![];
+        for f in TAG_FIELDS {
+            if item.get(f).is_some() && !nulls.contains(*f) {
+                kv.push(((*f).to_string(), py_value_str(item, f)));
+            }
+        }
+        for (k, v) in &tags.extra {
+            if !nulls.contains(*k) {
+                kv.push(((*k).to_string(), v.clone()));
+            }
+        }
+        crate::events::send(
+            "write",
+            &[
+                ("item", crate::events::Arg::Item(item)),
+                ("path", crate::events::Arg::Path(path)),
+                ("tags", crate::events::Arg::Tags(&kv)),
+            ],
+        );
+    }
     let mut mf = MediaFile::open(path)?;
     mf.update_with(item, &nulls);
     match extra {
@@ -433,6 +455,16 @@ fn write_event(
         mf.set_synced_lyrics(&[]);
     }
     mf.save(id3v23)?;
+    // beets' `after_write`: importadded may put the file's mtime back.
+    if crate::events::listening("after_write") {
+        crate::events::send(
+            "after_write",
+            &[
+                ("item", crate::events::Arg::Item(item)),
+                ("path", crate::events::Arg::Path(path)),
+            ],
+        );
+    }
     Ok(tags.item_nulls)
 }
 

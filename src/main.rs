@@ -5,6 +5,7 @@ mod config;
 mod diff;
 mod display;
 mod duplicates;
+mod events;
 mod fileops;
 mod formatted;
 mod hooks;
@@ -612,6 +613,19 @@ pub enum Cmd {
         output: Option<String>,
         names: Vec<String>,
     },
+    /// Check for corrupt or missing files (plugin: badfiles)
+    Bad {
+        /// View results for both the bad and uncorrupted files
+        #[arg(short = 'v', long)]
+        verbose: bool,
+        /// Limit query results
+        #[arg(short = 'l', long)]
+        limit: Option<usize>,
+        #[arg(allow_hyphen_values = true)]
+        query: Vec<String>,
+    },
+    /// List all files in the library folder which are not listed in the beets library database (plugin: unimported)
+    Unimported,
     /// List missing tracks (plugin: missing)
     #[command(visible_alias = "miss")]
     Missing {
@@ -927,13 +941,28 @@ mod tests {
     use super::*;
     use clap::CommandFactory;
 
+    /// Run `f` with a deeper stack: clap's derive builds the whole command
+    /// tree on the stack, more than a test thread's 2 MiB in debug builds.
+    fn on_big_stack<R: Send + 'static>(f: impl FnOnce() -> R + Send + 'static) -> R {
+        std::thread::Builder::new()
+            .stack_size(8 << 20)
+            .spawn(f)
+            .unwrap()
+            .join()
+            .unwrap()
+    }
+
     fn parse(args: &[&str]) -> Result<Cli, clap::Error> {
-        parse_cli(std::iter::once("beet").chain(args.iter().copied()))
+        let args: Vec<String> = std::iter::once("beet")
+            .chain(args.iter().copied())
+            .map(String::from)
+            .collect();
+        on_big_stack(move || parse_cli(args))
     }
 
     #[test]
     fn cli_definition_is_valid() {
-        Cli::command().debug_assert();
+        on_big_stack(|| Cli::command().debug_assert());
     }
 
     #[test]

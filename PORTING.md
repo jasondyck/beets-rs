@@ -79,7 +79,7 @@ Done: fetchart (filesystem + CAA), lyrics (LRCLIB), embedart.
 - [x] **5.16 web**: HTTP JSON API compatible with beets' web plugin (`/item/`, `/album/`, queries, `/item/<id>/file`), plus a minimal browser UI
 - [x] **5.17 types**: declare flex attribute types (int/float/bool/date) for queries and sorting; also a framework for plugins' own `item_types`/`album_types` (e.g. lyrics_instrumental should format as True/False)
 - [x] **5.18a Template/path plugins**: rewrite, advancedrewrite, substitute, bucket, albumtypes, fromfilename
-- [ ] **5.18b Import/file plugins**: importadded, permissions, hook, ihate, filefilter, badfiles, unimported
+- [x] **5.18b Import/file plugins**: importadded, permissions, hook, ihate, filefilter, badfiles, unimported
 - [ ] **5.18c Export/media-server plugins**: random, export, playlist, mbcollection, parentwork, mpdupdate, plexupdate, kodiupdate, subsonicupdate, listenbrainz, lastimport
 - [ ] **5.19 Metadata source plugins**: discogs, spotify, deezer, beatport (as extra candidate sources)
 - [ ] **5.20 Rarely used**: bpd, aura, play, keyfinder, autobpm, bpm, absubmit, mbsubmit, metasync, thumbnails, importfeeds, fish, loadext, fuzzy, bareasc, limit, titlecase

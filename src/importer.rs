@@ -5,6 +5,7 @@ use crate::autotag::{self, AlbumMatch, Recommendation, TrackMatch};
 use crate::config::Config;
 use crate::display::Display;
 use crate::duplicates::{self, DuplicateAction, Found, KeyValues};
+use crate::events::{self, Arg as EArg, TaskInfo};
 use crate::fileops::{self, FileOp, Globs, WalkFilter, prune_dirs};
 use crate::formatted::Formatted;
 use crate::library::Library;
@@ -24,6 +25,9 @@ use std::io::Write as _;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, LazyLock};
 use std::time::SystemTime;
+
+/// The import session object plugin listeners see (`session`).
+const SESSION: &str = "beets.ui.commands.import_.session.TerminalImportSession";
 
 pub struct ImportOptions {
     pub op: FileOp,
@@ -256,6 +260,22 @@ pub struct Stats {
     pub skipped: usize,
     /// Directories passed over because an earlier import already handled them.
     pub already: usize,
+}
+
+/// beets' `task.source.desc` for an album task ("artist - album").
+fn describe_album(items: &[Item]) -> String {
+    let first = |f: &str| {
+        items
+            .first()
+            .map(|i| i.str(f).to_string())
+            .unwrap_or_default()
+    };
+    format!("{} - {}", first("artist"), first("album"))
+}
+
+/// beets' `task.source.desc` for a singleton task ("artist - title").
+fn describe_item(item: &Item) -> String {
+    format!("{} - {}", item.str("artist"), item.str("title"))
 }
 
 enum Decision<M> {
@@ -513,6 +533,9 @@ pub struct Importer<'a> {
     lookups: HashMap<Vec<PathBuf>, Looked>,
     /// The import path being worked through, for "Rescan directory".
     current: Option<CurrentTop>,
+    /// Tasks created (`import_task_created` let them through), for beets'
+    /// "No files imported from" warning.
+    created: usize,
     /// Albums added to the library but not yet placed. With the threaded
     /// pipeline beets adds tasks ahead of file placement, so `%aunique`
     /// sees later albums of the same run; these are placed one album later
@@ -758,6 +781,7 @@ impl<'a> Importer<'a> {
             prepared: None,
             lookups: HashMap::new(),
             current: None,
+            created: 0,
             pending_albums: VecDeque::new(),
             merged: HashSet::new(),
             clutter: fileops::clutter(cfg),
@@ -776,12 +800,13 @@ impl<'a> Importer<'a> {
 
     /// Take each task's first lookup from `src` instead of MusicBrainz.
     #[cfg(test)]
-    fn with_source(mut self, src: Arc<dyn CandidateSource>) -> Self {
+    pub(crate) fn with_source(mut self, src: Arc<dyn CandidateSource>) -> Self {
         self.source = src;
         self
     }
 
     pub fn run(&mut self, paths: &[PathBuf]) -> Result<()> {
+        events::send("import_begin", &[("session", EArg::Opaque(SESSION))]);
         if self.log.is_some() {
             // Python's time.asctime(), as in beets' "import started" line.
             let now = chrono::Local::now().format("%a %b %e %H:%M:%S %Y");
@@ -802,14 +827,15 @@ impl<'a> Importer<'a> {
             roots: paths.iter().map(|_| None).collect(),
         };
         let mut ahead = (self.opts.threaded && !self.opts.pretend).then(|| self.start_pipeline());
-        for (ri, p) in paths.iter().enumerate() {
-            let p = std::fs::canonicalize(p)
-                .with_context(|| format!("no such file or directory: {}", p.display()))?;
+        for (ri, original) in paths.iter().enumerate() {
+            let p = std::fs::canonicalize(original)
+                .with_context(|| format!("no such file or directory: {}", original.display()))?;
             self.roots.push(if p.is_dir() {
                 p.clone()
             } else {
                 p.parent().unwrap_or(&p).to_path_buf()
             });
+            let created_before = self.created;
             let done = if track_progress {
                 self.resume_point(&p)?
             } else {
@@ -856,6 +882,7 @@ impl<'a> Importer<'a> {
                 }
                 if self.opts.pretend {
                     self.log_files(&key, &group)?;
+                    self.created += 1;
                     continue;
                 }
                 let outcome = if self.opts.singletons {
@@ -895,6 +922,11 @@ impl<'a> Importer<'a> {
             }
             if track_progress && self.state.progress.remove(&p).is_some() {
                 self.state.save(&self.state_path)?;
+            }
+            // beets' `read_tasks`: no task survived (no files, or a plugin
+            // dropped them all).
+            if self.created == created_before {
+                crate::logging::emit(format!("No files imported from {}", original.display()));
             }
         }
         self.flush_pending_albums()?;
@@ -1137,6 +1169,7 @@ impl<'a> Importer<'a> {
     /// albums (or one by one with `-s`), as beets' `query_tasks`. There is
     /// no resume or incremental state for query imports.
     pub fn run_library(&mut self, query: &[String]) -> Result<()> {
+        events::send("import_begin", &[("session", EArg::Opaque(SESSION))]);
         use crate::model::Kind;
         use crate::query::Query;
         if self.log.is_some() {
@@ -1353,6 +1386,14 @@ impl<'a> Importer<'a> {
         paths: &[PathBuf],
         rescan: bool,
     ) -> Result<Outcome> {
+        // beets' `import_task_created`: plugins may filter the items or
+        // drop the task (filefilter).
+        if !self.task_created(&mut items, false)? {
+            return Ok(Outcome::Done);
+        }
+        let created = self.task_info(&items, paths, false, None);
+        self.send_task_event("import_task_created", &created);
+        self.created += 1;
         // As beets: the task's paths, one per line. With autotagging this is
         // `choose_match`'s header on stdout; without it beets never calls
         // `choose_match` and `import_asis` only logs the paths at info level,
@@ -1374,9 +1415,11 @@ impl<'a> Importer<'a> {
         if self.opts.autotag {
             plugins::fromfilename::task_start(self.cfg, &mut items, true);
         }
+        let started = self.task_info(&items, paths, false, None);
+        self.send_task_event("import_task_start", &started);
         let decision = if self.opts.autotag {
-            let d = self.choose_album(&items, rescan)?;
-            self.log_choice(&d, paths);
+            let d = self.choose_album(&items, paths, rescan)?;
+            self.log_choice(&d, paths, &items, true);
             d
         } else {
             Decision::AsIs
@@ -1425,6 +1468,13 @@ impl<'a> Importer<'a> {
                 idx += 1;
                 k
             });
+            // beets' `import_task_choice` listeners may turn an applied
+            // match into a skip (ihate).
+            if self.choice_skips(&applied, true, &describe_album(&applied)) {
+                self.tag_log("skip", paths);
+                self.stats.skipped += 1;
+                return Ok(Outcome::Skipped);
+            }
             match applied.first() {
                 Some(first) => duplicates::key_values(first, &album_keys),
                 None => duplicates::likely_key_values(&items, &album_keys),
@@ -1466,7 +1516,12 @@ impl<'a> Importer<'a> {
         Ok(Outcome::Done)
     }
 
-    fn choose_album(&mut self, items: &[Item], rescan: bool) -> Result<Decision<AlbumMatch>> {
+    fn choose_album(
+        &mut self,
+        items: &[Item],
+        paths: &[PathBuf],
+        rescan: bool,
+    ) -> Result<Decision<AlbumMatch>> {
         // The task's items as plugins' prompt choices see (and change) them.
         let mut cur = items.to_vec();
         let (mut cands, mut rec) = match self.prefetched(items) {
@@ -1474,6 +1529,12 @@ impl<'a> Importer<'a> {
             Some(Err(e)) => return Err(e),
             _ => self.source.album(items)?,
         };
+        // Plugins may skip or abort before the match prompt (badfiles).
+        match self.before_choice(items, paths, false)? {
+            plugins::BeforeChoice::Skip => return Ok(Decision::Skip),
+            plugins::BeforeChoice::Abort => return Ok(Decision::Abort),
+            plugins::BeforeChoice::Continue => {}
+        }
 
         // `fresh`: candidates just (re)fetched, so quiet/strong handling
         // applies. `focus`: the candidate shown for confirmation, with
@@ -2077,6 +2138,30 @@ impl<'a> Importer<'a> {
             op,
         };
         plugins::each(self.plugins, |p| p.import_task_files(&ctx, &mut task));
+        // beets' `import_task_files` event (importadded records reimports).
+        {
+            let mut info = self.task_info(&items, &paths, false, Some(&album));
+            info.reimported_item_ids = items
+                .iter()
+                .zip(&replaced.items)
+                .filter(|(_, dups)| !dups.is_empty())
+                .filter_map(|(i, _)| i.id)
+                .collect();
+            info.replaced_album_paths = replaced
+                .albums
+                .iter()
+                .filter_map(|a| {
+                    let id = a.id?;
+                    replaced
+                        .items
+                        .iter()
+                        .flatten()
+                        .find(|d| d.int("album_id") == id)
+                        .and_then(|d| d.path().parent().map(Path::to_path_buf))
+                })
+                .collect();
+            self.send_task_event("import_task_files", &info);
+        }
         self.delete_originals(&copied);
         if op == FileOp::Move
             && let Some(root) = &root
@@ -2084,6 +2169,12 @@ impl<'a> Importer<'a> {
             prune_dirs(&source_dir, root, &self.clutter);
         }
         plugins::each(self.plugins, |p| p.album_imported(&ctx, &album));
+        if events::listening("album_imported") {
+            events::send(
+                "album_imported",
+                &[("lib", EArg::Lib(self.lib)), ("album", EArg::Album(&album))],
+            );
+        }
         self.stats.albums += 1;
         self.stats.items += n;
         Ok(())
@@ -2108,6 +2199,10 @@ impl<'a> Importer<'a> {
             op: self.opts.op,
         };
         plugins::each(self.plugins, |p| p.import_task_apply(&ctx, &mut task));
+        self.send_task_event(
+            "import_task_apply",
+            &self.task_info(items, paths, false, None),
+        );
     }
 
     /// beets' plugin stages (`plugin_stage`): every plugin's early import
@@ -2187,13 +2282,17 @@ impl<'a> Importer<'a> {
     /// beets' `log_choice` for a prompt decision: skips and as-is imports.
     /// Also sends beets' `import_task_choice` event (not for an abort,
     /// which ends the import first).
-    fn log_choice<M>(&mut self, d: &Decision<M>, paths: &[PathBuf]) {
+    fn log_choice<M>(&mut self, d: &Decision<M>, paths: &[PathBuf], items: &[Item], album: bool) {
         if !matches!(d, Decision::Abort) {
             let asis = matches!(d, Decision::AsIs);
             plugins::each(self.plugins, |p| {
                 p.import_task_choice(asis);
                 Ok(())
             });
+            self.send_task_event(
+                "import_task_choice",
+                &self.task_info(items, paths, !album, None),
+            );
         }
         match d {
             Decision::Skip => self.tag_log("skip", paths),
@@ -2239,6 +2338,99 @@ impl<'a> Importer<'a> {
         }
     }
 
+    /// What import task events carry (`task`: its items, paths and album).
+    fn task_info(
+        &self,
+        items: &[Item],
+        paths: &[PathBuf],
+        singleton: bool,
+        album: Option<&Album>,
+    ) -> TaskInfo {
+        TaskInfo {
+            items: items.to_vec(),
+            paths: paths.to_vec(),
+            singleton,
+            album: album.cloned(),
+            in_place: self.opts.op == FileOp::None,
+            ..TaskInfo::default()
+        }
+    }
+
+    /// beets' `plugins.send(name, session=..., task=...)`.
+    fn send_task_event(&self, name: &'static str, task: &TaskInfo) {
+        if events::listening(name) {
+            events::send(
+                name,
+                &[
+                    ("session", EArg::Opaque(SESSION)),
+                    ("task", EArg::Task(task)),
+                ],
+            );
+        }
+    }
+
+    /// beets' `import_task_created`, for album and singleton tasks alike:
+    /// every plugin's, in order; false drops the task.
+    fn task_created(&self, items: &mut Vec<Item>, singleton: bool) -> Result<bool> {
+        if self.plugins.is_empty() {
+            return Ok(true);
+        }
+        let ctx = self.plugin_ctx();
+        for p in self.plugins {
+            if !p.import_task_created(&ctx, items, singleton)? {
+                return Ok(false);
+            }
+        }
+        Ok(!items.is_empty())
+    }
+
+    /// beets' `import_task_before_choice`: the plugins may return an
+    /// action (skip or abort) instead of asking.
+    fn before_choice(
+        &self,
+        items: &[Item],
+        paths: &[PathBuf],
+        singleton: bool,
+    ) -> Result<plugins::BeforeChoice> {
+        let info = self.task_info(items, paths, singleton, None);
+        self.send_task_event("import_task_before_choice", &info);
+        let ctx = self.plugin_ctx();
+        let mut actions = vec![];
+        for p in self.plugins {
+            let a = p.import_task_before_choice(&ctx, items)?;
+            if a != plugins::BeforeChoice::Continue {
+                actions.push(a);
+            }
+        }
+        if actions.len() > 1 {
+            eprintln!(
+                "error: Only one handler for `import_task_before_choice` may return an action."
+            );
+        }
+        Ok(actions
+            .first()
+            .copied()
+            .unwrap_or(plugins::BeforeChoice::Continue))
+    }
+
+    /// beets' `import_task_choice` listeners that may skip a task whose
+    /// match is applied (ihate).
+    fn choice_skips(&self, imported_items: &[Item], album: bool, desc: &str) -> bool {
+        if self.plugins.is_empty() {
+            return false;
+        }
+        let ctx = self.plugin_ctx();
+        let info = plugins::ChoiceInfo {
+            imported_items,
+            album,
+            apply: true,
+            desc: desc.to_string(),
+        };
+        self.plugins
+            .iter()
+            .any(|p| p.import_task_choice_skip(&ctx, &info))
+    }
+
     /// beets' `import.delete` (`ImportTask.cleanup`): once the album is
     /// stored, remove the files that were copied into the library and prune
     /// the directories they leave empty, up to the import path.
@@ -2272,7 +2464,10 @@ impl<'a> Importer<'a> {
         let mut copied = None;
         if op != FileOp::None && dest != src {
             let dest = fileops::unique_path(&dest);
+            // beets' `Item.move_file` events.
+            events::send_file_op(op, true, item, &src, &dest);
             fileops::transfer(op, &src, &dest)?;
+            events::send_file_op(op, false, item, &src, &dest);
             item.set_path(dest);
             if op == FileOp::Move {
                 // Files moved within the library prune up to the library root.
@@ -2312,6 +2507,18 @@ impl<'a> Importer<'a> {
     }
 
     fn import_singleton_item(&mut self, mut item: Item) -> Result<Outcome> {
+        // beets' `import_task_created` (filefilter).
+        let mut items = vec![item];
+        if !self.task_created(&mut items, true)? {
+            return Ok(Outcome::Done);
+        }
+        item = items.remove(0);
+        let paths = [item.path().to_path_buf()];
+        self.send_task_event(
+            "import_task_created",
+            &self.task_info(std::slice::from_ref(&item), &paths, true, None),
+        );
+        self.created += 1;
         // beets: `choose_item`'s header when autotagging, else an info log
         // line on stderr (see `import_album_items`).
         if self.opts.autotag {
@@ -2320,13 +2527,16 @@ impl<'a> Importer<'a> {
         } else {
             eprintln!("{}", item.path().display());
         }
-        let paths = [item.path().to_path_buf()];
         if self.opts.autotag {
             plugins::fromfilename::task_start(self.cfg, std::slice::from_mut(&mut item), true);
         }
+        self.send_task_event(
+            "import_task_start",
+            &self.task_info(std::slice::from_ref(&item), &paths, true, None),
+        );
         let decision = if self.opts.autotag {
-            let d = self.choose_item(&item)?;
-            self.log_choice(&d, &paths);
+            let d = self.choose_item(&item, &paths)?;
+            self.log_choice(&d, &paths, std::slice::from_ref(&item), false);
             d
         } else {
             Decision::AsIs
@@ -2345,6 +2555,12 @@ impl<'a> Importer<'a> {
                 }
                 autotag::apply_track(self.cfg, &mut item, &m.info);
                 self.send_task_apply(std::slice::from_mut(&mut item), &paths);
+                let desc = describe_item(&item);
+                if self.choice_skips(std::slice::from_ref(&item), false, &desc) {
+                    self.tag_log("skip", &paths);
+                    self.stats.skipped += 1;
+                    return Ok(Outcome::Skipped);
+                }
                 true
             }
             Decision::Retag(mut edited) => {
@@ -2385,11 +2601,15 @@ impl<'a> Importer<'a> {
         let replaced = lib.transaction(|lib| {
             let replaced = self.record_replaced(std::slice::from_ref(&item))?;
             self.remove_replaced(&replaced)?;
-            self.reimport_metadata(None, std::slice::from_mut(&mut item), &replaced);
             self.apply_set_fields(None, std::slice::from_mut(&mut item));
             // As beets: added before its files are placed, so the path
             // format sees the item's id (`%sunique`).
             lib.add(&mut item)?;
+            // beets' `reimport_metadata`: `added` and flex from the rows
+            // this reimport replaced (after `add` stamped the new ones).
+            self.reimport_metadata(None, std::slice::from_mut(&mut item), &replaced);
+            // `reimport_metadata` stores each preserved item (beets).
+            lib.store(&item)?;
             Ok(replaced)
         })?;
         let op = self.file_op(&item, !replaced.items[0].is_empty());
@@ -2408,8 +2628,26 @@ impl<'a> Importer<'a> {
             op: self.opts.op,
         };
         plugins::each(self.plugins, |p| p.import_task_files(&ctx, &mut task));
+        // beets' `import_task_files` event (importadded records reimports).
+        {
+            let mut info = self.task_info(std::slice::from_ref(&item), &paths, true, None);
+            info.reimported_item_ids = (if replaced.items[0].is_empty() {
+                None
+            } else {
+                item.id
+            })
+            .into_iter()
+            .collect();
+            self.send_task_event("import_task_files", &info);
+        }
         self.delete_originals(copied.as_slice());
         plugins::each(self.plugins, |p| p.item_imported(&ctx, &item));
+        if events::listening("item_imported") {
+            events::send(
+                "item_imported",
+                &[("lib", EArg::Lib(self.lib)), ("item", EArg::Item(&item))],
+            );
+        }
         self.stats.items += 1;
         Ok(Outcome::Done)
     }
@@ -2422,13 +2660,18 @@ impl<'a> Importer<'a> {
         }
     }
 
-    fn choose_item(&mut self, item: &Item) -> Result<Decision<TrackMatch>> {
+    fn choose_item(&mut self, item: &Item, paths: &[PathBuf]) -> Result<Decision<TrackMatch>> {
         // An album's lookup for a lone track ("as Tracks") isn't this one.
         let (mut cands, mut rec) = match self.prefetched(std::slice::from_ref(item)) {
             Some(Ok(Candidates::Track(c, r))) => (c, r),
             Some(Err(e)) => return Err(e),
             _ => self.source.item(item)?,
         };
+        match self.before_choice(std::slice::from_ref(item), paths, true)? {
+            plugins::BeforeChoice::Skip => return Ok(Decision::Skip),
+            plugins::BeforeChoice::Abort => return Ok(Decision::Abort),
+            plugins::BeforeChoice::Continue => {}
+        }
         let disp = self.display();
         if let Some(d) = self.summary_judgment(rec) {
             return Ok(d);
@@ -3425,12 +3668,24 @@ mod tests {
         let mut imp = run();
         assert_eq!(imp.stats.skipped, 1);
         // Prompt decisions are logged the same way (these need no lookup).
-        imp.log_choice(&Decision::<AlbumMatch>::Skip, std::slice::from_ref(&album));
+        imp.log_choice(
+            &Decision::<AlbumMatch>::Skip,
+            std::slice::from_ref(&album),
+            &[],
+            true,
+        );
         imp.log_choice(
             &Decision::<AlbumMatch>::AsIs,
             &[album.join("1.mp3"), album.join("2.mp3")],
+            &[],
+            true,
         );
-        imp.log_choice(&Decision::<AlbumMatch>::Abort, std::slice::from_ref(&album));
+        imp.log_choice(
+            &Decision::<AlbumMatch>::Abort,
+            std::slice::from_ref(&album),
+            &[],
+            true,
+        );
         drop(imp);
 
         let text = std::fs::read_to_string(&log).unwrap();
@@ -4418,7 +4673,7 @@ mod tests {
         // Read afresh, so its lookup is done again too.
         assert!(imp.lookups.is_empty());
         assert!(imp.prepared.is_none());
-        imp.choose_album(&items, true).ok();
+        imp.choose_album(&items, &files, true).ok();
         let calls = calls.lock().unwrap().clone();
         let first = calls.iter().filter(|c| *c == "album A one,two").count();
         assert_eq!(first, 2, "{calls:?}");

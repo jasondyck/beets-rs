@@ -8,6 +8,7 @@
 //! instance does.
 
 use crate::config::Config;
+use crate::events::{Event, Listener};
 use crate::plugins::PluginLog;
 use crate::query::Context;
 use anyhow::Result;
@@ -23,6 +24,47 @@ impl crate::plugins::Plugin for PlaylistPlugin {
     fn name(&self) -> &'static str {
         "playlist"
     }
+}
+
+/// The plugin's listeners: beets' `item_moved`, `item_removed` and
+/// `cli_exit` events, when `auto` is set.
+struct AutoUpdate {
+    cfg: Config,
+}
+
+impl Listener for AutoUpdate {
+    fn wants(&self, event: &str) -> bool {
+        matches!(event, "item_moved" | "item_removed" | "cli_exit")
+    }
+
+    fn on(&self, ev: &Event) {
+        match ev.name {
+            "item_moved" => {
+                if let (Some(source), Some(destination)) =
+                    (ev.path("source"), ev.path("destination"))
+                {
+                    item_moved(&self.cfg, source, destination);
+                }
+            }
+            "item_removed" => {
+                if let Some(item) = ev.item() {
+                    item_removed(&self.cfg, item.path());
+                }
+            }
+            "cli_exit" => {
+                if let Some(lib) = ev.lib() {
+                    cli_exit(&self.cfg, lib);
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+/// The plugin's `__init__`: register the auto-update listeners.
+pub fn load(cfg: &Config) -> PlaylistPlugin {
+    crate::events::register(std::rc::Rc::new(AutoUpdate { cfg: cfg.clone() }));
+    PlaylistPlugin
 }
 
 /// `is_m3u_file`.

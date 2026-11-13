@@ -325,6 +325,33 @@ smartplaylist:
     output: m3u
     pretend: no
 
+importadded:
+    preserve_mtimes: no
+    preserve_write_mtimes: no
+
+permissions:
+    file: '644'
+    dir: '755'
+
+hook:
+    hooks: []
+
+ihate:
+    warn: []
+    skip: []
+
+filefilter:
+    path: .*
+
+badfiles:
+    check_on_import: no
+    import_action_on_warning: ask
+    import_action_on_error: ask
+
+unimported:
+    ignore_extensions: []
+    ignore_subdirectories: []
+
 missing:
     count: no
     total: no
@@ -583,6 +610,13 @@ const PLUGIN_SECTIONS: &[&str] = &[
     "smartplaylist",
     "bucket",
     "albumtypes",
+    "importadded",
+    "permissions",
+    "hook",
+    "ihate",
+    "filefilter",
+    "badfiles",
+    "unimported",
     "convert",
     "edit",
     "web",
