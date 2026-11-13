@@ -215,3 +215,14 @@ alphabetically), and its cases as a module under `tools/diffbeets/cases/`
 `model` (typed fields + flex attrs) · `library` (SQLite, beets' schema and migrations) · `migrate` (`migrate-beets`) · `query` · `template` ·
 `paths` · `duplicates` (duplicate keys, Upgrade, prompt summaries) · `fileops` (copy/move/link/reflink, pruning, ignore globs) · `media` (reading/writing items' files, art) · `mediafile` (port of MediaFile's tag mapping) · `props` (mutagen's length and bitrate) · `mb` (MusicBrainz) · `autotag` · `importer` ·
 `artresizer` (image operations) · `commands` · `diff` (change highlighting) · `logging` (`-v`) · `events` (the plugin event bus) · `state` (import resume/history) · `ui` · `plugins/` (the bundled plugins, which register themselves; see the table above) · `requests` (HTTP session).
+
+## License
+
+beets-rs is released under the MIT License (see [`LICENSE`](LICENSE)), like
+beets, of which it is a port.
+
+Third-party code and data that beets-rs ports or embeds (beets itself,
+MediaFile, confuse, PyYAML, python-titlecase, SoCo, pyacoustid, Python's
+`difflib`, librosa/resampy, the web UI's bundled JavaScript, and the test
+data taken from beets) are credited in [`NOTICE.md`](NOTICE.md), which also
+flags the parts that follow mutagen's GPL-licensed code.

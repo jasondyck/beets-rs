@@ -2,6 +2,11 @@
 name = "beets-rs"
 version = "0.1.0"
 edition = "2024"
+description = "A Rust port of beets, the music library manager and MusicBrainz tagger"
+license = "MIT"
+# Edition 2024 needs 1.85; the highest declared MSRV in the dependency graph is
+# 1.89 (rusqlite 0.41, lofty 0.25, uuid 1.29 and their dependencies).
+rust-version = "1.89"
 
 [[bin]]
 name = "beet"
