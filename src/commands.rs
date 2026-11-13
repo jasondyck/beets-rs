@@ -380,7 +380,7 @@ pub fn run(cli: Cli) -> Result<()> {
                 format,
                 limit,
             };
-            modify(&cfg, &lib, opts, &args)
+            modify(&cfg, &lib, &opts, &args)
         }
         Cmd::Remove {
             album,
@@ -479,10 +479,10 @@ pub fn run(cli: Cli) -> Result<()> {
 /// run time; the global options come from the same matches).
 pub fn run_plugin(
     command: &'static crate::plugin_registry::PluginCommand,
-    g: Globals,
+    g: &Globals,
     m: &clap::ArgMatches,
 ) -> Result<()> {
-    let cfg = load_config(&g)?;
+    let cfg = load_config(g)?;
     if g.version {
         return version(&cfg);
     }
@@ -582,7 +582,8 @@ fn list(
         for a in albums {
             if path && fmt == "$path" {
                 // An album's path is the directory of its items.
-                let items = lib.album_items(a.id.unwrap())?;
+                let items =
+                    lib.album_items(a.id.expect("BUG: albums from the library have an id"))?;
                 if let Some(dir) = items.first().and_then(|i| i.path().parent()) {
                     println!("{}", dir.display());
                 }
@@ -847,7 +848,7 @@ fn display_pair(lib: &Library, old: &Record, new: &Record) -> Result<(Record, Re
 }
 
 /// beets' `modify_func` / `modify_objects`.
-fn modify(cfg: &Config, lib: &Library, opts: ModifyOpts, args: &[String]) -> Result<()> {
+fn modify(cfg: &Config, lib: &Library, opts: &ModifyOpts, args: &[String]) -> Result<()> {
     let album = opts.album;
     let kind = if album { Kind::Album } else { Kind::Item };
     let (q, mods, dels) = parse_modify_args(kind, args);
@@ -873,7 +874,7 @@ fn modify(cfg: &Config, lib: &Library, opts: ModifyOpts, args: &[String]) -> Res
         bail!(
             "field '{}' does not support the {}= operator",
             m.field,
-            m.op.unwrap()
+            m.op.expect("BUG: the find selected a modification with an operator")
         );
     }
     if objs.is_empty() {
@@ -964,7 +965,10 @@ pub(crate) fn apply_changes(
                 continue;
             }
             lib.store(&new)?;
-            let mut items = lib.album_items(new.id.unwrap())?;
+            let mut items = lib.album_items(
+                new.id
+                    .expect("BUG: the album was just stored, so it has an id"),
+            )?;
             if inherit {
                 // beets' `Album.store(inherit=True)`: changed fixed fields
                 // (but `artpath`/`id`) and flexible attributes, set or
@@ -1002,7 +1006,10 @@ pub(crate) fn store_album_inherit(lib: &Library, old: &Album, new: &Album) -> Re
     if fields.is_empty() {
         return Ok(());
     }
-    for mut item in lib.album_items(new.id.unwrap())? {
+    for mut item in lib.album_items(
+        new.id
+            .expect("BUG: store_album_inherit stores the album first"),
+    )? {
         for f in &fields {
             match new.get(f) {
                 Some(v) => item.set(f, v),
@@ -1034,7 +1041,10 @@ pub(crate) fn move_model(
     let fmt = PathFormatter::new(&dcfg)?;
     let obj = match rec.kind {
         Kind::Album => {
-            let items = lib.album_items(rec.id.unwrap())?;
+            let items = lib.album_items(
+                rec.id
+                    .expect("BUG: album records from the library have an id"),
+            )?;
             // Made unique when moved (`move_item_file`), as beets.
             let dests = items
                 .iter()
@@ -1111,7 +1121,9 @@ fn remove(cfg: &Config, lib: &Library, opts: &RemoveOpts, q: &[String]) -> Resul
         let file_count = if opts.album {
             let mut n = 0;
             for a in &objs {
-                n += lib.album_items(a.id.unwrap())?.len();
+                n += lib
+                    .album_items(a.id.expect("BUG: albums from the library have an id"))?
+                    .len();
             }
             n
         } else {
@@ -1123,7 +1135,10 @@ fn remove(cfg: &Config, lib: &Library, opts: &RemoveOpts, q: &[String]) -> Resul
         let show = |o: &Record| {
             if opts.album {
                 println!();
-                for i in lib.album_items(o.id.unwrap()).unwrap_or_default() {
+                for i in lib
+                    .album_items(o.id.expect("BUG: albums from the library have an id"))
+                    .unwrap_or_default()
+                {
                     println!("{}", format_record(&t, &i, Some(lib)));
                 }
             } else {
@@ -1220,7 +1235,7 @@ pub(crate) fn remove_album(
     with_items: bool,
 ) -> Result<()> {
     let items = if with_items {
-        lib.album_items(album.id.unwrap())?
+        lib.album_items(album.id.expect("BUG: albums from the library have an id"))?
     } else {
         vec![]
     };
@@ -1373,7 +1388,7 @@ fn move_cmd(cfg: &Config, lib: &Library, opts: &MoveOpts, q: &[String]) -> Resul
         let mut albums = lib.albums(&Query::parse(Kind::Album, q)?)?;
         albums.truncate(opts.limit.unwrap_or(usize::MAX));
         for a in albums {
-            let items = lib.album_items(a.id.unwrap())?;
+            let items = lib.album_items(a.id.expect("BUG: albums from the library have an id"))?;
             let dests = items
                 .iter()
                 .map(|i| item_destination(&fmt, lib, i, Some(&a)))
@@ -1441,7 +1456,7 @@ fn move_cmd(cfg: &Config, lib: &Library, opts: &MoveOpts, q: &[String]) -> Resul
     }
     let selected = if opts.timid {
         ui::select_objects(&format!("Really {act}"), &objs, |o| {
-            show_path_changes(cfg, &o.path_changes())
+            show_path_changes(cfg, &o.path_changes());
         })
     } else {
         objs
@@ -1487,7 +1502,9 @@ fn move_obj(
     }
     // Items re-read their album: an earlier item may have moved the art.
     let album = match album {
-        Some(a) if !album_mode => lib.get_album(a.id.unwrap())?,
+        Some(a) if !album_mode => {
+            lib.get_album(a.id.expect("BUG: albums from the library have an id"))?
+        }
         a => a,
     };
     let Some(mut album) = album else {
@@ -1575,7 +1592,8 @@ fn file_mtime(path: &Path) -> f64 {
 /// Store `fields` of `new` over the item's stored row (beets'
 /// `store(fields=...)`), plus `mtime` when `with_mtime`.
 fn store_fields(lib: &Library, new: &Item, fields: &[String], with_mtime: bool) -> Result<()> {
-    let Some(mut row) = lib.get_item(new.id.unwrap())? else {
+    let Some(mut row) = lib.get_item(new.id.expect("BUG: store_fields runs for a stored item"))?
+    else {
         return Ok(());
     };
     for f in fields
@@ -1611,7 +1629,7 @@ fn update(cfg: &Config, lib: &Library, opts: &UpdateOpts, q: &[String]) -> Resul
         albums.truncate(opts.limit.unwrap_or(usize::MAX));
         let mut v = vec![];
         for a in albums {
-            v.extend(lib.album_items(a.id.unwrap())?);
+            v.extend(lib.album_items(a.id.expect("BUG: albums from the library have an id"))?);
         }
         v
     } else {
@@ -1818,7 +1836,9 @@ fn move_art(
     }
     let dir = match item_dir {
         Some(d) => d,
-        None => match plugins::fetchart::album_dir(&lib.album_items(album.id.unwrap())?) {
+        None => match plugins::fetchart::album_dir(
+            &lib.album_items(album.id.expect("BUG: albums from the library have an id"))?,
+        ) {
             Some(d) => d,
             None => return Ok(false),
         },
@@ -1940,7 +1960,7 @@ fn write(
         bail!("No matching items to write.");
     }
     let t = Template::parse(&cfg.str("format_item"));
-    let tag_fields: Vec<String> = media::TAG_FIELDS.iter().map(|f| f.to_string()).collect();
+    let tag_fields: Vec<String> = media::TAG_FIELDS.iter().map(ToString::to_string).collect();
     for mut item in items {
         if !item.path().exists() {
             // beets logs this at INFO, which goes to stderr.
@@ -2105,13 +2125,13 @@ fn fields_lines(lib: &Library) -> Result<Vec<String>> {
     let mut out = vec!["Item fields:".to_string()];
     let mut item_computed: Vec<String> = ["singleton", "filesize", "has_cover_art"]
         .iter()
-        .map(|s| s.to_string())
+        .map(ToString::to_string)
         .collect();
     item_computed.extend(inline(Kind::Item));
     out.extend(names(ITEM_FIELDS, &item_computed));
     out.push("Album fields:".into());
     let mut album_computed: Vec<String> = vec!["path".into(), "albumtotal".into()];
-    album_computed.extend(env.album_template_fields.iter().map(|s| s.to_string()));
+    album_computed.extend(env.album_template_fields.iter().map(ToString::to_string));
     album_computed.extend(inline(Kind::Album));
     out.extend(names(ALBUM_FIELDS, &album_computed));
     for (title, kind) in [("Item", Kind::Item), ("Album", Kind::Album)] {
@@ -2165,7 +2185,7 @@ mod tests {
     }
 
     fn strs(a: &[&str]) -> Vec<String> {
-        a.iter().map(|s| s.to_string()).collect()
+        a.iter().map(ToString::to_string).collect()
     }
 
     #[test]
@@ -2432,8 +2452,8 @@ mod tests {
         move_cmd(&cfg, &lib, &o, &[]).unwrap();
         let after = items(&lib);
         assert_eq!(
-            before.iter().map(|i| i.path()).collect::<Vec<_>>(),
-            after.iter().map(|i| i.path()).collect::<Vec<_>>()
+            before.iter().map(Record::path).collect::<Vec<_>>(),
+            after.iter().map(Record::path).collect::<Vec<_>>()
         );
         assert!(after.iter().all(|i| i.path().is_file()));
         assert_eq!(artpath(&lib), d.path().join("src/cover.jpg"));
@@ -2562,7 +2582,7 @@ mod tests {
         std::fs::write(&taken, b"other").unwrap();
         let mut o = quiet_opts(false);
         o.mv = Some(true);
-        modify(&cfg, &lib, o, &strs(&["title=New"])).unwrap();
+        modify(&cfg, &lib, &o, &strs(&["title=New"])).unwrap();
         let p = items(&lib)[0].path().to_path_buf();
         assert_eq!(p, old.with_file_name("01 New.1.mp3"));
         assert!(p.is_file());
@@ -2571,7 +2591,7 @@ mod tests {
         // Modifying again (same destination) keeps the `.1` name.
         let mut o = quiet_opts(false);
         o.mv = Some(true);
-        modify(&cfg, &lib, o, &strs(&["comments=x"])).unwrap();
+        modify(&cfg, &lib, &o, &strs(&["comments=x"])).unwrap();
         assert_eq!(items(&lib)[0].path(), p);
     }
 
@@ -2913,7 +2933,7 @@ mod tests {
     #[test]
     fn modify_items_with_templates_types_and_deletions() {
         let (_d, cfg, lib) = lib_with_album(2);
-        let run = |args: &[&str]| modify(&cfg, &lib, quiet_opts(false), &strs(args));
+        let run = |args: &[&str]| modify(&cfg, &lib, &quiet_opts(false), &strs(args));
         run(&[
             "title:T1",
             "title=$title (live)",
@@ -2969,7 +2989,7 @@ mod tests {
         // -l caps the matches.
         let mut o = quiet_opts(false);
         o.limit = Some(1);
-        modify(&cfg, &lib, o, &strs(&["comment=x"])).unwrap();
+        modify(&cfg, &lib, &o, &strs(&["comment=x"])).unwrap();
         let n = items(&lib)
             .iter()
             .filter(|i| i.str("comment") == "x")
@@ -2983,7 +3003,7 @@ mod tests {
         modify(
             &cfg,
             &lib,
-            quiet_opts(true),
+            &quiet_opts(true),
             &strs(&["genres=Jazz", "mood=x"]),
         )
         .unwrap();
@@ -2992,19 +3012,19 @@ mod tests {
             assert_eq!((i.str("genres"), i.str("mood")), ("Jazz", "x"));
         }
         // Deleting the album's flex attribute deletes it from the items.
-        modify(&cfg, &lib, quiet_opts(true), &strs(&["mood!"])).unwrap();
+        modify(&cfg, &lib, &quiet_opts(true), &strs(&["mood!"])).unwrap();
         assert!(items(&lib).iter().all(|i| i.get("mood").is_none()));
         // Only changed fields propagate.
         let mut it = items(&lib).remove(0);
         it.set_str("genres", "Own");
         lib.store(&it).unwrap();
-        modify(&cfg, &lib, quiet_opts(true), &strs(&["year=2001"])).unwrap();
+        modify(&cfg, &lib, &quiet_opts(true), &strs(&["year=2001"])).unwrap();
         assert_eq!(items(&lib)[0].str("genres"), "Own");
         assert!(items(&lib).iter().all(|i| i.int("year") == 2001));
         // -I keeps the album's change to itself.
         let mut o = quiet_opts(true);
         o.inherit = false;
-        modify(&cfg, &lib, o, &strs(&["genres=Blues"])).unwrap();
+        modify(&cfg, &lib, &o, &strs(&["genres=Blues"])).unwrap();
         assert_eq!(lib.all_albums().unwrap()[0].str("genres"), "Blues");
         assert!(items(&lib).iter().all(|i| i.str("genres") != "Blues"));
     }
@@ -3013,7 +3033,7 @@ mod tests {
     fn modify_args() {
         let args: Vec<String> = ["artist:foo", "genre=Rock", "mood!", "-live", "year:2000"]
             .iter()
-            .map(|s| s.to_string())
+            .map(ToString::to_string)
             .collect();
         let (q, s, d) = parse_modify_args(Kind::Item, &args);
         assert_eq!(q, vec!["artist:foo", "-live", "year:2000"]);
