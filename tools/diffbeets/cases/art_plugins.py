@@ -208,8 +208,6 @@ _PLUGIN_LOAD = ("a plugin that fails to set up (bad `fetchart.sources`): beets l
                 "loading plugin fetchart\" with a Python traceback and runs without it; beets-rs "
                 "logs the same line with the error message (and the `fetchart` command fails "
                 "with it)")
-_NOT_ENABLED = ("a disabled plugin's command: beets doesn't know it (\"unknown command\"), "
-                "beets-rs names the plugin to enable")
 _EXTRACT_CRASH = ("extractart -o into a missing directory: beets crashes with a traceback "
                   "(FileNotFoundError), beets-rs reports the same error and exits 1")
 EXPECTED.update({
@@ -217,7 +215,6 @@ EXPECTED.update({
     "art:sources-invalid:state": _PLUGIN_LOAD,
     "art:sources-empty:1": _PLUGIN_LOAD,
     "art:sources-empty:state": _PLUGIN_LOAD,
-    "art:cmd-not-enabled:1": _NOT_ENABLED,
     "art:extractart:2": _EXTRACT_CRASH,
 })
 
