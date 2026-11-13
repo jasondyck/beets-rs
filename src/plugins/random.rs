@@ -59,14 +59,14 @@ impl Rng {
     }
 
     /// `random.randrange(n)`.
-    fn below(&mut self, n: usize) -> usize {
+    pub fn next_below(&mut self, n: usize) -> usize {
         (self.next_u64() % n as u64) as usize
     }
 
     /// `random.shuffle`.
     pub fn shuffle<T>(&mut self, v: &mut [T]) {
         for i in (1..v.len()).rev() {
-            let j = self.below(i + 1);
+            let j = self.next_below(i + 1);
             v.swap(i, j);
         }
     }
@@ -111,7 +111,7 @@ pub fn equal_chance_permutation(objs: Vec<Record>, field: &str, rng: &mut Rng) -
     }
     let mut out = vec![];
     while !groups.is_empty() {
-        let i = rng.below(groups.len());
+        let i = rng.next_below(groups.len());
         let o = groups[i].1.pop().unwrap();
         out.push(o);
         if groups[i].1.is_empty() {

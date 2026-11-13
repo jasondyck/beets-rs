@@ -1460,6 +1460,18 @@ pub fn sort_from_strings(kind: Kind, parts: &[String], case_insensitive: bool) -
     )
 }
 
+/// beets' `SlowFieldSort`: a sort by any field, computed ones included
+/// (the aura plugin's `sort` parameter).
+pub fn slow_sort(field: &str, ascending: bool) -> FieldSort {
+    FieldSort {
+        field: field.to_string(),
+        ascending,
+        // beets' `SlowFieldSort` default.
+        case_insensitive: true,
+        kind: SortKind::Slow,
+    }
+}
+
 impl FieldSort {
     fn order_clause(&self, kind: Kind) -> Option<String> {
         let order = if self.ascending { "ASC" } else { "DESC" };
@@ -1657,6 +1669,64 @@ impl Query {
             kind,
             pred,
             sort: sort_from_strings(kind, &sorts, case_insensitive),
+        })
+    }
+
+    /// beets' `LibModel.field_query(field, value, MatchQuery)` on its own:
+    /// an exact match, without parsing `value` as query syntax (the aura
+    /// plugin's filters).
+    pub fn match_field(kind: Kind, field: &str, value: &str) -> anyhow::Result<Query> {
+        let pred =
+            field_query(kind, field, value, Class::Match).map_err(|e| anyhow::anyhow!("{e}"))?;
+        Ok(Query {
+            kind,
+            pred,
+            sort: Sort::default(),
+        })
+    }
+
+    /// beets' `LibModel.field_query(field, value, QueryType)` for an
+    /// explicit query type, without parsing the value as query syntax
+    /// (bpd's `search`/`find`/`list`/`count`, which choose between
+    /// substring and exact matching themselves).
+    pub fn field_match(
+        kind: Kind,
+        field: &str,
+        value: &str,
+        substring: bool,
+    ) -> anyhow::Result<Query> {
+        let class = if substring {
+            Class::Substring
+        } else {
+            Class::Match
+        };
+        let field = crate::model::replace_legacy_field(kind, &lower(field), false);
+        let pred = field_query(kind, &field, value, class).map_err(|e| anyhow::anyhow!("{e}"))?;
+        Ok(Query {
+            kind,
+            pred,
+            sort: Sort::default(),
+        })
+    }
+
+    /// beets' `Item.any_writable_media_field_query`: the same, over every
+    /// field the item stores in tags (bpd's `search`/`find ... any`).
+    pub fn any_tag_field_match(kind: Kind, value: &str, substring: bool) -> anyhow::Result<Query> {
+        let class = if substring {
+            Class::Substring
+        } else {
+            Class::Match
+        };
+        let preds = crate::mediafile::TAG_FIELDS
+            .iter()
+            .filter(|f| own_type(kind, f).is_some() || in_other_db(kind, f))
+            .map(|f| field_query(kind, f, value, class))
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| anyhow::anyhow!("{e}"))?;
+        Ok(Query {
+            kind,
+            pred: Pred::Or(preds),
+            sort: Sort::default(),
         })
     }
 

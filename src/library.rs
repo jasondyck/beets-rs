@@ -1317,6 +1317,19 @@ impl Library {
             .collect::<Result<_, _>>()?)
     }
 
+    /// Every row of a raw statement with parameters, as its column values
+    /// (the bpd plugin's `list` and `stats`).
+    pub fn raw_query(&self, sql: &str, params: &[SqlValue]) -> Result<Vec<Vec<SqlValue>>> {
+        let mut stmt = self.conn.prepare(sql)?;
+        let n = stmt.column_count();
+        let rows = stmt.query_map(rusqlite::params_from_iter(params.iter()), |r| {
+            (0..n)
+                .map(|i| r.get::<_, SqlValue>(i))
+                .collect::<rusqlite::Result<Vec<_>>>()
+        })?;
+        Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+    }
+
     /// How many items and albums the library holds.
     pub fn counts(&self) -> Result<(i64, i64)> {
         Ok((

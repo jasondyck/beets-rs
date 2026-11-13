@@ -1560,8 +1560,15 @@ impl<'a> Importer<'a> {
                     .then_some((0, rec > Recommendation::Low));
             }
 
-            let extra =
-                self.plugin_choices(true, &mut cur, cands.len(), focus.map(|f| f.0), rescan);
+            let extra = self.plugin_choices(
+                true,
+                &mut cur,
+                cands.len(),
+                focus.map(|f| f.0),
+                rec,
+                paths,
+                rescan,
+            );
             let extra_long: Vec<&'static str> = extra.iter().map(|(_, c)| c.long).collect();
             let choice = if let Some((k, has_default)) = focus {
                 self.show_album_match(items, &cands[k]);
@@ -1611,6 +1618,8 @@ impl<'a> Importer<'a> {
                     cfg,
                     is_album: true,
                     items: &mut cur,
+                    paths,
+                    rec: Some(rec),
                     candidates: cands.len(),
                     selected: focus.map(|f| f.0),
                     apply_candidate: &apply,
@@ -1659,12 +1668,15 @@ impl<'a> Importer<'a> {
 
     /// The plugins' prompt choices (beets' `before_choose_candidate`), with
     /// the index of each one's plugin.
+    #[allow(clippy::too_many_arguments)]
     fn plugin_choices(
         &self,
         is_album: bool,
         items: &mut Vec<Item>,
         candidates: usize,
         selected: Option<usize>,
+        rec: Recommendation,
+        paths: &[PathBuf],
         rescan: bool,
     ) -> Vec<(usize, plugins::PromptChoice)> {
         if self.plugins.is_empty() {
@@ -1675,6 +1687,8 @@ impl<'a> Importer<'a> {
             cfg: self.cfg,
             is_album,
             items,
+            paths,
+            rec: Some(rec),
             candidates,
             selected,
             apply_candidate: &noop,
@@ -2693,8 +2707,15 @@ impl<'a> Importer<'a> {
                     .then_some((0, rec > Recommendation::Low));
             }
 
-            let extra =
-                self.plugin_choices(false, &mut cur, cands.len(), focus.map(|f| f.0), false);
+            let extra = self.plugin_choices(
+                false,
+                &mut cur,
+                cands.len(),
+                focus.map(|f| f.0),
+                rec,
+                paths,
+                false,
+            );
             let extra_long: Vec<&'static str> = extra.iter().map(|(_, c)| c.long).collect();
             let choice = if let Some((k, has_default)) = focus {
                 disp.show_track_change(item, &cands[k]);
@@ -2736,6 +2757,8 @@ impl<'a> Importer<'a> {
                     cfg,
                     is_album: false,
                     items: &mut cur,
+                    paths,
+                    rec: Some(rec),
                     candidates: cands.len(),
                     selected: focus.map(|f| f.0),
                     apply_candidate: &apply,

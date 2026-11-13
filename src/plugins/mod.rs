@@ -311,6 +311,11 @@ pub struct ChoiceTask<'t> {
     pub is_album: bool,
     /// The task's items, which the callback may change.
     pub items: &'t mut Vec<Item>,
+    /// beets' `task.paths`: the task's source paths.
+    pub paths: &'t [PathBuf],
+    /// beets' `task.rec`: how good the best match is (None when there was
+    /// no match at all, or before one was looked up).
+    pub rec: Option<crate::autotag::Recommendation>,
     /// How many candidates there are.
     pub candidates: usize,
     /// The candidate on screen (beets' `task.selected_match`), 0-based.

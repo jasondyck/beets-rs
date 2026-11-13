@@ -92,6 +92,7 @@ def build_art_corpus(src, ffmpeg_audio):
             check=True,
         )
     build_rg_corpus(src)
+    build_bpm_corpus(src)
     # convert (`conv/`): a FLAC and an Ogg Vorbis track of one album.
     for i, (title, fmt) in enumerate([("Uno", "flac"), ("Dos", "ogg")], 1):
         tags = dict(common, title=title, track=str(i), album="Conv Album", _d="0.5")
@@ -108,6 +109,28 @@ RG_AUDIO = [
     ("o/02.opus", "anoisesrc=d=1:a=0.1:seed=3", "Op Two", "RG Opus", "1"),
     ("f/01.flac", "anoisesrc=d=1:a=0.5:seed=5", "Flac One", "RG Flac", "1"),
 ]
+
+
+# autobpm (`bpm/`): click tracks (a 40 ms 1 kHz beep every period) whose
+# tempos the librosa port estimates.
+BPM_AUDIO = [
+    ("slow/01.mp3", 60.0 / 100, "Click 100", "BPM Artist", "Slow Clicks", "1"),
+    ("fast/01.mp3", 60.0 / 120, "Click 120", "BPM Artist", "Fast Clicks", "1"),
+]
+
+
+def build_bpm_corpus(src):
+    for rel, period, title, artist, album, track in BPM_AUDIO:
+        out = os.path.join(src, "bpm", rel)
+        os.makedirs(os.path.dirname(out), exist_ok=True)
+        lavfi = (
+            f"aevalsrc='if(lt(mod(t,{period}),0.04),0.9*sin(2*PI*1000*t),0)'"
+            ":s=44100:d=8"
+        )
+        cmd = ["ffmpeg", "-nostdin", "-loglevel", "error", "-y", "-f", "lavfi", "-i", lavfi,
+               "-ac", "1", "-metadata", f"title={title}", "-metadata", f"artist={artist}",
+               "-metadata", f"album={album}", "-metadata", f"track={track}", out]
+        subprocess.run(cmd, check=True)
 
 
 def build_rg_corpus(src):
