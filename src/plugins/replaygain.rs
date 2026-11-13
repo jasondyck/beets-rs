@@ -22,9 +22,10 @@ use crate::query::Query;
 use crate::template::Template;
 use anyhow::{Result, anyhow, bail};
 use std::path::{Path, PathBuf};
+use std::collections::VecDeque;
 use std::process::{Command, Stdio};
 use std::sync::mpsc;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Condvar, Mutex};
 
 const NAME: &str = "replaygain";
 
@@ -955,30 +956,81 @@ type Done = (GainTask, RgResult<()>);
 /// beets' `ThreadPool` of analyses: workers compute, the main thread
 /// stores the results (the pool's callbacks).
 struct Pool {
-    jobs: Option<mpsc::Sender<Job>>,
+    queue: Arc<JobQueue>,
     done: mpsc::Receiver<Done>,
     workers: Vec<std::thread::JoinHandle<()>>,
     pending: usize,
 }
 
+/// The jobs still to start. Workers pop under the lock and wait on the
+/// condition variable (which releases it), so none holds a lock while idle.
+struct JobQueue {
+    state: Mutex<QueueState>,
+    ready: Condvar,
+}
+
+struct QueueState {
+    jobs: VecDeque<Job>,
+    closed: bool,
+}
+
+impl JobQueue {
+    fn new() -> Self {
+        JobQueue {
+            state: Mutex::new(QueueState {
+                jobs: VecDeque::new(),
+                closed: false,
+            }),
+            ready: Condvar::new(),
+        }
+    }
+
+    /// Queue a job; false once the pool is closed (the caller then runs it
+    /// itself, as for a pool that was never opened).
+    fn push(&self, job: Job) -> bool {
+        let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
+        if state.closed {
+            return false;
+        }
+        state.jobs.push_back(job);
+        drop(state);
+        self.ready.notify_one();
+        true
+    }
+
+    /// No more jobs will be pushed; workers drain what is queued and stop.
+    fn close(&self) {
+        self.state.lock().unwrap_or_else(|e| e.into_inner()).closed = true;
+        self.ready.notify_all();
+    }
+
+    fn pop(&self) -> Option<Job> {
+        let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
+        loop {
+            if let Some(job) = state.jobs.pop_front() {
+                return Some(job);
+            }
+            if state.closed {
+                return None;
+            }
+            state = self.ready.wait(state).unwrap_or_else(|e| e.into_inner());
+        }
+    }
+}
+
 impl Pool {
     fn new(threads: usize, backend: Arc<dyn Backend>, level: u8) -> Pool {
-        let (jtx, jrx) = mpsc::channel::<Job>();
         let (dtx, drx) = mpsc::channel::<Done>();
-        let jrx = Arc::new(Mutex::new(jrx));
+        let queue = Arc::new(JobQueue::new());
         let workers = (0..threads)
             .map(|_| {
-                let jrx = Arc::clone(&jrx);
+                let queue = Arc::clone(&queue);
                 let dtx = dtx.clone();
                 let backend = Arc::clone(&backend);
                 std::thread::spawn(move || {
                     let log = PluginLog::new(NAME);
                     log.set_base_level(level);
-                    loop {
-                        let job = jrx.lock().map(|r| r.recv());
-                        let Ok(Ok((mut task, kind))) = job else {
-                            break;
-                        };
+                    while let Some((mut task, kind)) = queue.pop() {
                         let r = compute(backend.as_ref(), &mut task, kind, &log);
                         if dtx.send((task, r)).is_err() {
                             break;
@@ -988,7 +1040,7 @@ impl Pool {
             })
             .collect();
         Pool {
-            jobs: Some(jtx),
+            queue,
             done: drx,
             workers,
             pending: 0,
@@ -1229,13 +1281,11 @@ impl ReplayGain {
             let mut pool = self.pool.borrow_mut();
             match pool.as_mut() {
                 Some(p) => {
-                    p.jobs
-                        .as_ref()
-                        .expect("pool open")
-                        .send((task.clone(), kind))
-                        .ok();
-                    p.pending += 1;
-                    true
+                    let queued = p.queue.push((task.clone(), kind));
+                    if queued {
+                        p.pending += 1;
+                    }
+                    queued
                 }
                 None => false,
             }
@@ -1304,7 +1354,7 @@ impl ReplayGain {
     fn close_pool(&self, lib: Option<&Library>, write: bool) -> Result<()> {
         self.drain(lib, write, true);
         if let Some(mut p) = self.pool.borrow_mut().take() {
-            p.jobs = None;
+            p.queue.close();
             for w in p.workers.drain(..) {
                 w.join().ok();
             }
@@ -1317,8 +1367,8 @@ impl ReplayGain {
 
     /// beets' `terminate_pool`: drop the work not started.
     fn terminate_pool(&self) {
-        if let Some(mut p) = self.pool.borrow_mut().take() {
-            p.jobs = None;
+        if let Some(p) = self.pool.borrow_mut().take() {
+            p.queue.close();
             // Workers finish what they're on; their results are dropped.
             drop(p.done);
         }

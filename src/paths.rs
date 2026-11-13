@@ -45,6 +45,8 @@ fn max_filename_length(cfg: &Config, directory: &Path) -> usize {
     let Ok(c) = std::ffi::CString::new(directory.as_os_str().as_bytes()) else {
         return MAX_FILENAME_LENGTH;
     };
+    // SAFETY: all-zero bytes are a valid `libc::statvfs` (a plain C struct of
+    // integers); `statvfs` fills it in.
     let mut st: libc::statvfs = unsafe { std::mem::zeroed() };
     // SAFETY: `c` is a valid C string and `st` a writable statvfs.
     if unsafe { libc::statvfs(c.as_ptr(), &mut st) } != 0 {

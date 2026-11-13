@@ -590,8 +590,10 @@ pub fn term_width(fallback: usize) -> usize {
     }
     #[cfg(unix)]
     {
-        // SAFETY: TIOCGWINSZ only writes a `winsize` into the struct we pass.
+        // SAFETY: all-zero bytes are a valid `libc::winsize` (a plain C struct
+        // of integers); the ioctl fills it in.
         let mut ws: libc::winsize = unsafe { std::mem::zeroed() };
+        // SAFETY: TIOCGWINSZ only writes a `winsize` into the struct we pass.
         if unsafe { libc::ioctl(libc::STDOUT_FILENO, libc::TIOCGWINSZ, &mut ws) } == 0
             && ws.ws_col > 0
         {
