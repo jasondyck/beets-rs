@@ -2694,6 +2694,56 @@ mod tests {
         crate::media::read(p).unwrap()
     }
 
+    /// A FLAC whose Vorbis comments are exactly `comments`, in order.
+    /// ffmpeg rewrites some key names itself (7.x folds TRACK and
+    /// TRACKNUMBER into one `track` tag), so the comment block is written
+    /// out by hand instead of through `-metadata`.
+    fn flac_comments(dir: &Path, name: &str, comments: &[(&str, &str)]) -> Option<PathBuf> {
+        let p = make(dir, name, &[])?;
+        let data = std::fs::read(&p).ok()?;
+        if data.get(..4) != Some(b"fLaC") {
+            return None;
+        }
+        // The metadata blocks, without any existing comment block.
+        let mut blocks: Vec<(u8, &[u8])> = vec![];
+        let mut pos = 4;
+        loop {
+            let header = data.get(pos..pos + 4)?;
+            let last = header[0] & 0x80 != 0;
+            let kind = header[0] & 0x7f;
+            let len = u32::from_be_bytes([0, header[1], header[2], header[3]]) as usize;
+            let body = data.get(pos + 4..pos + 4 + len)?;
+            if kind != 4 {
+                blocks.push((kind, body));
+            }
+            pos += 4 + len;
+            if last {
+                break;
+            }
+        }
+        let mut vc = Vec::new();
+        vc.extend_from_slice(&4u32.to_le_bytes());
+        vc.extend_from_slice(b"test");
+        vc.extend_from_slice(&(comments.len() as u32).to_le_bytes());
+        for (k, v) in comments {
+            let c = format!("{k}={v}");
+            vc.extend_from_slice(&(c.len() as u32).to_le_bytes());
+            vc.extend_from_slice(c.as_bytes());
+        }
+        // After STREAMINFO, where ffmpeg puts it too.
+        blocks.insert(1.min(blocks.len()), (4, &vc));
+        let mut out = b"fLaC".to_vec();
+        for (i, (kind, body)) in blocks.iter().enumerate() {
+            let last = if i + 1 == blocks.len() { 0x80 } else { 0 };
+            out.push(last | kind);
+            out.extend_from_slice(&(body.len() as u32).to_be_bytes()[1..]);
+            out.extend_from_slice(body);
+        }
+        out.extend_from_slice(&data[pos..]);
+        std::fs::write(&p, out).ok()?;
+        Some(p)
+    }
+
     /// Every tag field set to something.
     fn full_item(p: &Path) -> Item {
         let mut it = read(p);
@@ -2871,33 +2921,21 @@ mod tests {
     #[test]
     fn reads_like_mediafile() {
         let d = tempfile::tempdir().unwrap();
-        let tags = [
-            "-metadata",
-            "ALBUM ARTIST=First",
-            "-metadata",
-            "ALBUMARTIST=Second",
-            "-metadata",
-            "TRACK=0",
-            "-metadata",
-            "TRACKNUMBER=3",
-            "-metadata",
-            "DISCNUMBER=2/3",
-            "-metadata",
-            "genre=Rock; Pop",
-            "-metadata",
-            "UPC=123",
-            "-metadata",
-            "REPLAYGAIN_TRACK_GAIN=-4.20 dB",
-            "-metadata",
-            "R128_TRACK_GAIN=-512",
-            "-metadata",
-            "DATE=2003-05-12T10:00",
-            "-metadata",
-            "YEAR=1999",
-            "-metadata",
-            "initialkey=Db Minor",
+        let comments = [
+            ("ALBUM ARTIST", "First"),
+            ("ALBUMARTIST", "Second"),
+            ("TRACK", "0"),
+            ("TRACKNUMBER", "3"),
+            ("DISCNUMBER", "2/3"),
+            ("genre", "Rock; Pop"),
+            ("UPC", "123"),
+            ("REPLAYGAIN_TRACK_GAIN", "-4.20 dB"),
+            ("R128_TRACK_GAIN", "-512"),
+            ("DATE", "2003-05-12T10:00"),
+            ("YEAR", "1999"),
+            ("initialkey", "Db Minor"),
         ];
-        let Some(p) = make(d.path(), "t.flac", &tags) else {
+        let Some(p) = flac_comments(d.path(), "t.flac", &comments) else {
             return;
         };
         let it = read(&p);
@@ -2917,7 +2955,7 @@ mod tests {
         );
         assert_eq!(it.str("initial_key"), "Cm");
         // A missing DATE falls back to YEAR.
-        let Some(p) = make(d.path(), "y.ogg", &["-metadata", "YEAR=1999"]) else {
+        let Some(p) = flac_comments(d.path(), "y.flac", &[("YEAR", "1999")]) else {
             return;
         };
         assert_eq!(read(&p).int("year"), 1999);

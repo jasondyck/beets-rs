@@ -185,18 +185,28 @@ pub fn hardlink_file(src: &Path, dest: &Path) -> Result<()> {
 pub fn reflink_file(src: &Path, dest: &Path, fallback: bool) -> Result<()> {
     create_parent(dest)?;
     let ctx = || format!("reflinking {} to {}", src.display(), dest.display());
+    let clone = reflink_copy::reflink(src, dest);
     if fallback {
-        reflink_copy::reflink_or_copy(src, dest).with_context(ctx)?;
-        return Ok(());
+        // beets' `reflink(..., fallback=True)` suppresses *any* error from
+        // the clone and copies instead (an unsupported filesystem says
+        // EOPNOTSUPP, but a sandboxed FICLONE ioctl can say EPERM, and so
+        // on). Only an existing destination stays an error, since beets'
+        // copy refuses to replace it.
+        match clone {
+            Ok(()) => Ok(()),
+            Err(e) if dest.exists() => Err(anyhow!(e)).with_context(ctx),
+            Err(_) => copy_file(src, dest),
+        }
+    } else {
+        clone.map_err(|e| {
+            let why = match e.kind() {
+                ErrorKind::CrossesDevices => "Cannot reflink across devices",
+                ErrorKind::Unsupported => "Device does not support reflinks",
+                _ => return anyhow!(e).context(ctx()),
+            };
+            anyhow!(why).context(ctx())
+        })
     }
-    reflink_copy::reflink(src, dest).map_err(|e| {
-        let why = match e.kind() {
-            ErrorKind::CrossesDevices => "Cannot reflink across devices",
-            ErrorKind::Unsupported => "Device does not support reflinks",
-            _ => return anyhow!(e).context(ctx()),
-        };
-        anyhow!(why).context(ctx())
-    })
 }
 
 /// Shell-style glob patterns (beets uses Python's `fnmatch`), matched
