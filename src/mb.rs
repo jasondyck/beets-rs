@@ -123,6 +123,9 @@ pub struct TrackInfo {
     /// Fields beets would have as None (MusicBrainz gave nothing), so that
     /// a disambiguation string or `match.required` sees them as beets does.
     pub nulls: BTreeSet<&'static str>,
+    /// Fields beets' info dict would not have at all (the data source's
+    /// constructor does not set them).
+    pub omit: BTreeSet<&'static str>,
     /// Extra information fields (mbpseudo's custom tags).
     pub extra: Vec<(String, V)>,
 }
@@ -173,6 +176,9 @@ pub struct AlbumInfo {
     pub data_url: String,
     /// Fields beets would have as None (see [`TrackInfo::nulls`]).
     pub nulls: BTreeSet<&'static str>,
+    /// Fields beets' info dict would not have at all (see
+    /// [`TrackInfo::omit`]).
+    pub omit: BTreeSet<&'static str>,
     /// Extra information fields (mbpseudo's custom tags).
     pub extra: Vec<(String, V)>,
 }
@@ -203,13 +209,27 @@ impl AlbumInfo {
             ("albumtype", s("albumtype", &self.albumtype)),
             ("albumtypes", list(&self.albumtypes)),
             ("artist", V::Str(self.artist.clone())),
-            ("artist_credit", V::Str(self.artist_credit.clone())),
-            ("artist_id", V::Str(self.artist_id.clone())),
-            ("artist_sort", V::Str(self.artist_sort.clone())),
+            ("artist_credit", s("artist_credit", &self.artist_credit)),
+            ("artist_id", s("artist_id", &self.artist_id)),
+            ("artist_sort", s("artist_sort", &self.artist_sort)),
             ("artists", list(&self.artists)),
-            ("artists_credit", list(&self.artists_credit)),
+            (
+                "artists_credit",
+                if n.contains("artists_credit") {
+                    V::None
+                } else {
+                    list(&self.artists_credit)
+                },
+            ),
             ("artists_ids", list(&self.artists_ids)),
-            ("artists_sort", list(&self.artists_sort)),
+            (
+                "artists_sort",
+                if n.contains("artists_sort") {
+                    V::None
+                } else {
+                    list(&self.artists_sort)
+                },
+            ),
             ("asin", s("asin", &self.asin)),
             ("barcode", s("barcode", &self.barcode)),
             ("catalognum", s("catalognum", &self.catalognum)),
@@ -224,7 +244,14 @@ impl AlbumInfo {
             ("label", s("label", &self.label)),
             ("language", s("language", &self.language)),
             ("media", s("media", &self.media)),
-            ("mediums", V::Int(self.mediums as i64)),
+            (
+                "mediums",
+                if n.contains("mediums") {
+                    V::None
+                } else {
+                    V::Int(self.mediums as i64)
+                },
+            ),
             ("month", V::int_or_none(self.month)),
             ("original_day", V::int_or_none(self.original_day)),
             ("original_month", V::int_or_none(self.original_month)),
@@ -233,7 +260,10 @@ impl AlbumInfo {
                 "release_group_title",
                 V::opt_str(self.release_group_title.clone()),
             ),
-            ("releasegroup_id", V::Str(self.releasegroup_id.clone())),
+            (
+                "releasegroup_id",
+                s("releasegroup_id", &self.releasegroup_id),
+            ),
             (
                 "releasegroupdisambig",
                 s("releasegroupdisambig", &self.releasegroupdisambig),
@@ -245,6 +275,7 @@ impl AlbumInfo {
         ]
         .into_iter()
         .map(|(k, v)| (k.to_string(), v))
+        .filter(|(k, _)| !self.omit.contains(k.as_str()))
         .collect();
         for (k, v) in &self.external_ids {
             d.insert(k.clone(), V::opt_str(v.clone()));
@@ -272,8 +303,12 @@ impl TrackInfo {
         let n = &self.nulls;
         let s = |k: &str, v: &str| nullable(n, k, v);
         let positioned = self.index != 0;
-        let pos = |v: usize| {
-            if positioned {
+        // A positional value, None when the source gave none (a field in
+        // `nulls`, or no position at all).
+        let pos = |k: &str, v: usize| {
+            if n.contains(k) {
+                V::None
+            } else if positioned {
                 V::Int(v as i64)
             } else {
                 V::None
@@ -284,13 +319,27 @@ impl TrackInfo {
             ("arrangers", V::opt_list(self.arrangers.clone())),
             ("arrangers_ids", list(&self.arrangers_ids)),
             ("artist", V::Str(self.artist.clone())),
-            ("artist_credit", V::Str(self.artist_credit.clone())),
-            ("artist_id", V::Str(self.artist_id.clone())),
-            ("artist_sort", V::Str(self.artist_sort.clone())),
+            ("artist_credit", s("artist_credit", &self.artist_credit)),
+            ("artist_id", s("artist_id", &self.artist_id)),
+            ("artist_sort", s("artist_sort", &self.artist_sort)),
             ("artists", list(&self.artists)),
-            ("artists_credit", list(&self.artists_credit)),
+            (
+                "artists_credit",
+                if n.contains("artists_credit") {
+                    V::None
+                } else {
+                    list(&self.artists_credit)
+                },
+            ),
             ("artists_ids", list(&self.artists_ids)),
-            ("artists_sort", list(&self.artists_sort)),
+            (
+                "artists_sort",
+                if n.contains("artists_sort") {
+                    V::None
+                } else {
+                    list(&self.artists_sort)
+                },
+            ),
             ("bpm", V::None),
             ("composer_sort", V::opt_str(self.composer_sort.clone())),
             ("composers", V::opt_list(self.composers.clone())),
@@ -299,7 +348,7 @@ impl TrackInfo {
             ("data_url", s("data_url", &self.data_url)),
             ("disctitle", s("disctitle", &self.disctitle)),
             ("genres", V::None),
-            ("index", pos(self.index)),
+            ("index", pos("index", self.index)),
             ("initial_key", V::None),
             ("isrc", s("isrc", &self.isrc)),
             ("length", self.length.map_or(V::None, V::Float)),
@@ -307,9 +356,9 @@ impl TrackInfo {
             ("lyricists_ids", list(&self.lyricists_ids)),
             ("mb_workid", V::opt_str(self.mb_workid.clone())),
             ("media", s("media", &self.media)),
-            ("medium", pos(self.medium)),
-            ("medium_index", pos(self.medium_index)),
-            ("medium_total", pos(self.medium_total)),
+            ("medium", pos("medium", self.medium)),
+            ("medium_index", pos("medium_index", self.medium_index)),
+            ("medium_total", pos("medium_total", self.medium_total)),
             (
                 "release_track_id",
                 if self.release_track_id.is_empty() {
@@ -329,6 +378,7 @@ impl TrackInfo {
         ]
         .into_iter()
         .map(|(k, v)| (k.to_string(), v))
+        .filter(|(k, _)| !self.omit.contains(k.as_str()))
         .chain(self.extra.iter().cloned())
         .collect()
     }
@@ -1044,6 +1094,7 @@ pub fn parse_release(j: &J, opts: &ParseOpts) -> AlbumInfo {
         external_ids: parse_external_ids(j, &opts.external_ids),
         data_source: "MusicBrainz".into(),
         nulls,
+        omit: Default::default(),
         extra: vec![],
     };
     if info.va {

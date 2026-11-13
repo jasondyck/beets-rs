@@ -20,7 +20,7 @@ use std::sync::{Arc, LazyLock};
 const VA_ARTISTS: [&str; 5] = ["", "various artists", "various", "va", "unknown"];
 
 /// The plugins that are beets `MetadataSourcePlugin`s.
-const METADATA_SOURCES: &[&str] = &["musicbrainz", "chroma"];
+const METADATA_SOURCES: &[&str] = &["musicbrainz", "chroma", "tidal"];
 
 /// What the distance functions read from the config, gathered once per
 /// lookup (beets caches the same values).
@@ -675,6 +675,41 @@ fn sort_by_distance<T>(v: &mut [T], d: impl Fn(&T) -> f64) {
     v.sort_by(|a, b| d(a).total_cmp(&d(b)));
 }
 
+/// beets' `maybe_handle_plugin_error`: a metadata source's failure is logged
+/// and counts as no result, unless `raise_on_error`.
+fn metadata_error(cfg: &Config, source: &str, method: &str, e: anyhow::Error) -> Result<()> {
+    if cfg.bool("raise_on_error") {
+        return Err(e);
+    }
+    crate::logging::emit(format!("Error in '{source}.{method}': {e:#}"));
+    Ok(())
+}
+
+fn metadata_single<T>(
+    cfg: &Config,
+    source: &str,
+    method: &str,
+    r: Result<Option<T>>,
+) -> Result<Option<T>> {
+    match r {
+        Ok(v) => Ok(v),
+        Err(e) => {
+            metadata_error(cfg, source, method, e)?;
+            Ok(None)
+        }
+    }
+}
+
+fn metadata_list<T>(cfg: &Config, source: &str, method: &str, r: Result<Vec<T>>) -> Result<Vec<T>> {
+    match r {
+        Ok(v) => Ok(v),
+        Err(e) => {
+            metadata_error(cfg, source, method, e)?;
+            Ok(vec![])
+        }
+    }
+}
+
 /// beets' `tag_album`: the release candidates for a group of items and a
 /// recommendation. With `ids`, only those releases; otherwise the items'
 /// own release (when they agree on one), returned alone if it's a strong
@@ -688,7 +723,9 @@ pub fn album_candidates(
     ids: &[String],
 ) -> Result<(Vec<AlbumMatch>, Recommendation)> {
     // As beets with no metadata source plugin: nothing to search.
-    if !crate::plugins::enabled(cfg, "musicbrainz") {
+    let mb_on = crate::plugins::enabled(cfg, "musicbrainz");
+    let tidal_on = crate::plugins::enabled(cfg, "tidal");
+    if !mb_on && !tidal_on {
         return Ok((vec![], Recommendation::None));
     }
     let ctx = Ctx::new(cfg);
@@ -699,23 +736,39 @@ pub fn album_candidates(
     };
     let mut cands = vec![];
     // beets' `albums_for_ids`: each lookup's error is logged, not fatal.
-    let add_ids = |cands: &mut Vec<AlbumMatch>, ids: &[String]| {
+    let add_ids = |cands: &mut Vec<AlbumMatch>, ids: &[String]| -> Result<()> {
         for id in ids {
-            match mb.album_for_id_variants(id) {
-                Ok(infos) => {
-                    for info in infos {
-                        add_candidate(&ctx, &cur, items, cands, info);
+            if mb_on {
+                match mb.album_for_id_variants(id) {
+                    Ok(infos) => {
+                        for info in infos {
+                            add_candidate(&ctx, &cur, items, cands, info);
+                        }
                     }
+                    Err(e) => crate::logging::emit(format!("warning: {e:#}")),
                 }
-                Err(e) => crate::logging::emit(format!("warning: {e:#}")),
+            }
+            if tidal_on {
+                // The tidal plugin's `album_for_id` (beets' `albums_for_ids`
+                // asks every metadata source; each extracts the IDs it
+                // knows, here `tidal.com/album/<n>` URLs and numeric IDs).
+                if let Some(info) = metadata_single(
+                    cfg,
+                    "Tidal",
+                    "album_for_id",
+                    crate::plugins::tidal::album_for_id(cfg, id),
+                )? {
+                    add_candidate(&ctx, &cur, items, cands, info);
+                }
             }
         }
+        Ok(())
     };
     if !ids.is_empty() {
-        add_ids(&mut cands, ids);
+        add_ids(&mut cands, ids)?;
     } else {
         if !cur.mb_albumid.is_empty() && cur.id_consensus {
-            add_ids(&mut cands, std::slice::from_ref(&cur.mb_albumid));
+            add_ids(&mut cands, std::slice::from_ref(&cur.mb_albumid))?;
         }
         if !cands.is_empty() && !ctx.timid && rec_of(&cands) == Recommendation::Strong {
             crate::logging::debug!("ID match.");
@@ -727,12 +780,24 @@ pub fn album_candidates(
             _ => (cur.artist.clone(), cur.album.clone()),
         };
         let va_likely = cur.va || VA_ARTISTS.contains(&artist.to_lowercase().as_str());
-        let release_ids = mb.search_releases(items, &artist, &album, va_likely)?;
-        add_ids(&mut cands, &release_ids);
-        // The other metadata source's candidates (beets queries every
-        // source's `candidates`).
-        for info in crate::plugins::chroma::album_candidates(cfg, mb, items) {
-            add_candidate(&ctx, &cur, items, &mut cands, info);
+        if mb_on {
+            let release_ids = mb.search_releases(items, &artist, &album, va_likely)?;
+            add_ids(&mut cands, &release_ids)?;
+            // The other metadata source's candidates (beets queries every
+            // source's `candidates`).
+            for info in crate::plugins::chroma::album_candidates(cfg, mb, items) {
+                add_candidate(&ctx, &cur, items, &mut cands, info);
+            }
+        }
+        if tidal_on {
+            for info in metadata_list(
+                cfg,
+                "Tidal",
+                "candidates",
+                crate::plugins::tidal::album_candidates(cfg, items),
+            )? {
+                add_candidate(&ctx, &cur, items, &mut cands, info);
+            }
         }
     }
     sort_by_distance(&mut cands, |m| m.distance.distance());
@@ -759,7 +824,9 @@ pub fn item_candidates(
     search: Option<(&str, &str)>,
     ids: &[String],
 ) -> Result<(Vec<TrackMatch>, Recommendation)> {
-    if !crate::plugins::enabled(cfg, "musicbrainz") {
+    let mb_on = crate::plugins::enabled(cfg, "musicbrainz");
+    let tidal_on = crate::plugins::enabled(cfg, "tidal");
+    if !mb_on && !tidal_on {
         return Ok((vec![], Recommendation::None));
     }
     let ctx = Ctx::new(cfg);
@@ -793,10 +860,22 @@ pub fn item_candidates(
     };
     if !trackids.is_empty() {
         for id in &trackids {
-            match mb.track_for_id(id) {
-                Ok(Some(t)) => push(&mut cands, t),
-                Ok(None) => {}
-                Err(e) => crate::logging::emit(format!("warning: {e:#}")),
+            if mb_on {
+                match mb.track_for_id(id) {
+                    Ok(Some(t)) => push(&mut cands, t),
+                    Ok(None) => {}
+                    Err(e) => crate::logging::emit(format!("warning: {e:#}")),
+                }
+            }
+            if tidal_on
+                && let Some(t) = metadata_single(
+                    cfg,
+                    "Tidal",
+                    "track_for_id",
+                    crate::plugins::tidal::track_for_id(cfg, id),
+                )?
+            {
+                push(&mut cands, t);
             }
         }
         let rec = rec_of(&mut cands);
@@ -819,11 +898,23 @@ pub fn item_candidates(
         sa
     };
     let title = if st.is_empty() { item.str("title") } else { st };
-    for t in mb.search_recordings(artist, title)? {
-        push(&mut cands, t);
+    if mb_on {
+        for t in mb.search_recordings(artist, title)? {
+            push(&mut cands, t);
+        }
+        for t in crate::plugins::chroma::item_candidates(cfg, mb, item) {
+            push(&mut cands, t);
+        }
     }
-    for t in crate::plugins::chroma::item_candidates(cfg, mb, item) {
-        push(&mut cands, t);
+    if tidal_on {
+        for t in metadata_list(
+            cfg,
+            "Tidal",
+            "item_candidates",
+            crate::plugins::tidal::item_candidates(cfg, item),
+        )? {
+            push(&mut cands, t);
+        }
     }
     let rec = rec_of(&mut cands);
     Ok((cands, rec))

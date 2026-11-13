@@ -59,6 +59,32 @@ impl Source for MusicBrainz {
     }
 }
 
+struct MbSourceRef<'a>(&'a dyn Source);
+
+impl Source for MbSourceRef<'_> {
+    fn album_for_id(&self, id: &str) -> Result<Option<AlbumInfo>> {
+        self.0.album_for_id(id)
+    }
+    fn track_for_id(&self, id: &str) -> Result<Option<TrackInfo>> {
+        self.0.track_for_id(id)
+    }
+}
+
+/// beets' `metadata_plugins.album_for_id(id, "Tidal")` and
+/// `track_for_id`.
+struct TidalSource<'a> {
+    cfg: &'a Config,
+}
+
+impl Source for TidalSource<'_> {
+    fn album_for_id(&self, id: &str) -> Result<Option<AlbumInfo>> {
+        crate::plugins::tidal::album_for_id(self.cfg, id)
+    }
+    fn track_for_id(&self, id: &str) -> Result<Option<TrackInfo>> {
+        crate::plugins::tidal::track_for_id(self.cfg, id)
+    }
+}
+
 /// `beet mbsync`.
 pub fn command(cfg: &Config, lib: &Library, opts: CmdOpts) -> Result<()> {
     let mut cfg = cfg.clone();
@@ -114,21 +140,29 @@ impl<'a> Sync<'a> {
         crate::commands::format_record(&t, rec, Some(self.lib))
     }
 
-    /// `metadata_plugins.get_metadata_source(name)`: only MusicBrainz, and
-    /// only while its plugin is enabled.
-    fn source_for(&self, data_source: &str) -> Option<&dyn Source> {
-        (data_source.eq_ignore_ascii_case("musicbrainz")
-            && crate::plugins::enabled(self.cfg, "musicbrainz"))
-        .then_some(self.source)
+    /// `metadata_plugins.get_metadata_source(name)`: MusicBrainz (the
+    /// client this command was built with), or tidal, while the plugin is
+    /// enabled. (Other metadata sources, e.g. discogs, come with their own
+    /// plugins.)
+    fn source_for(&self, data_source: &str) -> Option<Box<dyn Source + '_>> {
+        if data_source.eq_ignore_ascii_case("musicbrainz")
+            && crate::plugins::enabled(self.cfg, "musicbrainz")
+        {
+            return Some(Box::new(MbSourceRef(self.source)));
+        }
+        if data_source.eq_ignore_ascii_case("tidal") && crate::plugins::enabled(self.cfg, "tidal") {
+            return Some(Box::new(TidalSource { cfg: self.cfg }));
+        }
+        None
     }
 
     /// `maybe_handle_plugin_error`: a lookup failure is logged (unless
     /// `raise_on_error`) and counts as not found.
-    fn lookup<T>(&self, method: &str, r: Result<Option<T>>) -> Result<Option<T>> {
+    fn lookup<T>(&self, source: &str, method: &str, r: Result<Option<T>>) -> Result<Option<T>> {
         match r {
             Ok(v) => Ok(v),
             Err(e) if !self.cfg.bool("raise_on_error") => {
-                crate::logging::emit(format!("Error in 'MusicBrainz.{method}': {e:#}"));
+                crate::logging::emit(format!("Error in '{source}.{method}': {e:#}"));
                 Ok(None)
             }
             Err(e) => Err(e),
@@ -156,7 +190,7 @@ impl<'a> Sync<'a> {
                 .cloned()
                 .unwrap_or_else(|| "MusicBrainz".into());
             let info = match self.source_for(&ds) {
-                Some(s) => self.lookup("track_for_id", s.track_for_id(&track_id))?,
+                Some(s) => self.lookup(&ds, "track_for_id", s.track_for_id(&track_id))?,
                 None => None,
             };
             let Some(info) = info else {
@@ -223,7 +257,7 @@ impl<'a> Sync<'a> {
                 },
             };
             let info = match self.source_for(&ds) {
-                Some(s) => self.lookup("album_for_id", s.album_for_id(&album_id))?,
+                Some(s) => self.lookup(&ds, "album_for_id", s.album_for_id(&album_id))?,
                 None => None,
             };
             let Some(info) = info else {
