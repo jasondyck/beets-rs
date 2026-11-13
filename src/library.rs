@@ -186,7 +186,7 @@ impl Library {
             Value::Int(0) if name == "album_id" => SqlValue::Null,
             Value::Int(i) => SqlValue::Integer(*i),
             Value::Float(f) => SqlValue::Real(*f),
-            Value::Bool(b) => SqlValue::Integer(*b as i64),
+            Value::Bool(b) => SqlValue::Integer(i64::from(*b)),
             Value::Path(p) if p.as_os_str().is_empty() => SqlValue::Null,
             Value::Path(p) => SqlValue::Blob(to_db_path(
                 p.as_os_str().as_bytes(),
@@ -196,6 +196,8 @@ impl Library {
     }
 }
 
+// beets stores/reads these as mutagen/Python numbers; the casts mirror that.
+#[allow(clippy::cast_possible_truncation, clippy::cast_precision_loss)]
 fn from_sql(v: SqlValue, ty: FieldType, music_dir: Option<&Path>) -> Value {
     match (ty, v) {
         (_, SqlValue::Null) => ty.default_value(),

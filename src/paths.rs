@@ -36,6 +36,8 @@ fn key_query(key: &str) -> &str {
 
 /// beets' `get_max_filename_length`: `max_filename_length`, else what the
 /// library directory's filesystem allows (at most 200).
+// as beets' int(max_filename_length): floats truncate like Python int().
+#[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
 fn max_filename_length(cfg: &Config, directory: &Path) -> usize {
     use std::os::unix::ffi::OsStrExt;
     let configured = cfg.f64("max_filename_length") as usize;

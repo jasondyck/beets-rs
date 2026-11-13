@@ -106,6 +106,8 @@ pub fn mpeg(data: &[u8], size: u64) -> Option<Info> {
 }
 
 /// `mpeg` with mutagen's encoder details (`_parse_vbr_header`).
+// Matches mutagen/Python: header numbers truncate/round like int()/float().
+#[allow(clippy::cast_possible_truncation, clippy::cast_precision_loss)]
 pub fn mpeg_full(data: &[u8], size: u64) -> Option<(Info, Encoder)> {
     // Skip ID3v2 tags (there can be several).
     let mut pos = 0;
@@ -141,7 +143,7 @@ pub fn mpeg_full(data: &[u8], size: u64) -> Option<(Info, Encoder)> {
             2 => 2,
             _ => 4,
         };
-    let padding = ((h >> 9) & 1) as i64;
+    let padding = i64::from((h >> 9) & 1);
     let mono = (h >> 6) & 3 == 3;
     let frame_size: i64 = if mpeg1 { 1152 } else { 576 };
     let frame_length = (frame_size / 8 * bitrate) / sample_rate + padding;
@@ -181,7 +183,11 @@ pub fn mpeg_full(data: &[u8], size: u64) -> Option<(Info, Encoder)> {
         if flags & flag == 0 {
             return Some(None);
         }
-        let v = if len == 4 { be32(data, p)? as i64 } else { 0 };
+        let v = if len == 4 {
+            i64::from(be32(data, p)?)
+        } else {
+            0
+        };
         data.get(p..p + len)?;
         p += len;
         Some(Some(v))
@@ -336,15 +342,15 @@ fn lame_header(data: &[u8], h: usize, vbr_scale: i64) -> Option<LameHeader> {
     let d = u32::from_be_bytes([0, h[12], h[13], h[14]]);
     Some(LameHeader {
         vbr_method: h[0] & 0xf,
-        lowpass_filter: h[1] as u32 * 100,
+        lowpass_filter: u32::from(h[1]) * 100,
         quality: (100 - vbr_scale).rem_euclid(10),
         vbr_quality: (100 - vbr_scale).div_euclid(10),
         encoding_flags: h[10] >> 4,
         ath_type: h[10] & 0xf,
-        bitrate: h[11] as u32,
-        delay: (d >> 12) as i64,
-        padding: (d & 0xfff) as i64,
-        preset_used: ((h[17] as u32 & 0x07) << 8) | h[18] as u32,
+        bitrate: u32::from(h[11]),
+        delay: i64::from(d >> 12),
+        padding: i64::from(d & 0xfff),
+        preset_used: ((u32::from(h[17]) & 0x07) << 8) | u32::from(h[18]),
     })
 }
 
@@ -437,13 +443,15 @@ impl LameHeader {
 }
 
 /// mutagen's VBRI header (Fraunhofer) at `off`.
+// Matches mutagen/Python: header numbers truncate/round like int()/float().
+#[allow(clippy::cast_possible_truncation, clippy::cast_precision_loss)]
 fn vbri(data: &[u8], off: usize, frame_size: i64, sample_rate: i64) -> Option<Info> {
     let d = data.get(off..off + 26)?;
     if &d[..4] != b"VBRI" || u16::from_be_bytes([d[4], d[5]]) != 1 {
         return None;
     }
-    let bytes = be32(d, 10)? as i64;
-    let frames = be32(d, 14)? as i64;
+    let bytes = i64::from(be32(d, 10)?);
+    let frames = i64::from(be32(d, 14)?);
     let entries = u16::from_be_bytes([d[18], d[19]]) as usize;
     let entry_size = u16::from_be_bytes([d[22], d[23]]) as usize;
     if !matches!(entry_size, 2 | 4) {
@@ -463,6 +471,8 @@ fn vbri(data: &[u8], off: usize, frame_size: i64, sample_rate: i64) -> Option<In
 
 /// mutagen's `FLAC`: total samples over the sample rate; the bitrate from
 /// the size of what follows the metadata blocks.
+// Matches mutagen/Python: header numbers truncate/round like int()/float().
+#[allow(clippy::cast_possible_truncation, clippy::cast_precision_loss)]
 fn flac(f: &mut File, size: u64) -> Option<Info> {
     let mut off = 0u64;
     // mutagen skips ID3v2 tags in front of the stream.
@@ -473,7 +483,7 @@ fn flac(f: &mut File, size: u64) -> Option<Info> {
         }
         let size = h[6..10]
             .iter()
-            .fold(0u64, |acc, &x| (acc << 7) | (x & 0x7f) as u64);
+            .fold(0u64, |acc, &x| (acc << 7) | u64::from(x & 0x7f));
         off += 10 + size;
     }
     let d = read_at(f, off, 4 + 4 + 34)?;
@@ -481,17 +491,20 @@ fn flac(f: &mut File, size: u64) -> Option<Info> {
         return None;
     }
     let s = &d[8..];
-    let rate = ((s[10] as u64) << 12) | ((s[11] as u64) << 4) | (s[12] as u64 >> 4);
+    let rate = (u64::from(s[10]) << 12) | (u64::from(s[11]) << 4) | (u64::from(s[12]) >> 4);
     if rate == 0 {
         return None;
     }
-    let total = s[13..18].iter().fold(0u64, |acc, &x| (acc << 8) | x as u64) & 0xF_FFFF_FFFF;
+    let total = s[13..18]
+        .iter()
+        .fold(0u64, |acc, &x| (acc << 8) | u64::from(x))
+        & 0xF_FFFF_FFFF;
     let length = total as f64 / rate as f64;
     // Walk the metadata blocks to where the audio starts.
     let mut pos = off + 4;
     loop {
         let h = read_at(f, pos, 4)?;
-        pos += 4 + u32::from_be_bytes([0, h[1], h[2], h[3]]) as u64;
+        pos += 4 + u64::from(u32::from_be_bytes([0, h[1], h[2], h[3]]));
         if h[0] & 0x80 != 0 {
             break;
         }
@@ -512,11 +525,11 @@ fn boxes(f: &mut File, start: u64, end: u64) -> Vec<([u8; 4], u64, u64)> {
     let mut pos = start;
     while pos + 8 <= end {
         let Some(h) = read_at(f, pos, 8) else { break };
-        let mut size = u32::from_be_bytes(
+        let mut size = u64::from(u32::from_be_bytes(
             h[..4]
                 .try_into()
                 .expect("BUG: read_at returned eight bytes"),
-        ) as u64;
+        ));
         let mut header = 8;
         if size == 1 {
             let Some(l) = read_at(f, pos + 8, 8) else {
@@ -560,6 +573,8 @@ fn descend(f: &mut File, mut range: (u64, u64), names: &[&[u8; 4]]) -> Option<(u
 /// mutagen's `MP4Info`: the first sound track's `mdhd` duration over its
 /// time scale, and the bitrate its sample entry gives (`esds` average
 /// bitrate, ALAC cookie, AC-3 rate code).
+// Matches mutagen/Python: header numbers truncate/round like int()/float().
+#[allow(clippy::cast_possible_truncation)]
 fn mp4(f: &mut File, size: u64) -> Option<Info> {
     let moov = child(f, (0, size), b"moov")?;
     let trak = boxes(f, moov.0, moov.1).into_iter().find_map(|(n, s, e)| {
@@ -591,9 +606,9 @@ fn mp4(f: &mut File, size: u64) -> Option<Info> {
 /// `mdhd`/`mvhd`: duration / time scale (version 0 or 1).
 fn mdhd_length(d: &[u8]) -> Option<f64> {
     let (unit, length) = match d.first()? {
-        0 => (be32(d, 12)? as u64, be32(d, 16)? as u64),
+        0 => (u64::from(be32(d, 12)?), u64::from(be32(d, 16)?)),
         1 => (
-            be32(d, 20)? as u64,
+            u64::from(be32(d, 20)?),
             u64::from_be_bytes(d.get(24..32)?.try_into().ok()?),
         ),
         _ => return None,
@@ -626,7 +641,7 @@ fn sample_entry_bitrate(d: &[u8]) -> Option<i64> {
             if body[0] != 0 || *body.get(8)? != 0 {
                 return Some(0);
             }
-            Some(be32(body, 20)? as i64)
+            Some(i64::from(be32(body, 20)?))
         }
         (b"ac-3", b"dac3") => {
             let code = (u32::from_be_bytes([0, body[0], body[1], body[2]]) >> 5) & 0x1f;
@@ -685,7 +700,7 @@ fn esds_bitrate(d: &[u8]) -> Option<i64> {
     };
     desc_len()?;
     // objectType (1), streamType (1), bufferSize (3), maxBitrate (4).
-    Some(be32(d, p + 9)? as i64)
+    Some(i64::from(be32(d, p + 9)?))
 }
 
 // ------------------------------------------------------------------- Ogg
@@ -713,7 +728,7 @@ impl Page {
             return None;
         }
         let lacing = read_at(f, off + 27, h[26] as usize)?;
-        let body: u64 = lacing.iter().map(|&l| l as u64).sum();
+        let body: u64 = lacing.iter().map(|&l| u64::from(l)).sum();
         Some(Page {
             flags: h[5],
             position: i64::from_le_bytes(h[6..14].try_into().ok()?),
@@ -724,7 +739,7 @@ impl Page {
     }
 
     fn body_start(&self) -> u64 {
-        self.end - self.lacing.iter().map(|&l| l as u64).sum::<u64>()
+        self.end - self.lacing.iter().map(|&l| u64::from(l)).sum::<u64>()
     }
 
     /// mutagen's `complete`: the last packet ends on this page.
@@ -743,6 +758,12 @@ impl Page {
 }
 
 /// mutagen's `OggVorbisInfo` and `OggOpusInfo`.
+// Matches mutagen/Python: header numbers truncate/round like int()/float().
+#[allow(
+    clippy::cast_possible_truncation,
+    clippy::cast_possible_wrap,
+    clippy::cast_precision_loss
+)]
 fn ogg(f: &mut File, size: u64, kind: Ogg) -> Option<Info> {
     let magic: &[u8] = match kind {
         Ogg::Vorbis => b"\x01vorbis",
@@ -766,11 +787,11 @@ fn ogg(f: &mut File, size: u64, kind: Ogg) -> Option<Info> {
     let serial = page.serial;
     let mut info = match kind {
         Ogg::Vorbis => {
-            let rate = le32(&head, 12)? as i64;
+            let rate = i64::from(le32(&head, 12)?);
             if rate == 0 || head.len() < 28 {
                 return None;
             }
-            let br = |at| le32(&head, at).map(|v| (v as i32).max(0) as i64);
+            let br = |at| le32(&head, at).map(|v| i64::from((v as i32).max(0)));
             let (max, nominal, min) = (br(16)?, br(20)?, br(24)?);
             let bitrate = if nominal == 0 {
                 (max + min) / 2
@@ -787,7 +808,7 @@ fn ogg(f: &mut File, size: u64, kind: Ogg) -> Option<Info> {
     };
     let mut audio_size = 0;
     let pre_skip = if kind == Ogg::Opus {
-        let pre_skip = le16(&head, 10)? as i64;
+        let pre_skip = i64::from(le16(&head, 10)?);
         // The comment header's pages: the audio is what follows them.
         let mut off = page.end;
         let mut tags = loop {
@@ -877,14 +898,14 @@ fn wavpack(f: &mut File) -> Option<Info> {
     }
     let total = le32(&h, 12)?;
     let samples = if total == u32::MAX || le32(&h, 16)? != 0 {
-        let mut samples = le32(&h, 20)? as i64;
+        let mut samples = i64::from(le32(&h, 20)?);
         let mut off = 0u64;
         let mut h = h;
         loop {
-            off += le32(&h, 4)? as u64 + 8;
+            off += u64::from(le32(&h, 4)?) + 8;
             match header(f, off) {
                 Some(next) => {
-                    samples += le32(&next, 20)? as i64;
+                    samples += i64::from(le32(&next, 20)?);
                     h = next;
                 }
                 None => break,
@@ -892,7 +913,7 @@ fn wavpack(f: &mut File) -> Option<Info> {
         }
         samples
     } else {
-        total as i64
+        i64::from(total)
     };
     Some(Info {
         length: samples as f64 / rate as f64,
@@ -920,8 +941,9 @@ pub fn ape(h: &[u8]) -> Option<Info> {
         (bpf, le32(h, 28)?, le32(h, 24)?, le32(h, 12)?)
     };
     let length = if rate != 0 && total_frames > 0 {
-        ((total_frames as u64 - 1) * blocks_per_frame as u64 + final_blocks as u64) as f64
-            / rate as f64
+        ((u64::from(total_frames) - 1) * u64::from(blocks_per_frame) + u64::from(final_blocks))
+            as f64
+            / f64::from(rate)
     } else {
         0.0
     };
@@ -940,11 +962,11 @@ fn iff_chunks(f: &mut File, size: u64, le: bool) -> Vec<([u8; 4], u64, u64)> {
         let n: [u8; 4] = h[4..8]
             .try_into()
             .expect("BUG: read_at returned eight bytes");
-        let len = if le {
+        let len = u64::from(if le {
             u32::from_le_bytes(n)
         } else {
             u32::from_be_bytes(n)
-        } as u64;
+        });
         out.push((
             h[..4]
                 .try_into()
@@ -959,6 +981,8 @@ fn iff_chunks(f: &mut File, size: u64, le: bool) -> Vec<([u8; 4], u64, u64)> {
 
 /// mutagen's `WaveStreamInfo`: channels x bits x rate; data size over the
 /// block alignment over the rate.
+// Matches mutagen/Python: header numbers truncate/round like int()/float().
+#[allow(clippy::cast_precision_loss)]
 fn wav(f: &mut File, size: u64) -> Option<Info> {
     let h = read_at(f, 0, 12)?;
     if &h[..4] != b"RIFF" || &h[8..12] != b"WAVE" {
@@ -968,10 +992,10 @@ fn wav(f: &mut File, size: u64) -> Option<Info> {
     let id = |c: &([u8; 4], u64, u64)| c.0.to_ascii_lowercase();
     let fmt = chunks.iter().find(|c| &id(c) == b"fmt ")?;
     let d = read_at(f, fmt.1, 16)?;
-    let channels = le16(&d, 2)? as i64;
-    let rate = le32(&d, 4)? as i64;
-    let block_align = le16(&d, 12)? as f64;
-    let bits = le16(&d, 14)? as i64;
+    let channels = i64::from(le16(&d, 2)?);
+    let rate = i64::from(le32(&d, 4)?);
+    let block_align = f64::from(le16(&d, 12)?);
+    let bits = i64::from(le16(&d, 14)?);
     let samples = match chunks.iter().find(|c| &id(c) == b"data") {
         Some(data) if block_align > 0.0 => data.2 as f64 / block_align,
         _ => 0.0,
@@ -983,6 +1007,8 @@ fn wav(f: &mut File, size: u64) -> Option<Info> {
 }
 
 /// mutagen's `AIFFInfo`: frames over the rate; channels x bits x rate.
+// Matches mutagen/Python: header numbers truncate/round like int()/float().
+#[allow(clippy::cast_possible_truncation, clippy::cast_precision_loss)]
 fn aiff(f: &mut File, size: u64) -> Option<Info> {
     let h = read_at(f, 0, 12)?;
     if &h[..4] != b"FORM" {
@@ -992,9 +1018,9 @@ fn aiff(f: &mut File, size: u64) -> Option<Info> {
         .into_iter()
         .find(|c| &c.0 == b"COMM")?;
     let d = read_at(f, comm.1, 18)?;
-    let channels = i16::from_be_bytes([d[0], d[1]]) as i64;
-    let frames = be32(&d, 2)? as f64;
-    let bits = i16::from_be_bytes([d[6], d[7]]) as i64;
+    let channels = i64::from(i16::from_be_bytes([d[0], d[1]]));
+    let frames = f64::from(be32(&d, 2)?);
+    let bits = i64::from(i16::from_be_bytes([d[6], d[7]]));
     let rate = ieee_extended(d[8..18].try_into().ok()?)? as i64;
     Some(Info {
         length: if rate != 0 { frames / rate as f64 } else { 0.0 },
@@ -1004,7 +1030,7 @@ fn aiff(f: &mut File, size: u64) -> Option<Info> {
 
 /// An 80-bit IEEE 754 extended float (mutagen's `read_float`).
 fn ieee_extended(b: [u8; 10]) -> Option<f64> {
-    let exp = (((b[0] & 0x7f) as i32) << 8) | b[1] as i32;
+    let exp = (i32::from(b[0] & 0x7f) << 8) | i32::from(b[1]);
     let mant = u64::from_be_bytes(b[2..10].try_into().ok()?);
     if exp == 0 && mant == 0 {
         return Some(0.0);

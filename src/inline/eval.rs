@@ -216,6 +216,12 @@ impl<'a, 'g> Interp<'a, 'g> {
         }
     }
 
+    // Python semantics: indexes, lengths and int() truncate/wrap like CPython.
+    #[allow(
+        clippy::cast_possible_truncation,
+        clippy::cast_possible_wrap,
+        clippy::cast_sign_loss
+    )]
     fn assign(&mut self, t: &Target, v: V<'a>) -> PyResult<()> {
         match t {
             Target::Name(n) => {
@@ -551,6 +557,8 @@ fn py_mod(a: f64, b: f64) -> f64 {
     }
 }
 
+// Python semantics: indexes, lengths and int() truncate/wrap like CPython.
+#[allow(clippy::cast_precision_loss)]
 pub fn binary<'a>(op: &str, a: &V<'a>, b: &V<'a>) -> PyResult<V<'a>> {
     // Integers (bools count) stay integers.
     if let (Some(x), Some(y)) = (a.int(), b.int()) {
@@ -788,6 +796,12 @@ fn compare<'a>(op: &str, a: &V<'a>, b: &V<'a>) -> PyResult<bool> {
     })
 }
 
+// Python semantics: indexes, lengths and int() truncate/wrap like CPython.
+#[allow(
+    clippy::cast_possible_truncation,
+    clippy::cast_possible_wrap,
+    clippy::cast_sign_loss
+)]
 fn norm_index(i: i64, len: usize) -> Option<usize> {
     let n = len as i64;
     let k = if i < 0 { i + n } else { i };
@@ -834,7 +848,7 @@ pub fn index<'a>(b: &V<'a>, i: &V<'a>) -> PyResult<V<'a>> {
                     }
                 }
                 V::Bytes(x) => match norm_index(k, x.len()) {
-                    Some(k) => Ok(V::Int(x[k] as i64)),
+                    Some(k) => Ok(V::Int(i64::from(x[k]))),
                     None => out_of_range(),
                 },
                 V::List(l) => {
@@ -859,6 +873,12 @@ pub fn index<'a>(b: &V<'a>, i: &V<'a>) -> PyResult<V<'a>> {
 }
 
 /// Python's slice indices for a sequence of `len`.
+// Python semantics: indexes, lengths and int() truncate/wrap like CPython.
+#[allow(
+    clippy::cast_possible_truncation,
+    clippy::cast_possible_wrap,
+    clippy::cast_sign_loss
+)]
 fn slice_indices(
     len: usize,
     a: Option<i64>,
@@ -1085,6 +1105,13 @@ pub fn call<'a>(f: &V<'a>, args: Vec<V<'a>>, kwargs: Vec<(String, V<'a>)>) -> Py
     }
 }
 
+// Python semantics: indexes, lengths and int() truncate/wrap like CPython.
+#[allow(
+    clippy::cast_possible_truncation,
+    clippy::cast_possible_wrap,
+    clippy::cast_precision_loss,
+    clippy::cast_sign_loss
+)]
 fn builtin<'a>(name: &str, args: Vec<V<'a>>, kwargs: Vec<(String, V<'a>)>) -> PyResult<V<'a>> {
     let kw = |k: &str| kwargs.iter().find(|(n, _)| n == k).map(|(_, v)| v.clone());
     if let Some((k, _)) = kwargs.iter().find(|(k, _)| {
@@ -1539,6 +1566,12 @@ fn is_py_space(c: char) -> bool {
     c.is_whitespace() || ('\x1c'..='\x1f').contains(&c)
 }
 
+// Python semantics: indexes, lengths and int() truncate/wrap like CPython.
+#[allow(
+    clippy::cast_possible_truncation,
+    clippy::cast_possible_wrap,
+    clippy::cast_sign_loss
+)]
 fn str_method<'a>(
     s: &str,
     name: &str,
@@ -1973,6 +2006,12 @@ fn str_format<'a>(fmt: &str, args: &[V<'a>], kwargs: &[(String, V<'a>)]) -> PyRe
     Ok(out)
 }
 
+// Python semantics: indexes, lengths and int() truncate/wrap like CPython.
+#[allow(
+    clippy::cast_possible_truncation,
+    clippy::cast_possible_wrap,
+    clippy::cast_sign_loss
+)]
 fn method<'a>(
     obj: &V<'a>,
     name: &str,

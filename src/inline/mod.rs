@@ -145,7 +145,7 @@ pub fn py_value<'a>(rec: &Record, key: &str) -> V<'a> {
                 V::Bytes(Rc::new(s.into_bytes()))
             }
         }
-        (FieldType::Bool, v) => V::Int((v.as_f64().unwrap_or(0.0) != 0.0) as i64),
+        (FieldType::Bool, v) => V::Int(i64::from(v.as_f64().unwrap_or(0.0) != 0.0)),
         (FieldType::Int | FieldType::Padded(_) | FieldType::Bitrate | FieldType::SampleRate, v) => {
             V::Int(v.as_f64().unwrap_or(0.0) as i64)
         }

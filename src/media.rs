@@ -76,7 +76,7 @@ fn mp4_sample_size(path: &Path) -> Option<i64> {
             f.seek(SeekFrom::Start(pos)).ok()?;
             let mut h = [0u8; 16];
             f.read_exact(&mut h[..8]).ok()?;
-            let mut size = u32::from_be_bytes(h[..4].try_into().ok()?) as u64;
+            let mut size = u64::from(u32::from_be_bytes(h[..4].try_into().ok()?));
             let mut header = 8;
             if size == 1 {
                 f.read_exact(&mut h[8..16]).ok()?;
@@ -134,7 +134,7 @@ fn mp4_sample_size(path: &Path) -> Option<i64> {
         if u32::from_be_bytes(buf[4..8].try_into().ok()?) == 0 {
             return None;
         }
-        return Some(u16::from_be_bytes(buf[34..36].try_into().ok()?) as i64);
+        return Some(i64::from(u16::from_be_bytes(buf[34..36].try_into().ok()?)));
     }
     None
 }
@@ -150,11 +150,12 @@ pub fn read(path: &Path) -> Result<Item> {
     let (length, bitrate, enc) = crate::props::read(path, mf.file_type()).unwrap_or_else(|| {
         (
             props.duration().as_secs_f64(),
-            props
-                .audio_bitrate()
-                .or(props.overall_bitrate())
-                .unwrap_or(0) as i64
-                * 1000,
+            i64::from(
+                props
+                    .audio_bitrate()
+                    .or(props.overall_bitrate())
+                    .unwrap_or(0),
+            ) * 1000,
             Default::default(),
         )
     });
@@ -163,16 +164,16 @@ pub fn read(path: &Path) -> Result<Item> {
     item.set_str("encoder_settings", enc.settings);
     item.set("length", Value::Float(length));
     item.set_int("bitrate", bitrate);
-    item.set_int("samplerate", props.sample_rate().unwrap_or(0) as i64);
+    item.set_int("samplerate", i64::from(props.sample_rate().unwrap_or(0)));
     let bitdepth = props
         .bit_depth()
-        .map(|b| b as i64)
+        .map(i64::from)
         .or_else(|| match mf.file_type() {
             FileType::Mp4 => mp4_sample_size(path),
             _ => None,
         });
     item.set_int("bitdepth", bitdepth.unwrap_or(0));
-    item.set_int("channels", props.channels().unwrap_or(0) as i64);
+    item.set_int("channels", i64::from(props.channels().unwrap_or(0)));
     let format = match (mf.file_type(), path.extension().and_then(|e| e.to_str())) {
         (FileType::Mp4, Some(e))
             if e.eq_ignore_ascii_case("m4a") && props.bit_depth().is_some() =>

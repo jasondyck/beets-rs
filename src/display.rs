@@ -39,6 +39,8 @@ pub struct Display {
 }
 
 impl Display {
+    // beets turns float config values into integer widths with Python int().
+    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
     pub fn new(cfg: &Config) -> Display {
         let n = |k: &str, d: f64| {
             cfg.get(k)

@@ -144,9 +144,11 @@ impl<'a> V<'a> {
     }
 
     /// A number as f64 (bools count), for arithmetic.
+    // Python semantics: int()/float() and formatting truncate like CPython.
+    #[allow(clippy::cast_precision_loss)]
     pub fn num(&self) -> Option<f64> {
         match self {
-            V::Bool(b) => Some(*b as i64 as f64),
+            V::Bool(b) => Some(i64::from(*b) as f64),
             V::Int(i) => Some(*i as f64),
             V::Float(f) => Some(*f),
             _ => None,
@@ -156,7 +158,7 @@ impl<'a> V<'a> {
     /// An integer (bools count).
     pub fn int(&self) -> Option<i64> {
         match self {
-            V::Bool(b) => Some(*b as i64),
+            V::Bool(b) => Some(i64::from(*b)),
             V::Int(i) => Some(*i),
             _ => None,
         }
@@ -225,7 +227,7 @@ impl<'a> V<'a> {
     pub fn iter(&self) -> PyResult<Vec<V<'a>>> {
         Ok(match self {
             V::Str(s) => s.chars().map(|c| V::str(c.to_string())).collect(),
-            V::Bytes(b) => b.iter().map(|x| V::Int(*x as i64)).collect(),
+            V::Bytes(b) => b.iter().map(|x| V::Int(i64::from(*x))).collect(),
             V::List(l) => l.borrow().clone(),
             V::Tuple(t) => t.to_vec(),
             V::Dict(d) => d.borrow().iter().map(|(k, _)| k.clone()).collect(),
@@ -285,6 +287,12 @@ fn exp_str(m: &str, e: i32, upper: bool) -> String {
 }
 
 /// `format(x, 'g')`-style: `prec` significant digits, `alt` keeps zeros.
+// Python semantics: int()/float() and formatting truncate like CPython.
+#[allow(
+    clippy::cast_possible_truncation,
+    clippy::cast_possible_wrap,
+    clippy::cast_sign_loss
+)]
 fn general(x: f64, prec: usize, upper: bool, alt: bool, repr_like: bool) -> String {
     let p = prec.max(1);
     if x == 0.0 {
@@ -299,7 +307,7 @@ fn general(x: f64, prec: usize, upper: bool, alt: bool, repr_like: bool) -> Stri
         return s;
     }
     let (_, e) = expo(x, p - 1);
-    if -4 <= e && (e as i64) < p as i64 {
+    if -4 <= e && i64::from(e) < p as i64 {
         let digits = (p as i32 - 1 - e).max(0) as usize;
         let mut s = fixed(x, digits);
         if !alt && s.contains('.') {
@@ -570,6 +578,8 @@ pub fn format_value(v: &V, spec: &str) -> PyResult<String> {
 }
 
 /// `fmt % args` (printf-style).
+// Python semantics: int()/float() and formatting truncate like CPython.
+#[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
 pub fn percent_format<'a>(fmt: &str, args: &V<'a>) -> PyResult<String> {
     let mut vals: Vec<V<'a>> = match args {
         V::Tuple(t) => t.to_vec(),

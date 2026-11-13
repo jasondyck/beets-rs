@@ -86,7 +86,7 @@ impl Ctx {
             medium: cfg.f64("match.medium_rec_thresh"),
             gap: cfg.f64("match.rec_gap_thresh"),
             timid: cfg.bool("import.timid"),
-            this_year: chrono::Datelike::year(&chrono::Local::now()) as i64,
+            this_year: i64::from(chrono::Datelike::year(&chrono::Local::now())),
         }
     }
 
@@ -153,6 +153,8 @@ impl Distance {
 
     /// By position in a preference list: the first option is free, later
     /// ones cost more, and matching none costs 1.0.
+    // beets computes these counts/distances with Python's int()/float() conversions.
+    #[allow(clippy::cast_precision_loss)]
     pub fn add_priority(&mut self, key: &str, value: &str, options: &[Regex]) {
         let unit = 1.0 / options.len().max(1) as f64;
         let dist = options
@@ -405,6 +407,8 @@ pub fn current_metadata(items: &[Item]) -> Current {
 
 /// beets' `track_distance`. `incl_artist`: compare the track artist too
 /// (for various-artist releases and singletons).
+// beets computes these counts/distances with Python's int()/float() conversions.
+#[allow(clippy::cast_possible_wrap)]
 pub fn track_distance(ctx: &Ctx, item: &Item, track: &TrackInfo, incl_artist: bool) -> Distance {
     let mut d = ctx.dist();
     if let Some(len) = track.length.filter(|l| *l != 0.0) {
@@ -445,6 +449,8 @@ pub fn track_distance(ctx: &Ctx, item: &Item, track: &TrackInfo, incl_artist: bo
 /// Optimal assignment of items to tracks (beets' `assign_items`), by the
 /// tracks' distances without the artist. Returns (item, track) index
 /// pairs in track order.
+// beets computes these counts/distances with Python's int()/float() conversions.
+#[allow(clippy::cast_possible_truncation)]
 pub fn assign(ctx: &Ctx, items: &[Item], tracks: &[TrackInfo]) -> Vec<(usize, usize)> {
     const SCALE: f64 = 1e12;
     if items.is_empty() || tracks.is_empty() {
@@ -489,6 +495,8 @@ pub enum Recommendation {
 
 /// beets' `distance`: how far the album `info`, with the items matched to
 /// its tracks as `mapping`, is from what the items say (`cur`).
+// beets computes these counts/distances with Python's int()/float() conversions.
+#[allow(clippy::cast_possible_wrap, clippy::cast_precision_loss)]
 pub fn album_distance(
     ctx: &Ctx,
     cur: &Current,
