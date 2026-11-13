@@ -10,7 +10,7 @@ fn writes_completions() {
     command(
         &cfg,
         &lib,
-        CmdOpts {
+        &CmdOpts {
             no_fields: false,
             extra_values: vec![],
             output: out.to_string_lossy().into_owned(),

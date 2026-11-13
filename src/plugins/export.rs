@@ -85,7 +85,7 @@ impl JsonOpts {
             ensure_ascii: cfg.bool(&format!("{base}.ensure_ascii")),
             indent: cfg
                 .get(&format!("{base}.indent"))
-                .and_then(|v| v.as_u64())
+                .and_then(serde_yaml::Value::as_u64)
                 .map(|n| n as usize),
             item_sep,
             key_sep,
@@ -117,7 +117,7 @@ impl JVal {
             Some(PyVal::List(l)) => JVal::List(l.iter().cloned().map(JVal::Str).collect()),
             Some(PyVal::Tuples(t)) => JVal::List(
                 t.iter()
-                    .map(|(s, ms)| JVal::List(vec![JVal::Str(s.clone()), JVal::Int(*ms as i64)]))
+                    .map(|(s, ms)| JVal::List(vec![JVal::Str(s.clone()), JVal::Int(i64::from(*ms))]))
                     .collect(),
             ),
         }
@@ -361,9 +361,9 @@ fn row_json(r: &Row, sort_keys: bool) -> JVal {
 }
 
 /// `beet export`, to stdout or `-o`.
-pub fn command(cfg: &Config, lib: &Library, opts: CmdOpts) -> Result<()> {
+pub fn command(cfg: &Config, lib: &Library, opts: &CmdOpts) -> Result<()> {
     match &opts.output {
-        None => run(cfg, lib, &opts, &mut std::io::stdout().lock()),
+        None => run(cfg, lib, opts, &mut std::io::stdout().lock()),
         Some(path) => {
             let mode = if opts.append {
                 std::fs::OpenOptions::new()
@@ -374,7 +374,7 @@ pub fn command(cfg: &Config, lib: &Library, opts: CmdOpts) -> Result<()> {
                 std::fs::File::create(path)
             };
             let mut f = std::io::BufWriter::new(mode?);
-            run(cfg, lib, &opts, &mut f)
+            run(cfg, lib, opts, &mut f)
         }
     }
 }
@@ -476,7 +476,7 @@ pub fn run_export(
     crate::plugins::export::command(
         cfg,
         lib,
-        crate::plugins::export::CmdOpts {
+        &crate::plugins::export::CmdOpts {
             album: a.album,
             library: a.library,
             append: a.append,

@@ -87,8 +87,7 @@ pub fn matches(pattern: &str, val: &str) -> bool {
     // The threshold in effect, as beets reads the global config.
     let threshold = crate::query::context()
         .fuzzy
-        .map(|(_, t)| t)
-        .unwrap_or(threshold);
+        .map_or(threshold, |(_, t)| t);
     let threshold = if pattern.chars().count() < val.chars().count() {
         let p = pattern.chars().count() as f64;
         let v = val.chars().count() as f64;

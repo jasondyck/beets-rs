@@ -30,11 +30,11 @@ fn plugin(yaml: &str) -> LastGenre {
 }
 
 fn set(v: &[&str]) -> HashSet<String> {
-    v.iter().map(|s| s.to_string()).collect()
+    v.iter().map(ToString::to_string).collect()
 }
 
 fn s(v: &[&str]) -> Vec<String> {
-    v.iter().map(|s| s.to_string()).collect()
+    v.iter().map(ToString::to_string).collect()
 }
 
 /// `_setup_config`: whitelist off, canonical off, count 1 by default.
@@ -337,7 +337,7 @@ fn mock_lastfm(p: &mut LastGenre, mock: MockGenres) {
         let mut key = vec![kind.name().to_string()];
         key.extend(args.iter().cloned());
         mock.iter()
-            .find(|(k, _)| k.iter().map(|x| x.to_string()).collect::<Vec<_>>() == key)
+            .find(|(k, _)| k.iter().map(ToString::to_string).collect::<Vec<_>>() == key)
             .map(|(_, v)| s(v))
             .unwrap_or_default()
     }));

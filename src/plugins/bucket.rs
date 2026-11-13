@@ -68,7 +68,7 @@ pub fn span_from_str(span_str: &str) -> Result<YearSpan> {
 
 fn this_year() -> i64 {
     use chrono::Datelike;
-    chrono::Local::now().year() as i64
+    i64::from(chrono::Local::now().year())
 }
 
 /// `complete_year_spans`: sort by start; open ends reach the next span (the
@@ -340,7 +340,7 @@ impl Bucket {
     pub fn bucket(&self, text: &str, field: Option<&str>) -> Result<String, String> {
         let field = match field {
             Some(f) if !f.is_empty() => Some(f),
-            _ if text.chars().count() == 4 && text.chars().all(|c| c.is_numeric()) => Some("year"),
+            _ if text.chars().count() == 4 && text.chars().all(char::is_numeric) => Some("year"),
             _ => None,
         };
         if field == Some("year") {

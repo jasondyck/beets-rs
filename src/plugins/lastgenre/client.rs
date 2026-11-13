@@ -140,7 +140,7 @@ pub fn parse_top_tags(body: &str) -> Result<Vec<TopTag>, LastFmError> {
         .filter_map(|t| {
             Some(TopTag {
                 name: extract(t, "name")?,
-                weight: extract(t, "count").map(|c| py_number(&c)).unwrap_or(0.0),
+                weight: extract(t, "count").map_or(0.0, |c| py_number(&c)),
             })
         })
         .collect())
@@ -234,7 +234,7 @@ impl LastFmClient {
         args: &[String],
         fetch: impl FnOnce(&[String]) -> Vec<String>,
     ) -> Vec<String> {
-        if args.iter().any(|s| s.is_empty()) {
+        if args.iter().any(String::is_empty) {
             return vec![];
         }
         let replaced: Vec<String> = args.iter().map(|a| a.replace('\u{2010}', "-")).collect();

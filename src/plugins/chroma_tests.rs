@@ -12,7 +12,7 @@ use tempfile::TempDir;
 static SERIAL: Mutex<()> = Mutex::new(());
 
 fn serial() -> std::sync::MutexGuard<'static, ()> {
-    SERIAL.lock().unwrap_or_else(|e| e.into_inner())
+    SERIAL.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
 fn use_api(server: &Server) {

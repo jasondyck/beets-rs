@@ -105,7 +105,7 @@ impl Source for BeatportSource<'_> {
 }
 
 /// `beet bpsync`.
-pub fn command(cfg: &Config, lib: &Library, opts: CmdOpts) -> Result<()> {
+pub fn command(cfg: &Config, lib: &Library, opts: &CmdOpts) -> Result<()> {
     let mut cfg = cfg.clone();
     if let Some(f) = &opts.format {
         // `add_format_option()` without a target: both formats.
@@ -115,7 +115,7 @@ pub fn command(cfg: &Config, lib: &Library, opts: CmdOpts) -> Result<()> {
     // beets' `BPSyncPlugin.__init__` builds its own `BeatportPlugin()`.
     let beatport = Beatport::from_config(&cfg)?;
     let source = BeatportSource::new(&cfg, &beatport);
-    Sync::new(&cfg, lib, &opts, &source).run(&opts)
+    Sync::new(&cfg, lib, opts, &source).run(opts)
 }
 
 pub struct Sync<'a> {
@@ -172,7 +172,7 @@ impl<'a> Sync<'a> {
 
     /// `str.isnumeric()` on a Beatport id.
     fn is_numeric(s: &str) -> bool {
-        !s.is_empty() && s.chars().all(|c| c.is_numeric())
+        !s.is_empty() && s.chars().all(char::is_numeric)
     }
 
     /// `BPSyncPlugin.is_beatport_track`.
@@ -409,7 +409,7 @@ pub fn run_bpsync(
     command(
         cfg,
         lib,
-        CmdOpts {
+        &CmdOpts {
             pretend: a.pretend,
             mv: if a.mv {
                 Some(true)

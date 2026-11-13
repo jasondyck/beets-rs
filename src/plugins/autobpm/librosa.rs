@@ -51,7 +51,7 @@ pub fn decode(path: &Path) -> Result<Decoded> {
     use symphonia::core::probe::Hint;
 
     let file = std::fs::File::open(path)?;
-    let mss = MediaSourceStream::new(Box::new(file), Default::default());
+    let mss = MediaSourceStream::new(Box::new(file), symphonia::core::io::MediaSourceStreamOptions::default());
     let mut hint = Hint::new();
     if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
         hint.with_extension(ext);
@@ -76,8 +76,7 @@ pub fn decode(path: &Path) -> Result<Decoded> {
     let mut channels = track
         .codec_params
         .channels
-        .map(symphonia::core::audio::Channels::count)
-        .unwrap_or(1);
+        .map_or(1, symphonia::core::audio::Channels::count);
     loop {
         let packet = match format.next_packet() {
             Ok(p) => p,
@@ -147,7 +146,7 @@ fn kaiser_fast_window() -> (Vec<f64>, usize) {
         let mut term = 1.0;
         let y = x * x / 4.0;
         for k in 1..1000 {
-            term *= y / (k as f64 * k as f64);
+            term *= y / (f64::from(k) * f64::from(k));
             sum += term;
             if term < 1e-18 * sum {
                 break;
@@ -179,8 +178,8 @@ pub fn resample_kaiser_fast(x: &[f32], sr_orig: u32, sr_new: u32) -> Vec<f32> {
     if sr_orig == sr_new {
         return x.to_vec();
     }
-    let sample_ratio = sr_new as f64 / sr_orig as f64;
-    let n_out = (x.len() as f64 * sr_new as f64 / sr_orig as f64) as usize;
+    let sample_ratio = f64::from(sr_new) / f64::from(sr_orig);
+    let n_out = (x.len() as f64 * f64::from(sr_new) / f64::from(sr_orig)) as usize;
     let (mut interp_win, num_table) = kaiser_fast_window();
     if sample_ratio < 1.0 {
         for w in &mut interp_win {
@@ -213,7 +212,7 @@ pub fn resample_kaiser_fast(x: &[f32], sr_orig: u32, sr_new: u32) -> Vec<f32> {
         for i in 0..i_max {
             let idx = offset + i * index_step;
             let weight = interp_win[idx] + eta * interp_delta[idx];
-            acc += weight * x[n - i] as f64;
+            acc += weight * f64::from(x[n - i]);
         }
         frac = scale - frac;
         index_frac = frac * num_table as f64;
@@ -223,7 +222,7 @@ pub fn resample_kaiser_fast(x: &[f32], sr_orig: u32, sr_new: u32) -> Vec<f32> {
         for k in 0..k_max {
             let idx = offset + k * index_step;
             let weight = interp_win[idx] + eta * interp_delta[idx];
-            acc += weight * x[n + k + 1] as f64;
+            acc += weight * f64::from(x[n + k + 1]);
         }
         *out = acc as f32;
     }
@@ -306,14 +305,14 @@ pub fn mel_filterbank(sr: u32, n_fft: usize, n_mels: usize) -> Vec<Vec<f64>> {
         }
     };
     let fmin = 0.0;
-    let fmax = sr as f64 / 2.0;
+    let fmax = f64::from(sr) / 2.0;
     let mel_min = hz_to_mel(fmin);
     let mel_max = hz_to_mel(fmax);
     let mel_f: Vec<f64> = (0..n_mels + 2)
         .map(|i| mel_to_hz(mel_min + (mel_max - mel_min) * i as f64 / (n_mels + 1) as f64))
         .collect();
     let fftfreqs: Vec<f64> = (0..n_fft / 2 + 1)
-        .map(|k| k as f64 * sr as f64 / n_fft as f64)
+        .map(|k| k as f64 * f64::from(sr) / n_fft as f64)
         .collect();
     let mut weights = vec![vec![0.0; n_fft / 2 + 1]; n_mels];
     for m in 0..n_mels {
@@ -348,7 +347,7 @@ pub fn melspectrogram(y: &[f32], sr: u32, n_fft: usize, hop: usize, n_mels: usiz
             if let Some(sample) = padded.checked_sub(n_fft / 2)
                 && sample < y.len()
             {
-                *b = y[sample] as f64 * window[i];
+                *b = f64::from(y[sample]) * window[i];
             }
         }
         let spec = rfft(&buf, n_fft);
@@ -480,7 +479,7 @@ pub fn tempogram(onset: &[f64], win_length: usize) -> Vec<Vec<f64>> {
 /// `std_bpm=1`, `ac_size=8`, `max_tempo=320`, `aggregate=np.mean`).
 pub fn tempo(onset: &[f64], sr: u32, hop: usize) -> f64 {
     // `time_to_frames(8.0)` (n_fft=None: offset 0).
-    let win_length = ((8.0 * sr as f64) as usize) / hop;
+    let win_length = ((8.0 * f64::from(sr)) as usize) / hop;
     let win_length = win_length.max(1);
     let tg = tempogram(onset, win_length);
     let frames = tg.first().map_or(0, Vec::len);
@@ -498,7 +497,7 @@ pub fn tempo(onset: &[f64], sr: u32, hop: usize) -> f64 {
             if lag == 0 {
                 f64::INFINITY
             } else {
-                60.0 * sr as f64 / (hop as f64 * lag as f64)
+                60.0 * f64::from(sr) / (hop as f64 * lag as f64)
             }
         })
         .collect();

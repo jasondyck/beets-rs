@@ -25,8 +25,7 @@ const DUPLICATE_PLAY_THRESHOLD: f64 = 10.0;
 /// `is_url`: an http(s) stream rather than a file.
 pub fn is_url(path: &str) -> bool {
     path.split_once("://")
-        .map(|(scheme, _)| scheme == "http" || scheme == "https")
-        .unwrap_or(false)
+        .is_some_and(|(scheme, _)| scheme == "http" || scheme == "https")
 }
 
 /// The client the statistics code talks to (beets' `MPDClientWrapper`).
@@ -207,8 +206,7 @@ pub struct MPDStats<'a, C: Client> {
 fn now() -> f64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_secs_f64())
-        .unwrap_or(0.0)
+        .map_or(0.0, |d| d.as_secs_f64())
 }
 
 fn normpath(p: &str) -> String {
@@ -268,16 +266,15 @@ impl<'a, C: Client> MPDStats<'a, C> {
         increment: Option<f64>,
     ) -> Result<()> {
         let Some(item) = item else { return Ok(()) };
-        let mut item = match self.lib.get_item(item.id.unwrap_or(0)) {
-            Ok(Some(i)) => i,
-            _ => return Ok(()),
+        let Ok(Some(mut item)) = self.lib.get_item(item.id.unwrap_or(0)) else {
+            return Ok(());
         };
         let value = match increment {
             Some(inc) => {
                 let current = item
                     .get(attribute)
                     .and_then(|v| v.as_f64())
-                    .or_else(|| self.lib_flex_f64(&item, attribute))
+                    .or_else(|| Self::lib_flex_f64(&item, attribute))
                     .unwrap_or(0.0);
                 Some(Value::Float(current + inc))
             }
@@ -296,16 +293,15 @@ impl<'a, C: Client> MPDStats<'a, C> {
         Ok(())
     }
 
-    fn lib_flex_f64(&self, item: &Item, attribute: &str) -> Option<f64> {
+    fn lib_flex_f64(item: &Item, attribute: &str) -> Option<f64> {
         item.str(attribute).trim().parse().ok()
     }
 
     /// beets' `update_rating`.
     pub fn update_rating(&self, item: &Option<Item>, skipped: bool) -> Result<()> {
         let Some(it) = item else { return Ok(()) };
-        let mut it = match self.lib.get_item(it.id.unwrap_or(0)) {
-            Ok(Some(i)) => i,
-            _ => return Ok(()),
+        let Ok(Some(mut it)) = self.lib.get_item(it.id.unwrap_or(0)) else {
+            return Ok(());
         };
         let num = |name: &str, default: f64| -> f64 {
             it.get(name)

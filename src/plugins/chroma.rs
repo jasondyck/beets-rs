@@ -67,7 +67,7 @@ struct State {
 static STATE: LazyLock<Mutex<State>> = LazyLock::new(Default::default);
 
 fn state() -> std::sync::MutexGuard<'static, State> {
-    STATE.lock().unwrap_or_else(|e| e.into_inner())
+    STATE.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
 static LAST_REQUEST: Mutex<Option<Instant>> = Mutex::new(None);
@@ -80,7 +80,7 @@ fn api_base() -> String {
     #[cfg(test)]
     if let Some(b) = TEST_API_BASE
         .lock()
-        .unwrap_or_else(|e| e.into_inner())
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
         .clone()
     {
         return b;
@@ -180,7 +180,7 @@ pub fn fingerprint_file(path: &Path) -> Result<(f64, String), String> {
 /// requests a second. Errors are pyacoustid's `WebServiceError` messages.
 fn api_request(url: &str, params: &[(&str, String)]) -> Result<J, String> {
     {
-        let mut last = LAST_REQUEST.lock().unwrap_or_else(|e| e.into_inner());
+        let mut last = LAST_REQUEST.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         if let Some(t) = *last {
             let elapsed = t.elapsed();
             if elapsed < REQUEST_INTERVAL {
@@ -337,7 +337,7 @@ fn acoustid_match(cfg: &Config, log: &PluginLog, path: &Path) {
     log.debug(&format!("chroma: fingerprinted {}", bytes_repr(path)));
 
     let results = res.get("results").and_then(J::as_array);
-    if res.get("status").and_then(J::as_str) != Some("ok") || results.is_none_or(|r| r.is_empty()) {
+    if res.get("status").and_then(J::as_str) != Some("ok") || results.is_none_or(Vec::is_empty) {
         log.debug("no match found");
         return;
     }
@@ -881,14 +881,14 @@ impl TopN {
 
 fn base64_decode(s: &str) -> Option<Vec<u8>> {
     let val = |c: u8| -> Option<u32> {
-        Some(match c {
+        Some(u32::from(match c {
             b'A'..=b'Z' => c - b'A',
             b'a'..=b'z' => c - b'a' + 26,
             b'0'..=b'9' => c - b'0' + 52,
             b'-' | b'+' => 62,
             b'_' | b'/' => 63,
             _ => return None,
-        } as u32)
+        }))
     };
     let mut out = vec![];
     let (mut acc, mut bits) = (0u32, 0);
@@ -914,7 +914,7 @@ fn unpack(bytes: &[u8], width: usize) -> Vec<u32> {
         .map(|k| {
             (0..width).fold(0, |v, b| {
                 let bit = k * width + b;
-                v | ((((bytes[bit / 8] >> (bit % 8)) & 1) as u32) << b)
+                v | (u32::from((bytes[bit / 8] >> (bit % 8)) & 1) << b)
             })
         })
         .collect()
@@ -954,7 +954,7 @@ pub fn decode_fingerprint(data: &str) -> Option<Vec<u32>> {
     if exceptional > 0 {
         let ex = unpack(&input[offset..offset + ex_size], 5);
         let mut j = 0;
-        for b in bits.iter_mut() {
+        for b in &mut bits {
             if *b == 7 {
                 *b += ex[j];
                 j += 1;
@@ -996,7 +996,7 @@ fn match_fingerprints(a: &[u32], b: &[u32]) -> f64 {
         }
     }
     let top = counts.into_iter().max().unwrap_or(0);
-    top as f64 / asize.min(bsize) as f64
+    f64::from(top) / asize.min(bsize) as f64
 }
 
 /// pyacoustid's `compare_fingerprints`: a similarity score from 0 to 1.

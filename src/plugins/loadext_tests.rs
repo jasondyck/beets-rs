@@ -33,8 +33,7 @@ fn build_extension(dir: &std::path::Path, name: &str) -> Option<std::path::PathB
         .arg("-o")
         .arg(&so)
         .status()
-        .map(|s| s.success())
-        .unwrap_or(false);
+        .is_ok_and(|s| s.success());
     ok.then_some(so)
 }
 

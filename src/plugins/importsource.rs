@@ -80,13 +80,11 @@ fn writable(p: &Path) -> bool {
     use std::os::unix::fs::PermissionsExt;
     let ok = |p: &Path, bit: u32| {
         std::fs::metadata(p)
-            .map(|m| m.permissions().mode() & bit != 0)
-            .unwrap_or(false)
+            .is_ok_and(|m| m.permissions().mode() & bit != 0)
     };
     ok(p, 0o222)
         && p.parent()
-            .map(|d| ok(d, 0o222 | 0o111))
-            .unwrap_or(false)
+            .is_some_and(|d| ok(d, 0o222 | 0o111))
 }
 
 impl State {

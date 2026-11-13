@@ -194,7 +194,7 @@ pub fn embed_command(ctx: &PluginCtx, opts: &EmbedCmd) -> Result<()> {
         }
     } else if let Some(url) = &opts.url {
         let session = super::requests::Session::plain(super::USER_AGENT);
-        let resp = match session.get_any(url, Default::default()) {
+        let resp = match session.get_any(url, crate::plugins::requests::Request::default()) {
             Ok(r) if r.status >= 400 => {
                 let kind = if r.status < 500 { "Client" } else { "Server" };
                 log.error(&format!(

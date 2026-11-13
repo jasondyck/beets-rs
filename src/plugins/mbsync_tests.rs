@@ -50,7 +50,7 @@ impl Env {
         }
     }
 
-    fn item(&self, pairs: &[(&str, &str)]) -> Item {
+    fn item(pairs: &[(&str, &str)]) -> Item {
         let mut it = Item::new_item();
         it.set_path(format!("/nonexistent/{}.mp3", pairs.len()));
         for (k, v) in pairs {
@@ -60,14 +60,14 @@ impl Env {
     }
 
     fn add_album(&self, pairs: &[(&str, &str)]) -> Item {
-        let mut items = [self.item(pairs)];
+        let mut items = [Self::item(pairs)];
         self.lib.add_album(&mut items).unwrap();
         let [it] = items;
         it
     }
 
     fn add(&self, pairs: &[(&str, &str)]) -> Item {
-        let mut it = self.item(pairs);
+        let mut it = Self::item(pairs);
         self.lib.add(&mut it).unwrap();
         it
     }
@@ -252,7 +252,7 @@ fn album_takes_its_fields_from_a_changed_item_and_passes_them_on() {
         .iter()
         .enumerate()
         .map(|(n, id)| {
-            env.item(&[
+            Env::item(&[
                 ("album", "old"),
                 ("mb_albumid", "album id"),
                 ("mb_trackid", id),
@@ -281,7 +281,7 @@ fn album_takes_its_fields_from_a_changed_item_and_passes_them_on() {
 
 #[test]
 fn items_map_by_release_track_then_recording() {
-    let env = Env::new();
+    let _env = Env::new();
     let t = |rec: &str, rt: &str, disc: usize, idx: usize| TrackInfo {
         track_id: rec.into(),
         release_track_id: rt.into(),
@@ -298,12 +298,12 @@ fn items_map_by_release_track_then_recording() {
         ..Default::default()
     };
     let items = [
-        env.item(&[("mb_releasetrackid", "rt3"), ("mb_trackid", "r1")]),
-        env.item(&[("mb_trackid", "r1")]),
+        Env::item(&[("mb_releasetrackid", "rt3"), ("mb_trackid", "r1")]),
+        Env::item(&[("mb_trackid", "r1")]),
         // r2 twice: by disc and track number.
-        env.item(&[("mb_trackid", "r2"), ("disc", "1"), ("track", "2")]),
-        env.item(&[("mb_trackid", "r2"), ("disc", "3"), ("track", "9")]),
-        env.item(&[("mb_releasetrackid", "nope"), ("mb_trackid", "zzz")]),
+        Env::item(&[("mb_trackid", "r2"), ("disc", "1"), ("track", "2")]),
+        Env::item(&[("mb_trackid", "r2"), ("disc", "3"), ("track", "9")]),
+        Env::item(&[("mb_releasetrackid", "nope"), ("mb_trackid", "zzz")]),
     ];
     assert_eq!(map_items(&items, &info), [(0, 2), (1, 0), (2, 1)]);
 }

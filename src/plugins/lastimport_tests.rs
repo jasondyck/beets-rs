@@ -35,7 +35,7 @@ fn declare_types() {
         )]
         .into_iter()
         .collect(),
-        Default::default(),
+        std::collections::BTreeMap::default(),
     );
 }
 

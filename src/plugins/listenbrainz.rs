@@ -383,8 +383,7 @@ impl ListenBrainzPlugin {
                 .and_then(|r| r.get("date"))
                 .and_then(J::as_str)
                 .map(|d| d.split('-').next().unwrap_or_default().to_string())
-                .map(J::String)
-                .unwrap_or(J::Null);
+                .map_or(J::Null, J::String);
             info.push(serde_json::json!({
                 "identifier": identifier,
                 "title": title,
