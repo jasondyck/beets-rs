@@ -465,7 +465,7 @@ pub struct ParseOpts {
     pub album_custom_tags: Vec<(String, String)>,
     pub track_custom_tags: Vec<(String, String)>,
     /// The data source the parsed infos report: "MusicBrainz", or
-    /// "MusicBrainzPseudoRelease" while the mbpseudo plugin is enabled
+    /// `"MusicBrainzPseudoRelease"` while the mbpseudo plugin is enabled
     /// (beets' `MusicBrainzPseudoReleasePlugin.data_source`).
     pub data_source: String,
 }
