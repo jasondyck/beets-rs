@@ -1,17 +1,31 @@
-//! beets' `loadext` plugin: load SQLite extensions from `pluginpath`-like
-//! config values. beets-rs' bundled SQLite has extension loading disabled,
-//! so (as beets does on such a build) it only warns when enabled.
+//! beets' `loadext` plugin: load SQLite extensions (for the ICU
+//! collation, typically) when the library opens. The bundled SQLite is
+//! built with extension loading (`SQLITE_ENABLE_LOAD_EXTENSION`), so the
+//! plugin loads the configured files for real, as beets does.
 
 use crate::config::Config;
+use crate::events::{Event, Listener};
 use crate::plugins::{Plugin, PluginLog};
+use std::path::PathBuf;
+use std::rc::Rc;
 
 pub struct LoadExt;
 
+struct State {
+    cfg: Config,
+    log: PluginLog,
+}
+
 impl LoadExt {
-    pub fn new(_cfg: &Config) -> Self {
-        PluginLog::new("loadext").warning(
-            "loadext is enabled but the current SQLite installation does not support extensions",
-        );
+    pub fn new(cfg: &Config) -> Self {
+        let state = Rc::new(State {
+            cfg: cfg.clone(),
+            log: PluginLog::new("loadext"),
+        });
+        // beets raises an event listener's logger to WARNING (DEBUG with
+        // -vv, "loading extension").
+        state.log.set_base_level(crate::plugins::WARNING);
+        crate::events::register(state);
         LoadExt
     }
 }
@@ -19,6 +33,40 @@ impl LoadExt {
 impl Plugin for LoadExt {
     fn name(&self) -> &'static str {
         "loadext"
+    }
+}
+
+impl State {
+    /// A `loadext` entry as confuse's `Filename` reads it: `~` expanded,
+    /// a relative path taken from the configuration directory.
+    fn extension_path(&self, entry: &str) -> PathBuf {
+        let p = crate::config::expand_tilde(entry);
+        if p.is_absolute() {
+            p
+        } else {
+            self.cfg.config_dir.join(p)
+        }
+    }
+}
+
+impl Listener for State {
+    fn wants(&self, event: &str) -> bool {
+        event == "library_opened"
+    }
+
+    fn on(&self, ev: &Event) {
+        let Some(lib) = ev.lib() else { return };
+        for entry in self.cfg.list("loadext") {
+            let ext = self.extension_path(&entry);
+            self.log
+                .debug(&format!("loading extension {}", ext.display()));
+            if let Err(e) = lib.load_extension(&ext) {
+                self.log.error(&format!(
+                    "failed to load extension {}: {e}",
+                    ext.display()
+                ));
+            }
+        }
     }
 }
 
@@ -40,3 +88,7 @@ inventory::submit! {
 fn registry_make(cfg: &crate::config::Config) -> anyhow::Result<Box<dyn crate::plugins::Plugin>> {
     Ok(Box::new(LoadExt::new(cfg)))
 }
+
+#[cfg(test)]
+#[path = "loadext_tests.rs"]
+mod tests;

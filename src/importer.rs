@@ -1949,7 +1949,8 @@ impl<'a> Importer<'a> {
                 })
             }
             DuplicateAction::Skip => {
-                println!("Skipping.");
+                // beets' `log.info("Skipping.")`: a log line, on stderr.
+                eprintln!("Skipping.");
                 Ok(DupOutcome::Skip)
             }
         }

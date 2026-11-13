@@ -337,6 +337,25 @@ pub(crate) fn merge(base: Y, over: Y) -> Y {
     }
 }
 
+/// Deep-merge `over` into `base` keeping `base`'s key order (new keys,
+/// and new keys of shared sections, come last).
+fn merge_append(base: Y, over: Y) -> Y {
+    match (base, over) {
+        (Y::Mapping(mut b), Y::Mapping(o)) => {
+            for (k, v) in o {
+                match b.get_mut(&k) {
+                    Some(cur) => *cur = merge_append(std::mem::replace(cur, Y::Null), v),
+                    None => {
+                        b.insert(k, v);
+                    }
+                }
+            }
+            Y::Mapping(b)
+        }
+        (_, over) => over,
+    }
+}
+
 /// The core defaults (beets' `config_default.yaml`), without the plugins'
 /// sections.
 fn core_tree() -> Y {
@@ -595,7 +614,9 @@ impl Config {
     /// priority source's, the enabled plugins' sensitive values as
     /// "REDACTED", and the default config's comments before matching keys.
     pub fn dump(&self, full: bool, redact: bool) -> String {
-        let mut sources: Vec<&Y> = vec![&self.cli];
+        let sets = self.plugin_set_sources();
+        let mut sources: Vec<&Y> = sets.iter().collect();
+        sources.push(&self.cli);
         sources.extend(self.layers.iter());
         let core = core_tree();
         if full {
@@ -625,22 +646,61 @@ impl Config {
         restore_comments(&body)
     }
 
+    /// The sources beets' plugins `set` while they load, highest
+    /// priority first (beets loads the plugins in `plugins` order and
+    /// each `set` goes above the previous one).
+    fn plugin_set_sources(&self) -> Vec<Y> {
+        let names = crate::plugins::names(self);
+        let mut out = vec![];
+        for name in names.iter().rev() {
+            for def in crate::plugin_registry::load_sets() {
+                if def.plugin != name {
+                    continue;
+                }
+                let mut source = Y::Mapping(Mapping::new());
+                for (key, value) in (def.set)(self) {
+                    set_in(&mut source, key, value);
+                }
+                out.push(source);
+            }
+        }
+        out
+    }
+
     /// The sources beets' plugins add when they load (`config.add`): the
     /// `disabled_plugins` list, then each enabled plugin's sections in
     /// `plugins` order.
     fn plugin_defaults(&self) -> Y {
         let mut out = Mapping::new();
         out.insert(Y::String("disabled_plugins".into()), Y::Sequence(vec![]));
-        let defaults = default_tree();
+        // Each plugin's own `config.add` source, in load (`plugins`)
+        // order: an earlier plugin's keys stay first (beets appends the
+        // sources, so a later plugin's keys join its section at the end;
+        // two plugins can share a section, e.g. mpdupdate and mpdstats).
         for name in crate::plugins::names(self) {
             let Some(def) = crate::plugin_registry::find(&name) else {
                 continue;
             };
+            if def.defaults.trim().is_empty() {
+                continue;
+            }
+            let text = def.defaults.replace(
+                "CPU_COUNT",
+                &crate::plugins::replaygain::cpu_count().to_string(),
+            );
+            let Ok(y) = serde_yaml::from_str::<Y>(&yaml11_bools(&text)) else {
+                continue;
+            };
+            let mut mine = Mapping::new();
             for k in def.config_keys {
-                if let Some(v) = defaults.get(k) {
-                    out.insert(Y::String(k.to_string()), v.clone());
+                if let Some(v) = y.get(*k) {
+                    mine.insert(Y::String(k.to_string()), v.clone());
                 }
             }
+            out = merge_append(Y::Mapping(out), Y::Mapping(mine))
+                .as_mapping()
+                .unwrap()
+                .clone();
         }
         Y::Mapping(out)
     }
@@ -778,6 +838,35 @@ impl Config {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // beets' plugins that `set` config while loading (`importfeeds`'
+    // `relative_to`): the source goes above everything, so the section
+    // and its key come first.
+    #[test]
+    fn plugin_load_time_sets_come_first() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("config.yaml");
+        std::fs::write(&file, "directory: /srv/music\nplugins: [importfeeds]\n").unwrap();
+        let c = Config::load_file(&file).unwrap();
+        for full in [false, true] {
+            let out = c.dump(full, true);
+            assert_eq!(out.lines().next(), Some("importfeeds:"), "{out}");
+            let lines: Vec<&str> = out.lines().collect();
+            assert!(lines.contains(&"    relative_to: /srv/music"), "{out}");
+            let keys: Vec<&str> = lines
+                .iter()
+                .skip(1)
+                .take_while(|l| l.is_empty() || l.starts_with(' '))
+                .filter(|l| l.starts_with("    "))
+                .map(|l| l.trim().split(':').next().unwrap())
+                .collect();
+            assert_eq!(
+                keys,
+                ["relative_to", "formats", "m3u_name", "dir", "absolute_path"],
+                "{out}"
+            );
+        }
+    }
 
     // As confuse: a section's keys from the higher source first, then the
     // rest in the defaults' order.

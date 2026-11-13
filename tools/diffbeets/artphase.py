@@ -267,6 +267,8 @@ def snapshot(root, tool, normalise):
                     lines.append(f"{rel}: {describe_embedded(full)}")
                 elif low.endswith((".jpg", ".jpeg", ".png", ".webp", ".gif")):
                     lines.append(f"{rel}: {describe_image(full)}")
+                elif os.path.islink(full):
+                    lines.append(f"{rel}: -> {normalise(os.readlink(full))}")
                 else:
                     lines.append(rel)
     return "\n".join(lines)
@@ -300,7 +302,18 @@ def run_one(work, name, music, images, extra, steps, tool, normalise, url):
         yaml.safe_dump(config, f, allow_unicode=True)
     shutil.copytree(os.path.join(src, music), fill["music"])
     for dest, img in images.items():
-        shutil.copy(os.path.join(src, "img", img), os.path.join(fill["music"], dest))
+        target = os.path.join(fill["music"], dest)
+        if isinstance(img, tuple):
+            # ("text", template) or ("copy", fixture path): a file whose
+            # contents are written with the case's fill-ins.
+            kind, value = img
+            if kind == "copy":
+                with open(value) as fh:
+                    value = fh.read()
+            with open(target, "w") as fh:
+                fh.write(value.format(**fill))
+        else:
+            shutil.copy(os.path.join(src, "img", img), target)
     env = dict(tool.env)
     env[tool.envvar] = root
     env["NO_PROXY"] = "127.0.0.1,localhost"

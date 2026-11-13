@@ -201,3 +201,43 @@ fn amarok_quoteattr_as_python() {
     assert_eq!(quoteattr("a\"b'c"), "\"a&quot;b'c\"");
     assert_eq!(quoteattr("a&b<c>"), "\"a&amp;b&lt;c&gt;\"");
 }
+
+#[test]
+fn the_format_option_labels_the_no_match_warning() {
+    let mut c = Config::defaults();
+    let fixture = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures/metasync/itunes_library_unix.xml");
+    c.set(
+        "metasync.itunes.library",
+        fixture.to_string_lossy().into_owned().into(),
+    );
+    c.set("plugins", serde_yaml::from_str("[metasync]").unwrap());
+    crate::plugins::types::configure(&c).unwrap();
+    let lib = crate::library::Library::in_memory().unwrap();
+    let mut item = Item::new_item();
+    item.set("title", Value::Str("Two".into()));
+    item.set("path", Value::Path("/nowhere/Two.mp3".into()));
+    lib.add(&mut item).unwrap();
+    // beets' `-f` sets `format_item`, which `str(item)` (the warning's
+    // item) and the change display use.
+    let ((), lines) = crate::logging::capture(|| {
+        command(
+            &c,
+            &lib,
+            CmdOpts {
+                pretend: false,
+                sources: vec!["itunes".into()],
+                limit: None,
+                query: vec![],
+                format: Some("$title: $itunes_rating".into()),
+            },
+        )
+        .unwrap();
+    });
+    assert!(
+        lines
+            .iter()
+            .any(|l| l == "metasync: no iTunes match found for Two: $itunes_rating"),
+        "{lines:?}"
+    );
+}

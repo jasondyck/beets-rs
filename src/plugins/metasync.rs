@@ -454,9 +454,19 @@ pub struct CmdOpts {
     pub sources: Vec<String>,
     pub limit: Option<usize>,
     pub query: Vec<String>,
+    /// `-f`: beets sets the global `format_item` (the item labels here).
+    pub format: Option<String>,
 }
 
 pub fn command(cfg: &Config, lib: &Library, opts: CmdOpts) -> Result<()> {
+    // beets' `-f` callback (`ui._set_format`) sets the global
+    // `format_item`, which `str(item)` in the sources' warnings and the
+    // change display use.
+    let mut owned = cfg.clone();
+    if let Some(format) = &opts.format {
+        owned.set("format_item", format.as_str().into());
+    }
+    let cfg = &owned;
     let log = PluginLog::new("metasync");
     let mut sources = vec![];
     for s in &opts.sources {
@@ -592,6 +602,7 @@ pub fn run_metasync(
             sources: a.sources,
             limit: a.limit,
             query: a.query,
+            format: a.format,
         },
     )
 }

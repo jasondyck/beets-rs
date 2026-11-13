@@ -724,6 +724,25 @@ fn legacy_to_list_value(value: &str) -> String {
 }
 
 impl Library {
+    /// beets' `Database.load_extension`: load the SQLite extension at
+    /// `path` into the connection. SQLite adds the platform's library
+    /// suffix when the path has none or does not exist as given.
+    ///
+    /// Extension loading is enabled only for the load (rusqlite's
+    /// [`rusqlite::LoadExtensionGuard`]), so SQL's `load_extension()`
+    /// cannot run later queries as code.
+    pub fn load_extension(&self, path: &Path) -> Result<()> {
+        // SAFETY: extension loading is on only while loading the
+        // configured extension; no SQL runs in between (beets keeps it
+        // enabled for the connection's life, which also lets any later
+        // query call `load_extension()`).
+        unsafe {
+            let _guard = rusqlite::LoadExtensionGuard::new(&self.conn)?;
+            self.conn.load_extension(path, None::<&str>)?;
+        }
+        Ok(())
+    }
+
     #[cfg(test)]
     pub fn open(path: &Path) -> Result<Self> {
         Self::open_with(path, None, true)

@@ -19,6 +19,7 @@ EXTRA_CONFIGS.update({
     "config-bucket.yaml": "plugins: [bucket]\nbucket:\n    bucket_year: ['1990s']\n",
     "config-replaygain.yaml": "plugins: [replaygain]\n",
     "config-export.yaml": "plugins: [export]\n",
+    "config-importfeeds.yaml": "plugins: [importfeeds]\n",
     "config-playlist.yaml": "plugins: [playlist, parentwork]\n",
     "config-many.yaml": ("plugins: [the, zero, missing, convert, embedart, duplicates,"
                          " ftintitle, scrub, edit, albumtypes, types]\n"),
@@ -78,6 +79,7 @@ def _config_cases():
     for name in ["config-fetchart.yaml", "config-lyrics.yaml", "config-smartplaylist.yaml",
                  "config-web.yaml", "config-inline.yaml", "config-bucket.yaml",
                  "config-replaygain.yaml", "config-export.yaml", "config-playlist.yaml",
+                 "config-importfeeds.yaml",
                  "config-many.yaml"]:
         c = ["-c", f"{ROOT}/{name}"]
         out.append((f"-c {name} config", [*c, "config"]))

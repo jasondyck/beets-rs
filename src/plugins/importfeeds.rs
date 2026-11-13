@@ -253,6 +253,31 @@ inventory::submit! {
     }
 }
 
+/// beets' `__init__`: `self.config["relative_to"] = normpath(relative_to)`
+/// or the feeds dir, a `set` source above the other configuration.
+fn load_set(cfg: &Config) -> Vec<(&'static str, serde_yaml::Value)> {
+    let relative = cfg.str("importfeeds.relative_to");
+    let dir = cfg.str("importfeeds.dir");
+    let path = if !relative.is_empty() {
+        crate::query::normpath(Path::new(&relative))
+    } else if !dir.is_empty() {
+        crate::query::normpath(&crate::config::expand_tilde(&dir))
+    } else {
+        cfg.directory()
+    };
+    vec![(
+        "importfeeds.relative_to",
+        serde_yaml::Value::String(path.to_string_lossy().into_owned()),
+    )]
+}
+
+inventory::submit! {
+    crate::plugin_registry::PluginLoadSet {
+        plugin: "importfeeds",
+        set: load_set,
+    }
+}
+
 fn registry_make(cfg: &crate::config::Config) -> anyhow::Result<Box<dyn crate::plugins::Plugin>> {
     // beets registers the listeners in the plugin's `__init__`.
     crate::events::register(std::rc::Rc::new(ImportFeeds::new(cfg)));
