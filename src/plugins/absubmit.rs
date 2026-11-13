@@ -25,7 +25,7 @@ pub struct ABSubmit {
     extractor: PathBuf,
     /// The SHA-1 of the extractor binary, sent as `essentia_build_sha`.
     extractor_sha: String,
-    /// `base_url` + `{mbid}/low-level`; empty when no base_url is set.
+    /// `base_url` + `{mbid}/low-level`; empty when no `base_url` is set.
     url: String,
     force: bool,
     pretend: bool,

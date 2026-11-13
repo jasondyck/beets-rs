@@ -1,4 +1,4 @@
-//! beets' test/plugins/test_subsonicupdate.py, against a fake server.
+//! beets' `test/plugins/test_subsonicupdate.py`, against a fake server.
 
 use super::*;
 use crate::plugins::requests::testserver::{Reply, serve};

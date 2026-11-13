@@ -123,7 +123,7 @@ fn display(p: &Path) -> String {
     p.to_string_lossy().into_owned()
 }
 
-/// Python's `repr()` of a list of strings, for the CalledProcessError
+/// Python's `repr()` of a list of strings, for the `CalledProcessError`
 /// message.
 fn py_list_repr(items: &[String]) -> String {
     let parts: Vec<String> = items

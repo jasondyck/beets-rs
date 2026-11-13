@@ -1,4 +1,4 @@
-//! beets' test/plugins/test_art.py (and test_fetchart.py), with the web
+//! beets' `test/plugins/test_art.py` (and `test_fetchart.py`), with the web
 //! services served by a fake server on 127.0.0.1 (port 0) and test images
 //! generated with the `image` crate.
 
@@ -271,7 +271,7 @@ fn sources_need_their_keys_and_must_exist() {
     assert_eq!(env.plugin(None).sources[0].kind, SourceKind::Amazon);
 }
 
-/// test_fetchart.py `test_sources_is_*`.
+/// `test_fetchart.py` `test_sources_is_*`.
 #[test]
 fn sources_config_shapes() {
     let n = |yaml: &str| Env::new(yaml).plugin(None).sources.len();
@@ -287,7 +287,7 @@ fn sources_config_shapes() {
     assert_eq!(n("fetchart: {sources: [{coverart: [releasegroup]}]}"), 1);
 }
 
-/// test_fetchart.py `test_set_art_from_folder` (a non-ASCII cover name
+/// `test_fetchart.py` `test_set_art_from_folder` (a non-ASCII cover name
 /// that only matches as the folder's fallback image).
 #[test]
 fn command_sets_art_from_folder() {
@@ -306,7 +306,7 @@ fn command_sets_art_from_folder() {
     assert_eq!(std::fs::read(dir.join("mycover.jpg")).unwrap(), b"IMAGE");
 }
 
-/// test_art.py `TestDeprecatedConfig.test_moves_filesystem_to_end`.
+/// `test_art.py` `TestDeprecatedConfig.test_moves_filesystem_to_end`.
 #[test]
 fn remote_priority_moves_filesystem_to_end() {
     let env = Env::new("fetchart: {remote_priority: yes}");
@@ -1434,7 +1434,7 @@ fn command_output() {
         .unwrap();
 }
 
-/// The `store_source` and default `art_filename` with a cover_art_url
+/// The `store_source` and default `art_filename` with a `cover_art_url`
 /// download, end to end.
 #[test]
 fn command_downloads_from_cover_art_url() {

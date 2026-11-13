@@ -1,4 +1,4 @@
-//! beets' test/plugins/test_playlist.py: `playlist:` queries in the three
+//! beets' `test/plugins/test_playlist.py`: `playlist:` queries in the three
 //! `relative_to` modes, and the auto-update listeners.
 
 use super::*;

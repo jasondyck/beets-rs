@@ -5,7 +5,7 @@
 //!
 //! The Flask app is `App::handle`, a pure request → response function
 //! (what beets' tests drive through Flask's test client); `serve` puts it
-//! behind a small synchronous HTTP server (tiny_http). Requests are
+//! behind a small synchronous HTTP server (`tiny_http`). Requests are
 //! handled one at a time on the thread that owns the library (beets'
 //! models aren't shared between threads either); only writing a response
 //! out (an audio file streamed to a slow client, say) happens on a thread

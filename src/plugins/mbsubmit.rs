@@ -4,7 +4,7 @@
 //! files with Picard" for matches the recommendation isn't good enough
 //! for.
 //!
-//! [1] https://wiki.musicbrainz.org/History:How_To_Parse_Track_Listings
+//! [1] <https://wiki.musicbrainz.org/History:How_To_Parse_Track_Listings>
 
 use crate::autotag::Recommendation;
 use crate::config::Config;

@@ -194,7 +194,7 @@ pub fn py_format(fmt: &str, args: &[&str]) -> String {
 
 #[cfg(test)]
 mod tests {
-    //! Ported from beets' test/plugins/test_the.py.
+    //! Ported from beets' `test/plugins/test_the.py`.
     use super::*;
     use serde_yaml::Value as Y;
 

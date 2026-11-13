@@ -1,4 +1,4 @@
-//! beets' test/plugins/test_info.py, and the plugin's formatting.
+//! beets' `test/plugins/test_info.py`, and the plugin's formatting.
 
 use super::*;
 use crate::media;

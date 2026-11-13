@@ -1,4 +1,4 @@
-//! beets' test/plugins/test_listenbrainz.py, against fake servers.
+//! beets' `test/plugins/test_listenbrainz.py`, against fake servers.
 
 use super::*;
 use crate::plugins::requests::testserver::{Reply, serve};

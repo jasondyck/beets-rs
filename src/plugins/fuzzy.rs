@@ -71,7 +71,7 @@ fn is_lower(s: &str) -> bool {
     cased
 }
 
-/// `FuzzyQuery.string_match`: smartcase, then a SequenceMatcher ratio at
+/// `FuzzyQuery.string_match`: smartcase, then a `SequenceMatcher` ratio at
 /// the configured threshold (lowered when the pattern is shorter than the
 /// value, so it may match a substring).
 pub fn matches(pattern: &str, val: &str) -> bool {

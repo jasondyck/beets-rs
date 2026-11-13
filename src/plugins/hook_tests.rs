@@ -1,4 +1,4 @@
-//! Ported from beets' test/plugins/test_hook.py.
+//! Ported from beets' `test/plugins/test_hook.py`.
 
 use super::*;
 use crate::config::Config;

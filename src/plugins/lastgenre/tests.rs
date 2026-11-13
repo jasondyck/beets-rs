@@ -1,4 +1,4 @@
-//! beets' test/plugins/test_lastgenre.py, with Last.fm served by a fake
+//! beets' `test/plugins/test_lastgenre.py`, with Last.fm served by a fake
 //! server on 127.0.0.1 (port 0).
 
 use super::client::{Kind, LastFmClient, LastFmError, TopTag, filter_weight, parse_top_tags};

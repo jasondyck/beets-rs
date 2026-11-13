@@ -1,4 +1,4 @@
-//! beets' test/plugins/test_random.py, adapted: the seeded stream is this
+//! beets' `test/plugins/test_random.py`, adapted: the seeded stream is this
 //! port's own, so the statistical checks use fixed seeds.
 
 use super::*;

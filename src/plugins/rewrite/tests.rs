@@ -1,5 +1,5 @@
-//! Ported from beets' test/plugins/test_rewrite.py and
-//! test_advancedrewrite.py: the rewritten values as templates show them.
+//! Ported from beets' `test/plugins/test_rewrite.py` and
+//! `test_advancedrewrite.py`: the rewritten values as templates show them.
 
 use super::*;
 use crate::formatted::{FormatEnv, Formatted};

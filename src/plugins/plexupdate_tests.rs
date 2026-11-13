@@ -1,4 +1,4 @@
-//! beets' test/plugins/test_plexupdate.py, against fake plex.tv and Plex
+//! beets' `test/plugins/test_plexupdate.py`, against fake plex.tv and Plex
 //! servers.
 
 use super::*;

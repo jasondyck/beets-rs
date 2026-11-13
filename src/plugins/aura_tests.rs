@@ -1,4 +1,4 @@
-//! Ported from beets' test/plugins/test_aura.py: the JSON:API documents
+//! Ported from beets' `test/plugins/test_aura.py`: the JSON:API documents
 //! for the collection endpoints (with filters, sorts and includes), plus
 //! the single resources, images and audio files.
 

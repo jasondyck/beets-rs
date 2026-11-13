@@ -409,7 +409,7 @@ mod tests {
         }
     }
 
-    /// test_embedart.py `test_embed_art_from_file_with_yes_input` / `_no_input`.
+    /// `test_embedart.py` `test_embed_art_from_file_with_yes_input` / `_no_input`.
     #[test]
     fn embed_from_file_confirms() {
         let Some((env, _)) = Env::new("{}", 1) else {

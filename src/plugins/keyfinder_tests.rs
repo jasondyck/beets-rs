@@ -1,4 +1,4 @@
-//! Ported from beets' test/plugins/test_keyfinder.py: the external
+//! Ported from beets' `test/plugins/test_keyfinder.py`: the external
 //! program is a script in a temp dir here.
 
 use super::*;

@@ -372,7 +372,7 @@ fn truthy(y: Option<&Y>) -> bool {
     }
 }
 
-/// YAML 1.1's booleans (confuse reads YAML 1.1, serde_yaml 1.2).
+/// YAML 1.1's booleans (confuse reads YAML 1.1, `serde_yaml` 1.2).
 fn yaml11_bool(s: &str) -> Option<bool> {
     match s {
         "yes" | "Yes" | "YES" | "true" | "True" | "TRUE" | "on" | "On" | "ON" => Some(true),

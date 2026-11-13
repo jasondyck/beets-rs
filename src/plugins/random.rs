@@ -31,7 +31,7 @@ pub struct CmdOpts {
     pub query: Vec<String>,
 }
 
-/// A small SplitMix64 generator: the plugin needs no reproducible stream
+/// A small `SplitMix64` generator: the plugin needs no reproducible stream
 /// (beets uses Python's `random`), just an unseeded shuffle.
 pub struct Rng(u64);
 

@@ -1,4 +1,4 @@
-//! Ported from beets' test/plugins/test_acousticbrainz.py.
+//! Ported from beets' `test/plugins/test_acousticbrainz.py`.
 
 use super::*;
 use crate::config::Config;

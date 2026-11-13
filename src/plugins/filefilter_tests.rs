@@ -1,4 +1,4 @@
-//! Ported from beets' test/plugins/test_filefilter.py.
+//! Ported from beets' `test/plugins/test_filefilter.py`.
 
 use crate::config::Config;
 use crate::library::Library;

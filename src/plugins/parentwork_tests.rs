@@ -1,4 +1,4 @@
-//! beets' test/plugins/test_parentwork.py, with a fake MusicBrainz on
+//! beets' `test/plugins/test_parentwork.py`, with a fake MusicBrainz on
 //! 127.0.0.1 (a free port) where beets uses `requests_mock`.
 
 use super::*;

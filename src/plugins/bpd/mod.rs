@@ -1940,7 +1940,7 @@ impl crate::plugins::Plugin for BpdPlugin {
     }
 }
 
-/// `beet bpd`'s arguments: HOST, PORT, CONTROL_PORT.
+/// `beet bpd`'s arguments: HOST, PORT, `CONTROL_PORT`.
 #[derive(Debug, Default, Clone)]
 pub struct CmdOpts {
     pub args: Vec<String>,

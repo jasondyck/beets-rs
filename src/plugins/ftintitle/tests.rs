@@ -1,4 +1,4 @@
-//! Ported from beets' test/plugins/test_ftintitle.py.
+//! Ported from beets' `test/plugins/test_ftintitle.py`.
 
 use super::*;
 use serde_yaml::Value as Y;

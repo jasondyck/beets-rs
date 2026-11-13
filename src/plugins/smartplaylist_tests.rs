@@ -1,4 +1,4 @@
-//! beets' test/plugins/test_smartplaylist.py (on a real library where
+//! beets' `test/plugins/test_smartplaylist.py` (on a real library where
 //! beets mocks items), and the plugin's Python-compatible helpers.
 //!
 //! Not ported: `test_matches` and `test_db_changes`, which test the

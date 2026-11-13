@@ -75,7 +75,7 @@ pub fn is_m3u_file(path: &Path) -> bool {
         .unwrap_or(false)
 }
 
-/// `os.path.abspath` (what beets' PlaylistQuery uses for the
+/// `os.path.abspath` (what beets' `PlaylistQuery` uses for the
 /// `playlist_dir` candidate).
 fn abspath(p: &Path) -> PathBuf {
     if p.is_absolute() {

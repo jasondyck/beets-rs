@@ -1,4 +1,4 @@
-//! beets' test/plugins/test_chroma.py, plus tests of what pyacoustid does
+//! beets' `test/plugins/test_chroma.py`, plus tests of what pyacoustid does
 //! for the plugin, with a fake AcoustID (and MusicBrainz) on 127.0.0.1 (a
 //! free port) and real `fpcalc` runs on generated audio.
 

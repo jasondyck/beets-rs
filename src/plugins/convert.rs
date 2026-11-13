@@ -1435,8 +1435,8 @@ pub struct ConvertArgs {
     /// files will be used.
     #[arg(short = 'm', long)]
     playlist: Option<String>,
-    /// Force transcoding. Ignores no_convert, never_convert_lossy_files,
-    /// and max_bitrate
+    /// Force transcoding. Ignores `no_convert`, `never_convert_lossy_files`,
+    /// and `max_bitrate`
     #[arg(short = 'F', long)]
     force: bool,
     /// Match albums instead of tracks

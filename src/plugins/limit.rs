@@ -11,6 +11,12 @@ use anyhow::Result;
 
 pub struct LimitPlugin;
 
+impl Default for LimitPlugin {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl LimitPlugin {
     /// beets' `__init__` deprecates the plugin in favour of `-l`.
     pub fn new() -> Self {

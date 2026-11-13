@@ -1,4 +1,4 @@
-//! BPD's player: the interface beets' `gstplayer` GstPlayer has, with a
+//! BPD's player: the interface beets' `gstplayer` `GstPlayer` has, with a
 //! pure-Rust audio backend (rodio + symphonia, behind the `bpd-audio`
 //! feature) and a null player for builds without audio output and for the
 //! tests.
