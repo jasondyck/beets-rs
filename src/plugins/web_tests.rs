@@ -87,24 +87,24 @@ impl Env {
         }
     }
 
-    fn request(&self, req: Request) -> Response {
-        self.app().handle(&req)
+    fn request(&self, req: &Request) -> Response {
+        self.app().handle(req)
     }
 
     fn get(&self, url: &str) -> Response {
-        self.request(Request::new("GET", url))
+        self.request(&Request::new("GET", url))
     }
 
     fn delete(&self, url: &str) -> Response {
-        self.request(Request::new("DELETE", url))
+        self.request(&Request::new("DELETE", url))
     }
 
-    fn patch(&self, url: &str, body: J) -> Response {
+    fn patch(&self, url: &str, body: &J) -> Response {
         let mut r = Request::new("PATCH", url);
         r.headers
             .push(("Content-Type".into(), "application/json".into()));
         r.body = body.to_string().into_bytes();
-        self.request(r)
+        self.request(&r)
     }
 
     /// The status and the JSON body.
@@ -575,7 +575,7 @@ fn patch_item_id() {
     assert_eq!(j["test_patch_f1"], json!("1"));
     assert_eq!(j["test_patch_f2"], json!("Old"));
 
-    let (status, j) = json_of(env.patch(&format!("/item/{id}"), json!({"test_patch_f2": "New"})));
+    let (status, j) = json_of(env.patch(&format!("/item/{id}"), &json!({"test_patch_f2": "New"})));
     assert_eq!(status, 200);
     assert_eq!(j["id"], json!(id));
     assert_eq!(j["test_patch_f1"], json!("1"));
@@ -601,7 +601,7 @@ fn patch_item_id_readonly() {
     assert_eq!(j["id"], json!(id));
     assert_eq!(j["test_patch_f1"], json!("2"));
     assert_eq!(j["test_patch_f2"], json!("Old"));
-    let r = env.patch(&format!("/item/{id}"), json!({"test_patch_f2": "New"}));
+    let r = env.patch(&format!("/item/{id}"), &json!({"test_patch_f2": "New"}));
     assert_eq!(r.status, 405);
 }
 
@@ -821,20 +821,20 @@ fn unique_values_of_unknown_and_computed_fields() {
 fn routing_methods_redirects_and_errors() {
     let env = Env::new();
     // Flask's automatic OPTIONS.
-    let r = env.request(Request::new("OPTIONS", "/item/1"));
+    let r = env.request(&Request::new("OPTIONS", "/item/1"));
     assert_eq!(r.status, 200);
     assert_eq!(r.header("Allow"), Some("DELETE, GET, HEAD, OPTIONS, PATCH"));
     // A method the route doesn't have.
     let r = env.delete("/item/");
     assert_eq!(r.status, 405);
     assert_eq!(r.header("Allow"), Some("GET, HEAD, OPTIONS"));
-    let r = env.patch("/album/1", json!({}));
+    let r = env.patch("/album/1", &json!({}));
     assert_eq!(r.status, 405);
     assert_eq!(r.header("Allow"), Some("DELETE, GET, HEAD, OPTIONS"));
     // `strict_slashes`
     let mut req = Request::new("GET", "/item?expand");
     req.headers.push(("Host".into(), "h:1".into()));
-    let r = env.request(req);
+    let r = env.request(&req);
     assert_eq!(r.status, 308);
     assert_eq!(r.header("Location"), Some("http://h:1/item/?expand"));
     assert_eq!(env.get("/album/query").status, 308);
@@ -854,7 +854,7 @@ fn routing_methods_redirects_and_errors() {
          <p>Item with id 99 not found</p>\n"
     );
     // HEAD is GET (the server leaves the body out).
-    assert_eq!(env.request(Request::new("HEAD", "/stats")).status, 200);
+    assert_eq!(env.request(&Request::new("HEAD", "/stats")).status, 200);
 }
 
 #[test]
@@ -863,18 +863,18 @@ fn patch_needs_json_and_writes_fixed_fields() {
     env.settings.readonly = false;
     let mut r = Request::new("PATCH", "/item/2");
     r.body = b"{}".to_vec();
-    assert_eq!(env.request(r).status, 415);
+    assert_eq!(env.request(&r).status, 415);
     let mut r = Request::new("PATCH", "/item/2");
     r.headers
         .push(("Content-Type".into(), "application/json".into()));
     r.body = b"{nope".to_vec();
-    assert_eq!(env.request(r).status, 400);
+    assert_eq!(env.request(&r).status, 400);
     // No such item: nothing to patch.
-    assert_eq!(env.patch("/item/99", json!({"title": "x"})).status, 405);
+    assert_eq!(env.patch("/item/99", &json!({"title": "x"})).status, 405);
     // Typed fields take the JSON's values; several items give a list.
     let (status, j) = json_of(env.patch(
         "/item/1,2",
-        json!({"year": 1999, "genres": ["Rock", "Pop"], "comp": true}),
+        &json!({"year": 1999, "genres": ["Rock", "Pop"], "comp": true}),
     ));
     assert_eq!(status, 200);
     assert_eq!(j["items"][1]["year"], json!(1999));
@@ -883,7 +883,7 @@ fn patch_needs_json_and_writes_fixed_fields() {
     assert_eq!(j["genres"], json!(["Rock", "Pop"]));
     assert_eq!(j["comp"], json!(true));
     // By query: the patched items, under "items".
-    let (status, j) = json_of(env.patch("/item/query/title:another", json!({"bpm": "120"})));
+    let (status, j) = json_of(env.patch("/item/query/title:another", &json!({"bpm": "120"})));
     assert_eq!(status, 200);
     assert_eq!(j["items"][0]["bpm"], json!(120));
 }
@@ -893,7 +893,7 @@ fn patch_writes_tags_to_the_file() {
     let mut env = Env::new();
     env.settings.readonly = false;
     let (ipath, id) = env.mp3_item("w.mp3");
-    let r = env.patch(&format!("/item/{id}"), json!({"title": "patched"}));
+    let r = env.patch(&format!("/item/{id}"), &json!({"title": "patched"}));
     assert_eq!(r.status, 200);
     assert_eq!(crate::media::read(&ipath).unwrap().str("title"), "patched");
 }
@@ -935,7 +935,7 @@ fn file_names_and_ranges() {
     let range = |h: &str| {
         let mut r = Request::new("GET", &format!("/item/{plain}/file"));
         r.headers.push(("Range".into(), h.into()));
-        let resp = env.request(r);
+        let resp = env.request(&r);
         let cr = resp.header("Content-Range").map(String::from);
         (resp.status, cr, resp.into_bytes())
     };
@@ -970,16 +970,16 @@ fn cors_headers_as_flask_cors() {
         origin: "http://example.com".into(),
         supports_credentials: false,
     });
-    let r = env.request(cors_req("GET", Some("http://EXAMPLE.com")));
+    let r = env.request(&cors_req("GET", Some("http://EXAMPLE.com")));
     assert_eq!(
         r.header("Access-Control-Allow-Origin"),
         Some("http://EXAMPLE.com")
     );
     assert_eq!(r.header("Vary"), None);
-    let r = env.request(cors_req("GET", Some("http://other.com")));
+    let r = env.request(&cors_req("GET", Some("http://other.com")));
     assert_eq!(r.header("Access-Control-Allow-Origin"), None);
     // No Origin: the configured one (flask-cors' `always_send`).
-    let r = env.request(cors_req("GET", None));
+    let r = env.request(&cors_req("GET", None));
     assert_eq!(
         r.header("Access-Control-Allow-Origin"),
         Some("http://example.com")
@@ -992,7 +992,7 @@ fn cors_headers_as_flask_cors() {
         "Access-Control-Request-Headers".into(),
         "content-type, x-other".into(),
     ));
-    let r = env.request(req);
+    let r = env.request(&req);
     assert_eq!(r.status, 200);
     assert_eq!(
         r.header("Access-Control-Allow-Methods"),
@@ -1007,26 +1007,26 @@ fn cors_headers_as_flask_cors() {
         origin: "*".into(),
         supports_credentials: true,
     });
-    let r = env.request(cors_req("GET", Some("http://a.b")));
+    let r = env.request(&cors_req("GET", Some("http://a.b")));
     assert_eq!(r.header("Access-Control-Allow-Origin"), Some("http://a.b"));
     assert_eq!(r.header("Access-Control-Allow-Credentials"), Some("true"));
     assert_eq!(r.header("Vary"), Some("Origin"));
-    let r = env.request(cors_req("GET", None));
+    let r = env.request(&cors_req("GET", None));
     assert_eq!(r.header("Access-Control-Allow-Origin"), None);
     env.settings.cors.as_mut().unwrap().supports_credentials = false;
-    let r = env.request(cors_req("GET", None));
+    let r = env.request(&cors_req("GET", None));
     assert_eq!(r.header("Access-Control-Allow-Origin"), Some("*"));
     // Errors get the headers too.
     let mut req = cors_req("GET", Some("http://a.b"));
     req.url = "/nope".into();
     assert!(
-        env.request(req)
+        env.request(&req)
             .header("Access-Control-Allow-Origin")
             .is_some()
     );
     // Without `cors`, none.
     env.settings.cors = None;
-    let r = env.request(cors_req("GET", Some("http://a.b")));
+    let r = env.request(&cors_req("GET", Some("http://a.b")));
     assert_eq!(r.header("Access-Control-Allow-Origin"), None);
 }
 
@@ -1040,12 +1040,12 @@ fn reverse_proxy_strips_the_script_name() {
         r.headers.push(("Host".into(), "h".into()));
         r
     };
-    assert_eq!(env.request(req("/beets/stats")).status, 404);
+    assert_eq!(env.request(&req("/beets/stats")).status, 404);
     env.settings.reverse_proxy = true;
-    assert_eq!(env.request(req("/beets/stats")).status, 200);
-    let html = String::from_utf8(env.request(req("/beets/")).into_bytes()).unwrap();
+    assert_eq!(env.request(&req("/beets/stats")).status, 200);
+    let html = String::from_utf8(env.request(&req("/beets/")).into_bytes()).unwrap();
     assert!(html.contains(r#"src="/beets/static/beets.js""#));
-    let r = env.request(req("/beets/item"));
+    let r = env.request(&req("/beets/item"));
     assert_eq!(r.header("Location"), Some("https://h/beets/item/"));
 }
 

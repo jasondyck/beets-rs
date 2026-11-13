@@ -367,8 +367,7 @@ fn unique_name() -> String {
     let n = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let nanos = SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .map(|d| d.subsec_nanos())
-        .unwrap_or(0);
+        .map_or(0, |d| d.subsec_nanos());
     format!("{:08x}{:08x}.m3u", std::process::id(), nanos ^ n as u32)
 }
 

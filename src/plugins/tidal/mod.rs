@@ -436,9 +436,9 @@ impl Tidal {
             artist: artist_names.join(", "),
             artists: artist_names,
             label: label.unwrap_or_default(),
-            year: date.map(|d| d.0).unwrap_or(0),
-            month: date.map(|d| d.1).unwrap_or(0),
-            day: date.map(|d| d.2).unwrap_or(0),
+            year: date.map_or(0, |d| d.0),
+            month: date.map_or(0, |d| d.1),
+            day: date.map_or(0, |d| d.2),
             nulls,
             extra,
             ..Default::default()
@@ -512,8 +512,7 @@ impl Tidal {
 fn now() -> f64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs_f64())
-        .unwrap_or(0.0)
+        .map_or(0.0, |d| d.as_secs_f64())
 }
 
 // ---------------------------------------------------------------- parsing
@@ -677,9 +676,8 @@ fn parse_release_date(attrs: &J) -> Option<(i64, i64, i64)> {
 fn parse_popularity(attrs: &J) -> i64 {
     attrs
         .get("popularity")
-        .and_then(|p| p.as_f64())
-        .map(|p| (p * 100.0).round_ties_even() as i64)
-        .unwrap_or(0)
+        .and_then(serde_json::Value::as_f64)
+        .map_or(0, |p| (p * 100.0).round_ties_even() as i64)
 }
 
 /// beets' `_parse_artwork_url`.
@@ -704,6 +702,7 @@ fn parse_artwork_url(album: &J, artwork_by_id: &BTreeMap<String, &J>) -> Option<
 
 /// The plugin's commands (`beet tidal` and `beet tidalsync`).
 pub fn command_tidal(cfg: &Config, auth: bool) -> Result<()> {
+    use std::io::Write as _;
     if !auth {
         let mut cmd = build_tidal();
         cmd.print_help()?;
@@ -724,7 +723,6 @@ pub fn command_tidal(cfg: &Config, auth: bool) -> Result<()> {
         let _ = status;
     }
     print!("Paste redirected URL: ");
-    use std::io::Write as _;
     std::io::stdout().flush()?;
     let mut redirect = String::new();
     std::io::stdin().read_line(&mut redirect)?;

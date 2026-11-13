@@ -110,8 +110,7 @@ impl Perms {
             self.log
                 .warning(&format!("could not set permissions on {}", p.display()));
             let now = std::fs::metadata(p)
-                .map(|m| m.permissions().mode() & 0o777)
-                .unwrap_or(0);
+                .map_or(0, |m| m.permissions().mode() & 0o777);
             self.log.debug(&format!(
                 "set permissions to {perm}, but permissions are now {now}"
             ));

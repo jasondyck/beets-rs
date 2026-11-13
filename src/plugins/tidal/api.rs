@@ -83,7 +83,7 @@ impl TidalApi {
                 params.extend(repeated("filter[isrc]", &isrc_batch));
             }
             let page = self.get_paginated("/tracks", include, &params)?;
-            merge(&mut doc, page);
+            merge(&mut doc, &page);
         }
         Ok(doc)
     }
@@ -106,7 +106,7 @@ impl TidalApi {
                 params.extend(repeated("filter[barcodeId]", &barcode_batch));
             }
             let page = self.get_paginated("/albums", include, &params)?;
-            merge(&mut doc, page);
+            merge(&mut doc, &page);
         }
         Ok(doc)
     }
@@ -137,7 +137,7 @@ impl TidalApi {
             let mut page_params: Vec<(&str, String)> = params.to_vec();
             page_params.extend(include.iter().map(|i| ("include", i.to_string())));
             let page = self.get_json(&next, &page_params)?;
-            merge(&mut doc, page);
+            merge(&mut doc, &page);
             guard += 1;
             if guard > 10_000 {
                 break;
@@ -180,7 +180,7 @@ fn zip_batches(ids: &[String], others: &[String]) -> Vec<(Vec<String>, Vec<Strin
 
 /// `TidalAPI.merge_multiresource_pagination`: append `data`, dedupe
 /// `included` by `(type, id)`, and take the last page's `links`.
-pub fn merge(a: &mut J, b: J) {
+pub fn merge(a: &mut J, b: &J) {
     let b_data = b
         .get("data")
         .and_then(|d| d.as_array())

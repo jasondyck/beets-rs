@@ -308,7 +308,7 @@ impl Env {
             }
         }
         let p = self.plugin();
-        crate::logging::capture(|| p.command(&self.cfg, &self.lib, opts))
+        crate::logging::capture(|| p.command(&self.cfg, &self.lib, &opts))
             .0
             .unwrap();
     }
@@ -710,6 +710,7 @@ fn defaults() {
 /// A fake mp3gain: logs its arguments and prints canned `-o` output for
 /// each file (and an album line).
 fn fake_mp3gain(dir: &Path, name: &str) -> PathBuf {
+    use std::os::unix::fs::PermissionsExt;
     let p = dir.join(name);
     let script = format!(
         "#!/bin/sh\n\
@@ -721,7 +722,6 @@ fn fake_mp3gain(dir: &Path, name: &str) -> PathBuf {
         log = dir.join("args.log").display()
     );
     std::fs::write(&p, script).unwrap();
-    use std::os::unix::fs::PermissionsExt;
     std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o755)).unwrap();
     p
 }
@@ -790,7 +790,7 @@ fn debug_messages() {
         threads: Some(0),
         ..Default::default()
     };
-    let (r, lines) = crate::logging::capture(|| p.command(&env.cfg, &env.lib, opts));
+    let (r, lines) = crate::logging::capture(|| p.command(&env.cfg, &env.lib, &opts));
     r.unwrap();
     let text = lines.join("\n");
     assert!(

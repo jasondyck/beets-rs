@@ -27,8 +27,7 @@ pub struct TidalSession {
 fn now() -> f64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_secs_f64())
-        .unwrap_or(0.0)
+        .map_or(0.0, |d| d.as_secs_f64())
 }
 
 impl TidalSession {
@@ -118,9 +117,9 @@ impl TidalSession {
         let resp = self
             .http
             .request("POST", &self.urls.token_url, req)
-            .map_err(http_error)?;
-        let mut token = resp.json().map_err(http_error)?;
-        if let Some(expires_in) = token.get("expires_in").and_then(|v| v.as_f64()) {
+            .map_err(|e| http_error(&e))?;
+        let mut token = resp.json().map_err(|e| http_error(&e))?;
+        if let Some(expires_in) = token.get("expires_in").and_then(serde_json::Value::as_f64) {
             token["expires_at"] = json!(now() + expires_in);
         }
         self.token = Some(token.clone());
@@ -211,10 +210,10 @@ impl TidalSession {
                         ),
                     }
                 }
-                Err(e) => return Err(http_error(e)),
+                Err(e) => return Err(http_error(&e)),
             }
         };
-        resp.json().map_err(http_error)
+        resp.json().map_err(|e| http_error(&e))
     }
 }
 
@@ -223,7 +222,7 @@ fn load_token(path: &Path) -> Option<J> {
     serde_json::from_str(&text).ok()
 }
 
-fn http_error(e: HttpError) -> anyhow::Error {
+fn http_error(e: &HttpError) -> anyhow::Error {
     anyhow!(e.to_string())
 }
 

@@ -179,7 +179,7 @@ impl Default for Session {
 }
 
 /// What to send.
-#[derive(Default)]
+#[derive(Default, Clone, Copy)]
 pub struct Request<'a> {
     pub headers: &'a [(&'a str, &'a str)],
     pub json: Option<&'a J>,
@@ -248,7 +248,7 @@ impl Session {
     }
 
     fn wait_for_rate_limit() {
-        let mut last = LAST_REQUEST.lock().unwrap_or_else(|e| e.into_inner());
+        let mut last = LAST_REQUEST.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         if let Some(t) = *last {
             let elapsed = t.elapsed();
             if elapsed < RATE_LIMIT {
@@ -447,6 +447,9 @@ pub mod testserver {
     }
 
     impl Reply {
+        // The test server's API: callers (across the plugins' tests) pass
+        // `json!` values by value, as beets' `requests_mock` would.
+        #[allow(clippy::needless_pass_by_value)]
         pub fn json(v: serde_json::Value) -> Reply {
             Reply {
                 status: 200,

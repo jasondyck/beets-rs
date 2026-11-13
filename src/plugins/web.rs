@@ -368,7 +368,7 @@ fn b64encode(data: &[u8]) -> String {
             chunk.get(1).copied().unwrap_or(0),
             chunk.get(2).copied().unwrap_or(0),
         ];
-        let n = (b[0] as u32) << 16 | (b[1] as u32) << 8 | b[2] as u32;
+        let n = u32::from(b[0]) << 16 | u32::from(b[1]) << 8 | u32::from(b[2]);
         for i in 0..4 {
             if i <= chunk.len() {
                 out.push(A[(n >> (18 - 6 * i) & 63) as usize] as char);
@@ -691,7 +691,7 @@ impl App<'_> {
             ctx.method.as_str()
         };
         Ok(match route {
-            Route::Home => self.home(ctx),
+            Route::Home => Self::home(ctx),
             Route::Static(name) => match STATIC_FILES.iter().find(|(n, _)| *n == name) {
                 Some((n, data)) => {
                     let mut resp = Response::new(200, mimetype(n), data.to_vec());
@@ -707,7 +707,7 @@ impl App<'_> {
             },
             Route::Stats => {
                 let (items, albums) = self.lib.counts()?;
-                self.jsonify(Json::Obj(vec![
+                self.jsonify(&Json::Obj(vec![
                     ("albums".into(), Json::Int(albums)),
                     ("items".into(), Json::Int(items)),
                 ]))
@@ -717,7 +717,7 @@ impl App<'_> {
                     .lib
                     .query_column("SELECT DISTINCT albumartist FROM albums")?;
                 let names = names.into_iter().map(sql_json).collect::<Result<_>>()?;
-                self.jsonify(Json::Obj(vec![("artist_names".into(), Json::List(names))]))
+                self.jsonify(&Json::Obj(vec![("artist_names".into(), Json::List(names))]))
             }
             Route::List(kind) => {
                 let all = self.fetch(kind, &[] as &[&str])?;
@@ -730,7 +730,7 @@ impl App<'_> {
                 match self.lib.items(&q)?.into_iter().next() {
                     Some(item) => {
                         let rep = self.item_rep(&item, &mut HashMap::new())?;
-                        self.jsonify(rep)
+                        self.jsonify(&rep)
                     }
                     None => abort(404, None),
                 }
@@ -759,7 +759,7 @@ impl App<'_> {
 
     /// Flask's `jsonify`: sorted keys, compact (indented in debug mode),
     /// and a newline.
-    fn jsonify(&self, j: Json) -> Response {
+    fn jsonify(&self, j: &Json) -> Response {
         let layout = if self.settings.debug {
             Layout::Indent
         } else {
@@ -924,7 +924,7 @@ impl App<'_> {
         if method == "GET" || method == "PATCH" && kind == Kind::Item {
             if entities.len() == 1 {
                 let rep = self.rep(&entities[0], ctx.is_expand(), &mut HashMap::new())?;
-                return Ok(self.jsonify(rep));
+                return Ok(self.jsonify(&rep));
             }
             if !entities.is_empty() {
                 return self.json_generator(&entities, name, false);
@@ -976,7 +976,7 @@ impl App<'_> {
     }
 
     fn deleted(&self) -> Response {
-        self.jsonify(Json::Obj(vec![("deleted".into(), Json::Bool(true))]))
+        self.jsonify(&Json::Obj(vec![("deleted".into(), Json::Bool(true))]))
     }
 
     /// `/item/values/<key>`, `/album/values/<key>`: `SELECT DISTINCT` of a
@@ -1006,12 +1006,12 @@ impl App<'_> {
             "SELECT DISTINCT {key} FROM {table} ORDER BY {sort_key}"
         ))?;
         let values = rows.into_iter().map(sql_json).collect::<Result<_>>()?;
-        Ok(self.jsonify(Json::Obj(vec![("values".into(), Json::List(values))])))
+        Ok(self.jsonify(&Json::Obj(vec![("values".into(), Json::List(values))])))
     }
 
     /// `index.html`, with `url_for('static', ...)` filled in (Jinja drops
     /// the template's final newline).
-    fn home(&self, ctx: &Ctx) -> Response {
+    fn home(ctx: &Ctx) -> Response {
         let mut html = INDEX_HTML.to_string();
         for (name, _) in STATIC_FILES {
             html = html.replace(
@@ -1161,10 +1161,10 @@ fn quote_header_value(v: &str) -> String {
 /// Werkzeug's `Content-Disposition` for `send_file`: a non-ASCII name as
 /// an ASCII `filename` plus a UTF-8 `filename*`.
 pub(crate) fn content_disposition(kind: &str, name: &str) -> String {
+    use unicode_normalization::UnicodeNormalization;
     if name.is_ascii() {
         return format!("{kind}; filename={}", quote_header_value(name));
     }
-    use unicode_normalization::UnicodeNormalization;
     let simple: String = name.nfkd().filter(char::is_ascii).collect();
     let mut quoted = String::new();
     for b in name.bytes() {
@@ -1311,6 +1311,7 @@ impl Cors {
     /// the `cors` setting, `*` meaning any; `allow_headers` Content-Type;
     /// the default methods; `always_send`, `vary_header`).
     fn apply(&self, req: &Request, resp: &mut Response) {
+        const METHODS: &str = "DELETE, GET, HEAD, OPTIONS, PATCH, POST, PUT";
         let origin = if self.origin == "*" {
             ".*".to_string()
         } else {
@@ -1337,7 +1338,6 @@ impl Cors {
                 .header("Access-Control-Request-Method")
                 .unwrap_or("")
                 .to_ascii_uppercase();
-            const METHODS: &str = "DELETE, GET, HEAD, OPTIONS, PATCH, POST, PUT";
             if !m.is_empty() && METHODS.split(", ").any(|x| x == m) {
                 if let Some(rh) = req.header("Access-Control-Request-Headers") {
                     let mut ok: Vec<&str> = rh
@@ -1436,7 +1436,7 @@ pub struct CmdOpts {
 
 /// `beet web`: serve the library on `web.host`/`web.port` (or HOST and
 /// PORT) until interrupted.
-pub fn command(cfg: &Config, lib: &Library, opts: CmdOpts) -> Result<()> {
+pub fn command(cfg: &Config, lib: &Library, opts: &CmdOpts) -> Result<()> {
     let log = PluginLog::new("web");
     let host = match opts.args.first() {
         Some(h) => h.clone(),
@@ -1559,7 +1559,7 @@ pub fn run_web(
     crate::plugins::web::command(
         cfg,
         lib,
-        crate::plugins::web::CmdOpts {
+        &crate::plugins::web::CmdOpts {
             debug: a.debug,
             args: a.args,
         },
