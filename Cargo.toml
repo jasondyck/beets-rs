@@ -21,6 +21,7 @@ deunicode = "1.6.2"
 dirs = "7.0.0"
 fancy-regex = "0.20.1"
 glob = "0.3.4"
+getrandom = "0.4.3"
 hex = "0.4.3"
 html-escape = "0.2.15"
 image = { version = "0.25", default-features = false, features = ["jpeg", "png", "webp", "gif", "bmp", "tiff"] }
@@ -41,6 +42,7 @@ serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.154"
 serde_yaml = "0.9.34"
 sha1 = "0.10.6"
+sha2 = "0.10.9"
 strsim = "0.11.1"
 symphonia = { version = "0.5", default-features = false, features = ["mp3", "flac", "wav", "ogg", "vorbis", "pcm", "isomp4", "aac", "alac"] }
 tiny_http = "0.12"

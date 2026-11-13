@@ -805,7 +805,22 @@ impl<'a> Importer<'a> {
         self
     }
 
+    /// beets' `import_begin` listeners that may abort the import (tidal's
+    /// token check).
+    fn check_import_begin(&self) -> Result<()> {
+        let ctx = PluginCtx {
+            cfg: self.cfg,
+            lib: self.lib,
+            write: false,
+        };
+        for p in self.plugins {
+            p.import_begin(&ctx)?;
+        }
+        Ok(())
+    }
+
     pub fn run(&mut self, paths: &[PathBuf]) -> Result<()> {
+        self.check_import_begin()?;
         events::send("import_begin", &[("session", EArg::Opaque(SESSION))]);
         if self.log.is_some() {
             // Python's time.asctime(), as in beets' "import started" line.
@@ -1169,6 +1184,7 @@ impl<'a> Importer<'a> {
     /// albums (or one by one with `-s`), as beets' `query_tasks`. There is
     /// no resume or incremental state for query imports.
     pub fn run_library(&mut self, query: &[String]) -> Result<()> {
+        self.check_import_begin()?;
         events::send("import_begin", &[("session", EArg::Opaque(SESSION))]);
         use crate::model::Kind;
         use crate::query::Query;

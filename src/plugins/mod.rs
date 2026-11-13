@@ -53,6 +53,12 @@ pub trait Plugin {
 
     /// beets' `import_task_created`: filter the task's items, or drop the
     /// task entirely (false) before it is looked up.
+    /// beets' `import_begin` event: a listener that can end the import
+    /// (tidal when no token is stored).
+    fn import_begin(&self, _ctx: &PluginCtx) -> Result<()> {
+        Ok(())
+    }
+
     fn import_task_created(
         &self,
         _ctx: &PluginCtx,

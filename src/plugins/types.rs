@@ -72,6 +72,7 @@ fn declared(cfg: &Config, plugin: &str) -> Result<[Vec<(String, FieldType)>; 2]>
         "lastimport" => [own(crate::plugins::lastimport::ITEM_TYPES), vec![]],
         // 5.20b
         "metasync" => [own(crate::plugins::metasync::ITEM_TYPES), vec![]],
+        "tidal" => [own(crate::plugins::tidal::ITEM_TYPES), own(crate::plugins::tidal::ALBUM_TYPES)],
         _ => [vec![], vec![]],
     })
 }

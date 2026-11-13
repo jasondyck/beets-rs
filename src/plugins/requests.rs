@@ -167,6 +167,9 @@ pub struct Session {
     no_redirects: ureq::Agent,
     /// Retries and the shared rate limit (off for [`Session::plain`]).
     retries: bool,
+    /// Retry 429 like the other transient statuses (off for tidal, which
+    /// waits for the response's `Retry-After` itself).
+    retry_429: bool,
 }
 
 impl Default for Session {
@@ -190,6 +193,16 @@ impl Session {
         Self::build(USER_AGENT, true)
     }
 
+    /// A session that retries 5xx and transport failures but hands a 429
+    /// back to the caller (beets' tidal session, which honours
+    /// `Retry-After`).
+    pub fn new_without_429_retry() -> Self {
+        Session {
+            retry_429: false,
+            ..Self::build(USER_AGENT, true)
+        }
+    }
+
     /// A plain `requests.Session` as fetchart's `_logged_get` uses it: the
     /// given User-Agent, a 10 s timeout, no retries, no rate limit, and no
     /// `raise_for_status` (error responses come back as responses).
@@ -209,6 +222,7 @@ impl Session {
             agent: build(5),
             no_redirects: build(0),
             retries,
+            retry_429: true,
         }
     }
 
@@ -273,7 +287,7 @@ impl Session {
                 // A plain session hands every response back, as `requests`.
                 Err(ureq::Error::Status(_, resp)) if !self.retries => return Ok(read(resp)),
                 Err(ureq::Error::Status(code, resp)) => {
-                    if !RETRY_STATUSES.contains(&code) {
+                    if !RETRY_STATUSES.contains(&code) || (code == 429 && !self.retry_429) {
                         let resp = read(resp);
                         return Err(HttpError::Status {
                             code,
