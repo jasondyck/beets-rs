@@ -449,7 +449,7 @@ impl<'a> Obj<'a> {
             Kind::Item => match key {
                 "singleton" => return Some(PyVal::Bool(rec.int("album_id") == 0)),
                 "filesize" => {
-                    let n = std::fs::metadata(rec.path()).map(|m| m.len()).unwrap_or(0);
+                    let n = std::fs::metadata(rec.path()).map_or(0, |m| m.len());
                     return Some(PyVal::Int(n as i64));
                 }
                 "has_cover_art" => {
@@ -1283,7 +1283,7 @@ fn construct_query_part(kind: Kind, part: &str) -> Result<Pred, String> {
                     .map_err(|_| bad_arg(&pattern, "a positive integer", None))?;
                 Pred::Head(HeadQuery {
                     n,
-                    seen: Default::default(),
+                    seen: std::rc::Rc::default(),
                 })
             }
             "fuzzy" => plugin_query(kind, key.as_deref(), &pattern, |p| {

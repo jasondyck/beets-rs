@@ -866,7 +866,7 @@ impl<'a> Importer<'a> {
                     // later run doesn't offer to resume it.
                     self.state.save(&self.state_path)?;
                 }
-                Default::default()
+                BTreeSet::default()
             };
             let groups = match plan.roots[ri].take() {
                 Some(RootPlan::Ready { groups, log, .. }) => {
@@ -1104,7 +1104,7 @@ impl<'a> Importer<'a> {
     /// if the user wants to resume it; otherwise forget that progress.
     fn resume_point(&mut self, top: &Path) -> Result<std::collections::BTreeSet<PathBuf>> {
         let Some(done) = self.state.progress.get(top) else {
-            return Ok(Default::default());
+            return Ok(BTreeSet::default());
         };
         let resume = match self.opts.resume {
             Resume::Yes => true,
@@ -1124,7 +1124,7 @@ impl<'a> Importer<'a> {
         }
         self.state.progress.remove(top);
         self.state.save(&self.state_path)?;
-        Ok(Default::default())
+        Ok(BTreeSet::default())
     }
 
     /// Note that a group is finished, in the history (incremental) or the
@@ -1188,10 +1188,10 @@ impl<'a> Importer<'a> {
     /// albums (or one by one with `-s`), as beets' `query_tasks`. There is
     /// no resume or incremental state for query imports.
     pub fn run_library(&mut self, query: &[String]) -> Result<()> {
-        self.check_import_begin()?;
-        events::send("import_begin", &[("session", EArg::Opaque(SESSION))]);
         use crate::model::Kind;
         use crate::query::Query;
+        self.check_import_begin()?;
+        events::send("import_begin", &[("session", EArg::Opaque(SESSION))]);
         if self.log.is_some() {
             let now = chrono::Local::now().format("%a %b %e %H:%M:%S %Y");
             self.log_line(&format!("import started {now}"));
@@ -1412,7 +1412,7 @@ impl<'a> Importer<'a> {
             return Ok(Outcome::Done);
         }
         let created = self.task_info(&items, paths, false, None);
-        self.send_task_event("import_task_created", &created);
+        Self::send_task_event("import_task_created", &created);
         self.created += 1;
         // As beets: the task's paths, one per line. With autotagging this is
         // `choose_match`'s header on stdout; without it beets never calls
@@ -1436,7 +1436,7 @@ impl<'a> Importer<'a> {
             plugins::fromfilename::task_start(self.cfg, &mut items, true);
         }
         let started = self.task_info(&items, paths, false, None);
-        self.send_task_event("import_task_start", &started);
+        Self::send_task_event("import_task_start", &started);
         let decision = if self.opts.autotag {
             let d = self.choose_album(&items, paths, rescan)?;
             self.log_choice(&d, paths, &items, true);
@@ -1798,7 +1798,7 @@ impl<'a> Importer<'a> {
     /// An album whose files are all part of this import is being reimported,
     /// not duplicated; so is the track's own row.
     fn find_duplicates(&self, album: bool, task: &[Item], want: &KeyValues) -> Result<Vec<Found>> {
-        let task_paths: HashSet<&Path> = task.iter().map(|i| i.path()).collect();
+        let task_paths: HashSet<&Path> = task.iter().map(crate::model::Record::path).collect();
         let mut found = vec![];
         // The library narrows the candidates in SQL (beets' duplicate query);
         // `matches` still has the final say, so keys SQL can't check exactly
@@ -1966,7 +1966,7 @@ impl<'a> Importer<'a> {
     fn record_replaced(&self, items: &[Item]) -> Result<Replaced> {
         let mut r = Replaced::default();
         let mut album_ids = HashSet::new();
-        let paths: Vec<&Path> = items.iter().map(|i| i.path()).collect();
+        let paths: Vec<&Path> = items.iter().map(crate::model::Record::path).collect();
         for dups in self.lib.items_with_paths(&paths)? {
             for d in &dups {
                 let id = d.int("album_id");
@@ -2003,7 +2003,7 @@ impl<'a> Importer<'a> {
     /// beets' `reimport_metadata`: keep `added`, flexible attributes and
     /// (for albums) the art path from the rows being replaced. The old album
     /// is the one whose files were in the new album's directory.
-    fn reimport_metadata(&self, album: Option<&mut Album>, items: &mut [Item], r: &Replaced) {
+    fn reimport_metadata(album: Option<&mut Album>, items: &mut [Item], r: &Replaced) {
         if let Some(album) = album
             && let Some(dir) = items.first().and_then(|i| i.path().parent())
         {
@@ -2114,7 +2114,7 @@ impl<'a> Importer<'a> {
                     album
                 }
             };
-            self.reimport_metadata(Some(&mut album), &mut items, &replaced);
+            Self::reimport_metadata(Some(&mut album), &mut items, &replaced);
             if graft.is_some() {
                 self.apply_set_fields(None, &mut items);
             } else {
@@ -2207,7 +2207,7 @@ impl<'a> Importer<'a> {
                         .and_then(|d| d.path().parent().map(Path::to_path_buf))
                 })
                 .collect();
-            self.send_task_event("import_task_files", &info);
+            Self::send_task_event("import_task_files", &info);
         }
         self.delete_originals(&copied);
         if op == FileOp::Move
@@ -2246,7 +2246,7 @@ impl<'a> Importer<'a> {
             op: self.opts.op,
         };
         plugins::each(self.plugins, |p| p.import_task_apply(&ctx, &mut task));
-        self.send_task_event(
+        Self::send_task_event(
             "import_task_apply",
             &self.task_info(items, paths, false, None),
         );
@@ -2338,7 +2338,7 @@ impl<'a> Importer<'a> {
             });
             let mut info = self.task_info(items, paths, !album, None);
             info.skip = matches!(d, Decision::Skip);
-            self.send_task_event("import_task_choice", &info);
+            Self::send_task_event("import_task_choice", &info);
         }
         match d {
             Decision::Skip => self.tag_log("skip", paths),
@@ -2403,7 +2403,7 @@ impl<'a> Importer<'a> {
     }
 
     /// beets' `plugins.send(name, session=..., task=...)`.
-    fn send_task_event(&self, name: &'static str, task: &TaskInfo) {
+    fn send_task_event(name: &'static str, task: &TaskInfo) {
         if events::listening(name) {
             events::send(
                 name,
@@ -2439,7 +2439,7 @@ impl<'a> Importer<'a> {
         singleton: bool,
     ) -> Result<plugins::BeforeChoice> {
         let info = self.task_info(items, paths, singleton, None);
-        self.send_task_event("import_task_before_choice", &info);
+        Self::send_task_event("import_task_before_choice", &info);
         let ctx = self.plugin_ctx();
         let mut actions = vec![];
         for p in self.plugins {
@@ -2560,7 +2560,7 @@ impl<'a> Importer<'a> {
         }
         item = items.remove(0);
         let paths = [item.path().to_path_buf()];
-        self.send_task_event(
+        Self::send_task_event(
             "import_task_created",
             &self.task_info(std::slice::from_ref(&item), &paths, true, None),
         );
@@ -2576,7 +2576,7 @@ impl<'a> Importer<'a> {
         if self.opts.autotag {
             plugins::fromfilename::task_start(self.cfg, std::slice::from_mut(&mut item), true);
         }
-        self.send_task_event(
+        Self::send_task_event(
             "import_task_start",
             &self.task_info(std::slice::from_ref(&item), &paths, true, None),
         );
@@ -2653,7 +2653,7 @@ impl<'a> Importer<'a> {
             lib.add(&mut item)?;
             // beets' `reimport_metadata`: `added` and flex from the rows
             // this reimport replaced (after `add` stamped the new ones).
-            self.reimport_metadata(None, std::slice::from_mut(&mut item), &replaced);
+            Self::reimport_metadata(None, std::slice::from_mut(&mut item), &replaced);
             // `reimport_metadata` stores each preserved item (beets).
             lib.store(&item)?;
             Ok(replaced)
@@ -2684,7 +2684,7 @@ impl<'a> Importer<'a> {
             })
             .into_iter()
             .collect();
-            self.send_task_event("import_task_files", &info);
+            Self::send_task_event("import_task_files", &info);
         }
         self.delete_originals(copied.as_slice());
         plugins::each(self.plugins, |p| p.item_imported(&ctx, &item));
@@ -2772,7 +2772,7 @@ impl<'a> Importer<'a> {
                     other => other,
                 }
             } else {
-                self.pick_item_candidate(&disp, item, &cands, &extra_long)
+                Self::pick_item_candidate(&disp, item, &cands, &extra_long)
             };
 
             if let Some(Choice::Letter(c)) = choice
@@ -2836,7 +2836,6 @@ impl<'a> Importer<'a> {
     /// beets' candidate list for a track ("Finding tags for track ...") and
     /// prompt; with no candidates, just the prompt.
     fn pick_item_candidate(
-        &self,
         disp: &Display,
         item: &Item,
         cands: &[TrackMatch],
@@ -3459,6 +3458,7 @@ mod tests {
 
     #[test]
     fn summary_judgment_follows_quiet_timid_and_none_rec_action() {
+        use Recommendation as R;
         let (_d, cfg, lib, _src) = setup(&[]);
         let judge = |f: &dyn Fn(&mut ImportOptions), rec| {
             let mut o = opts(&cfg);
@@ -3471,7 +3471,6 @@ mod tests {
                 Some(_) => "other",
             }
         };
-        use Recommendation as R;
         assert_eq!(judge(&|_| {}, R::None), "ask");
         assert_eq!(
             judge(&|o| o.none_rec_action = NoneRecAction::Skip, R::None),
@@ -4484,7 +4483,7 @@ mod tests {
         let (_d, mut cfg, lib, _src) = setup(&[]);
         let mut info = crate::mb::parse_recording(
             &serde_json::json!({"id": "r1", "title": "T", "releases": [{"title": "Alb"}]}),
-            &Default::default(),
+            &crate::mb::ParseOpts::default(),
         );
         let disambig = |cfg: &Config, info: &crate::mb::TrackInfo| {
             Importer::new(cfg, &lib, opts(cfg), &[])
@@ -4779,6 +4778,7 @@ mod tests {
         singleton: bool,
         answers: &[&'static str],
     ) -> Option<(tempfile::TempDir, Library, Vec<String>)> {
+        use std::os::unix::fs::PermissionsExt;
         let (d, mut cfg, lib, top, _) = rescan_setup()?;
         let ed = d.path().join("editor.sh");
         std::fs::write(
@@ -4786,7 +4786,6 @@ mod tests {
             "#!/bin/sh\nsed -i -e 's/title: one/title: Edited one/' \"$1\"\n",
         )
         .unwrap();
-        use std::os::unix::fs::PermissionsExt;
         std::fs::set_permissions(&ed, std::fs::Permissions::from_mode(0o755)).unwrap();
         cfg.set("editor", ed.display().to_string().into());
         cfg.set("plugins", serde_yaml::from_str("[edit]").unwrap());
@@ -4857,7 +4856,7 @@ mod tests {
                 make_mp3(&a, "3.mp3", &[("album", "Album"), ("title", "three")], 128);
             });
             let prompts = rescan_run(&cfg, &lib, &top, vec![("r", add), ("u", None)], |o| {
-                o.threaded = threaded
+                o.threaded = threaded;
             });
             assert_eq!(all_items(&lib).len(), 3);
             assert!(prompts.iter().all(|p| offers_rescan(p)), "{prompts:?}");
@@ -4867,7 +4866,7 @@ mod tests {
             };
             let remove = hook(move || std::fs::remove_file(album.join("2.mp3")).unwrap());
             rescan_run(&cfg, &lib, &top, vec![("r", remove), ("u", None)], |o| {
-                o.threaded = threaded
+                o.threaded = threaded;
             });
             assert_eq!(all_items(&lib).len(), 1);
         }
@@ -4941,7 +4940,7 @@ mod tests {
         };
         album_with(&top, "Second", "Second", &[("x", 128), ("y", 128)]).unwrap();
         let prompts = rescan_run(&cfg, &lib, &top, vec![("r", None), ("u", None)], |o| {
-            o.flat = true
+            o.flat = true;
         });
         assert_eq!(prompts.len(), 2);
         assert_eq!(albums(&lib).len(), 1);
@@ -4964,7 +4963,7 @@ mod tests {
             return;
         };
         rescan_run(&cfg, &lib, &top, vec![("r", None), ("u", None)], |o| {
-            o.op = FileOp::Move
+            o.op = FileOp::Move;
         });
         assert_eq!(all_items(&lib).len(), 2);
         assert!(!album.exists());
@@ -4973,7 +4972,7 @@ mod tests {
             return;
         };
         rescan_run(&cfg, &lib, &top, vec![("r", None), ("u", None)], |o| {
-            o.resume = Resume::Yes
+            o.resume = Resume::Yes;
         });
         assert!(ImportState::load(&cfg.state_path()).progress.is_empty());
     }
@@ -5012,12 +5011,12 @@ mod tests {
         assert!(offers_rescan(&prompts[0]) && !offers_rescan(&prompts[1]));
 
         let prompts = rescan_run(&cfg, &lib, &top, vec![("s", None)], |o| {
-            o.group_albums = true
+            o.group_albums = true;
         });
         assert!(!offers_rescan(&prompts[0]), "{prompts:?}");
 
         let prompts = rescan_run(&cfg, &lib, &top, vec![("s", None), ("s", None)], |o| {
-            o.singletons = true
+            o.singletons = true;
         });
         assert!(prompts.iter().all(|p| !offers_rescan(p)), "{prompts:?}");
 

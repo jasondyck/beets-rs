@@ -375,7 +375,7 @@ impl<'a, 'g> Interp<'a, 'g> {
                     .iter()
                     .map(|(k, v)| Ok((k.clone(), self.eval(v)?)))
                     .collect::<PyResult<_>>()?;
-                call(&f, args, kwargs)
+                call(&f, args, &kwargs)
             }
             Expr::Index(b, i) => {
                 let b = self.eval(b)?;
@@ -1094,10 +1094,10 @@ fn py_round(x: f64, n: Option<i64>) -> f64 {
     }
 }
 
-pub fn call<'a>(f: &V<'a>, args: Vec<V<'a>>, kwargs: Vec<(String, V<'a>)>) -> PyResult<V<'a>> {
+pub fn call<'a>(f: &V<'a>, args: Vec<V<'a>>, kwargs: &[(String, V<'a>)]) -> PyResult<V<'a>> {
     match f {
         V::Builtin(name) => builtin(name, args, kwargs),
-        V::Method(obj, name) => method(obj, name, args, kwargs),
+        V::Method(obj, name) => method(obj, name, &args, kwargs),
         other => err(
             "TypeError",
             format!("'{}' object is not callable", other.type_name()),
@@ -1112,7 +1112,7 @@ pub fn call<'a>(f: &V<'a>, args: Vec<V<'a>>, kwargs: Vec<(String, V<'a>)>) -> Py
     clippy::cast_precision_loss,
     clippy::cast_sign_loss
 )]
-fn builtin<'a>(name: &str, args: Vec<V<'a>>, kwargs: Vec<(String, V<'a>)>) -> PyResult<V<'a>> {
+fn builtin<'a>(name: &str, args: Vec<V<'a>>, kwargs: &[(String, V<'a>)]) -> PyResult<V<'a>> {
     let kw = |k: &str| kwargs.iter().find(|(n, _)| n == k).map(|(_, v)| v.clone());
     if let Some((k, _)) = kwargs.iter().find(|(k, _)| {
         !matches!(
@@ -1718,16 +1718,13 @@ fn str_method<'a>(
                             let mut out: Vec<String> = vec![];
                             let mut rest = s.trim_end_matches(is_py_space);
                             for _ in 0..m {
-                                let st = rest
-                                    .rfind(is_py_space)
-                                    .map(|k| {
-                                        k + rest[k..]
-                                            .chars()
-                                            .next()
-                                            .expect("BUG: rfind found a char")
-                                            .len_utf8()
-                                    })
-                                    .unwrap_or(0);
+                                let st = rest.rfind(is_py_space).map_or(0, |k| {
+                                    k + rest[k..]
+                                        .chars()
+                                        .next()
+                                        .expect("BUG: rfind found a char")
+                                        .len_utf8()
+                                });
                                 out.push(rest[st..].to_string());
                                 rest = rest[..st].trim_end_matches(is_py_space);
                             }
@@ -1809,7 +1806,7 @@ fn str_method<'a>(
             }
         }
         "isdigit" | "isnumeric" | "isdecimal" => {
-            b(!s.is_empty() && s.chars().all(|c| c.is_numeric()))
+            b(!s.is_empty() && s.chars().all(char::is_numeric))
         }
         "isalpha" => b(!s.is_empty() && s.chars().all(char::is_alphabetic)),
         "isalnum" => b(!s.is_empty() && s.chars().all(char::is_alphanumeric)),
@@ -2015,11 +2012,11 @@ fn str_format<'a>(fmt: &str, args: &[V<'a>], kwargs: &[(String, V<'a>)]) -> PyRe
 fn method<'a>(
     obj: &V<'a>,
     name: &str,
-    args: Vec<V<'a>>,
-    kwargs: Vec<(String, V<'a>)>,
+    args: &[V<'a>],
+    kwargs: &[(String, V<'a>)],
 ) -> PyResult<V<'a>> {
     match obj {
-        V::Str(s) => str_method(s, name, &args, &kwargs),
+        V::Str(s) => str_method(s, name, args, kwargs),
         V::Bytes(b) => match name {
             "decode" => Ok(V::str(String::from_utf8_lossy(b).as_ref())),
             "lower" => Ok(V::Bytes(Rc::new(b.to_ascii_lowercase()))),
@@ -2040,7 +2037,7 @@ fn method<'a>(
         V::Float(f) => Ok(V::Bool(f.fract() == 0.0)),
         V::List(l) => match name {
             "append" => {
-                check("list.append", &args, 1, 1)?;
+                check("list.append", args, 1, 1)?;
                 l.borrow_mut().push(args[0].clone());
                 Ok(V::None)
             }
@@ -2050,7 +2047,7 @@ fn method<'a>(
                 Ok(V::None)
             }
             "insert" => {
-                check("insert", &args, 2, 2)?;
+                check("insert", args, 2, 2)?;
                 let mut l = l.borrow_mut();
                 let n = l.len() as i64;
                 let k = args[0].int().unwrap_or(0);
@@ -2114,11 +2111,11 @@ fn method<'a>(
             let d = d.borrow();
             match name {
                 "get" => {
-                    check("get", &args, 1, 2)?;
-                    Ok(d.iter()
-                        .find(|(k, _)| k.eq(&args[0]))
-                        .map(|(_, v)| v.clone())
-                        .unwrap_or_else(|| args.get(1).cloned().unwrap_or(V::None)))
+                    check("get", args, 1, 2)?;
+                    Ok(d.iter().find(|(k, _)| k.eq(&args[0])).map_or_else(
+                        || args.get(1).cloned().unwrap_or(V::None),
+                        |(_, v)| v.clone(),
+                    ))
                 }
                 "keys" => Ok(V::list(d.iter().map(|(k, _)| k.clone()).collect())),
                 "values" => Ok(V::list(d.iter().map(|(_, v)| v.clone()).collect())),
@@ -2129,7 +2126,7 @@ fn method<'a>(
                 )),
             }
         }
-        V::Obj(o) => o.call_method(name, &args),
+        V::Obj(o) => o.call_method(name, args),
         _ => err(
             "AttributeError",
             format!("'{}' object has no attribute '{name}'", obj.type_name()),

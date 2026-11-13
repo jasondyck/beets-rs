@@ -211,9 +211,7 @@ impl<'a> RecObj<'a> {
             (Kind::Item, "singleton") => return Ok(Some(V::Bool(self.rec.int("album_id") == 0))),
             (Kind::Item, "filesize") => {
                 return Ok(Some(V::Int(
-                    std::fs::metadata(self.rec.path())
-                        .map(|m| m.len() as i64)
-                        .unwrap_or(0),
+                    std::fs::metadata(self.rec.path()).map_or(0, |m| m.len() as i64),
                 )));
             }
             (Kind::Album, "albumtotal" | "missing") if f.get(key).is_some() => {

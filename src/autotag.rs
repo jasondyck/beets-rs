@@ -1868,7 +1868,7 @@ mod tests {
         it.set_str("isrc", "OLD");
         let mut items = vec![it];
         let m = AlbumMatch {
-            distance: Default::default(),
+            distance: Distance::default(),
             info: info(),
             mapping: vec![(0, 0)],
             extra_items: vec![],

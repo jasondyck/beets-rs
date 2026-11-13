@@ -568,8 +568,7 @@ fn optparse_width() -> usize {
     std::env::var("COLUMNS")
         .ok()
         .and_then(|w| w.trim().parse::<usize>().ok())
-        .map(|w| w.saturating_sub(2))
-        .unwrap_or(80 - 2)
+        .map_or(80 - 2, |w| w.saturating_sub(2))
 }
 
 /// optparse's `max_help_position`: the help starts at column 24 at most.
@@ -628,8 +627,7 @@ fn wrap_help(text: &str, width: usize) -> Vec<String> {
             let split = frag
                 .char_indices()
                 .nth(width)
-                .map(|(i, _)| i)
-                .unwrap_or(frag.len());
+                .map_or(frag.len(), |(i, _)| i);
             lines.push(frag[..split].to_string());
             frag = &frag[split..];
         }
@@ -669,7 +667,7 @@ fn render_table(rows: &[(String, String)], width: usize, help_position: usize) -
         };
         let lines = wrap_help(help, help_width);
         out.push_str(&" ".repeat(indent_first));
-        out.push_str(lines.first().map(String::as_str).unwrap_or(""));
+        out.push_str(lines.first().map_or("", String::as_str));
         out.push('\n');
         for line in lines.iter().skip(1) {
             out.push_str(&" ".repeat(help_position));

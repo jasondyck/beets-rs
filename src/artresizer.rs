@@ -29,8 +29,7 @@ pub fn temp_filename(prefix: &str, like: Option<&Path>) -> PathBuf {
         .unwrap_or_default();
     let nanos = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.subsec_nanos())
-        .unwrap_or(0);
+        .map_or(0, |d| d.subsec_nanos());
     let n = COUNTER.fetch_add(1, Ordering::Relaxed);
     std::env::temp_dir().join(format!(
         "beets-{prefix}{}-{n}-{nanos:08x}{suffix}",
@@ -47,8 +46,7 @@ pub fn py_temp_name() -> PathBuf {
     const CHARS: &[u8] = b"abcdefghijklmnopqrstuvwxyz0123456789_";
     let mut x = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_nanos() as u64)
-        .unwrap_or(0)
+        .map_or(0, |d| d.as_nanos() as u64)
         ^ u64::from(std::process::id()) << 32
         ^ COUNTER
             .fetch_add(1, Ordering::Relaxed)

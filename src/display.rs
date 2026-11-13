@@ -62,7 +62,7 @@ impl Display {
             singleton_album_disambig: cfg.bool("import.singleton_album_disambig"),
             album_fields: cfg.list("match.album_disambig_fields"),
             track_fields: cfg.list("match.singleton_disambig_fields"),
-            out: Default::default(),
+            out: std::cell::RefCell::default(),
         }
     }
 
@@ -294,7 +294,7 @@ impl Display {
             let (item, track) = (&items[i], &info.tracks[t]);
             let key = (track.medium, track.disctitle.clone());
             if medium.as_ref() != Some(&key) {
-                let header = self.medium_info_line(info, track);
+                let header = Self::medium_info_line(info, track);
                 if !header.is_empty() {
                     self.print_tracklist(&lines);
                     lines.clear();
@@ -338,7 +338,7 @@ impl Display {
     }
 
     /// beets' `make_medium_info_line`.
-    fn medium_info_line(&self, info: &AlbumInfo, track: &TrackInfo) -> String {
+    fn medium_info_line(info: &AlbumInfo, track: &TrackInfo) -> String {
         let media = if track.media.is_empty() {
             "Media"
         } else {

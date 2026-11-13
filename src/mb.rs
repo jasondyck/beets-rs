@@ -612,8 +612,7 @@ fn s(v: &J, key: &str) -> String {
 fn arr<'j>(v: &'j J, key: &str) -> &'j [J] {
     v.get(key)
         .and_then(|x| x.as_array())
-        .map(Vec::as_slice)
-        .unwrap_or(&[])
+        .map_or(&[], Vec::as_slice)
 }
 
 /// beets' normalised `<target-type>_relations`: an entity's relations to
@@ -1090,7 +1089,7 @@ pub fn parse_release(j: &J, opts: &ParseOpts) -> AlbumInfo {
         external_ids: parse_external_ids(j, &opts.external_ids),
         data_source: opts.data_source.clone(),
         nulls,
-        omit: Default::default(),
+        omit: BTreeSet::default(),
         extra: vec![],
     };
     if info.va {

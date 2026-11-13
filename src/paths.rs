@@ -216,7 +216,7 @@ pub fn art_destination(
 /// `os.path.splitext`: the extension of the last component, unless that
 /// component starts with its only dots.
 fn splitext(path: &str) -> (&str, &str) {
-    let name_start = path.rfind('/').map(|i| i + 1).unwrap_or(0);
+    let name_start = path.rfind('/').map_or(0, |i| i + 1);
     let name = &path[name_start..];
     let lead = name.len() - name.trim_start_matches('.').len();
     match name[lead..].rfind('.') {

@@ -156,7 +156,7 @@ pub fn read(path: &Path) -> Result<Item> {
                     .or(props.overall_bitrate())
                     .unwrap_or(0),
             ) * 1000,
-            Default::default(),
+            crate::props::Encoder::default(),
         )
     });
     item.set_str("bitrate_mode", enc.bitrate_mode);
@@ -475,8 +475,7 @@ pub fn refresh_mtime(item: &mut Item) {
         let ts = m
             .duration_since(std::time::UNIX_EPOCH)
             // beets' `current_mtime`: whole seconds.
-            .map(|d| d.as_secs() as f64)
-            .unwrap_or(0.0);
+            .map_or(0.0, |d| d.as_secs() as f64);
         item.set("mtime", Value::Float(ts));
     }
 }
