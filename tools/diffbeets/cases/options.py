@@ -43,6 +43,29 @@ _OPTION_CASES = [
     ["ls", "-l", "3"],
     ["ls", "--limit=2"],
     ["ls", "--lim", "2"],
+    # Option values, checked the way optparse's type/callback checks do
+    # (2.11): integers, enumeration choices, missing values, and the
+    # non-negative check of beets' add_limit_option callback.
+    ["ls", "-la"],
+    ["ls", "-l", "a"],
+    ["ls", "--limit=a"],
+    ["ls", "--lim", "a"],
+    ["ls", "-l", "-1"],
+    ["ls", "--limit=-1"],
+    ["ls", "-l", " 3 "],
+    ["modify", "-l", "x"],
+    ["rm", "-l", "x"],
+    ["stats", "-l", "x"],
+    ["-p", "export", "export", "-f", "yaml"],
+    ["-p", "export", "export", "--format=yaml"],
+    ["-p", "smartplaylist", "splupdate", "--output=xspf"],
+    ["-p", "smartplaylist", "splupdate", "--output"],
+    ["-p", "info", "info", "--limit=-1"],
+    ["-p", "info", "info", "--limit", "x"],
+    ["-p", "info", "info", "-l", "-1"],
+    ["-p", "duplicates", "duplicates", "-l", "x"],
+    ["-p", "missing", "missing", "-l", "x"],
+    ["-p", "random", "random", "-l", "x"],
     # Plugin commands (built by the registry at run time) get the same
     # treatment; `-p` enables the plugin so both tools know the command.
     ["-p", "fetchart", "fetchart", "-y"],

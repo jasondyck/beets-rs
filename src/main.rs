@@ -366,11 +366,59 @@ pub enum Cmd {
     },
 }
 
+/// How optparse checks an option's value (`type="int"`, `type="choice"`, ...).
+#[derive(Clone, Debug, PartialEq)]
+enum ValueKind {
+    Any,
+    Int,
+    Float,
+    Choice(Vec<String>),
+}
+
 /// One option a subcommand knows (as optparse would see it).
 struct OptInfo {
     short: Option<char>,
     long: Option<String>,
     takes_value: bool,
+    kind: ValueKind,
+}
+
+/// The value checks the option's clap parser implies, as optparse would
+/// make them: enumeration choices and integer/float conversions.
+fn value_kind(arg: &clap::Arg) -> ValueKind {
+    let choices: Vec<String> = arg
+        .get_possible_values()
+        .into_iter()
+        .map(|v| v.get_name().to_string())
+        .collect();
+    if !choices.is_empty() {
+        return ValueKind::Choice(choices);
+    }
+    let id = arg.get_value_parser().type_id();
+    let is = |t: std::any::TypeId| id == t;
+    if [
+        std::any::TypeId::of::<i8>(),
+        std::any::TypeId::of::<i16>(),
+        std::any::TypeId::of::<i32>(),
+        std::any::TypeId::of::<i64>(),
+        std::any::TypeId::of::<i128>(),
+        std::any::TypeId::of::<isize>(),
+        std::any::TypeId::of::<u8>(),
+        std::any::TypeId::of::<u16>(),
+        std::any::TypeId::of::<u32>(),
+        std::any::TypeId::of::<u64>(),
+        std::any::TypeId::of::<u128>(),
+        std::any::TypeId::of::<usize>(),
+    ]
+    .iter()
+    .any(|t| is(*t))
+    {
+        ValueKind::Int
+    } else if is(std::any::TypeId::of::<f32>()) || is(std::any::TypeId::of::<f64>()) {
+        ValueKind::Float
+    } else {
+        ValueKind::Any
+    }
 }
 
 fn options_of(cmd: &clap::Command) -> Vec<OptInfo> {
@@ -390,6 +438,11 @@ fn options_of(cmd: &clap::Command) -> Vec<OptInfo> {
                 short,
                 long,
                 takes_value,
+                kind: if takes_value {
+                    value_kind(a)
+                } else {
+                    ValueKind::Any
+                },
             })
         })
         .collect();
@@ -400,6 +453,7 @@ fn options_of(cmd: &clap::Command) -> Vec<OptInfo> {
             short: Some('h'),
             long: Some("help".into()),
             takes_value: false,
+            kind: ValueKind::Any,
         });
     }
     out
@@ -410,16 +464,86 @@ enum PreError {
     Ambiguous(String, Vec<String>),
     /// An option that needs a value at the end of the command line.
     Missing(String),
+    /// A value optparse's type check rejects (`option -l: invalid ...`).
+    ValueError(String),
+    /// A command-level check of a parsed value (beets raises `UserError`,
+    /// which prints without a usage block and exits 1).
+    User(String),
+}
+
+/// optparse's value checks (`type="int"`, `type="float"`, `type="choice"`),
+/// with its wording, plus the non-negative check of beets' `add_limit_option`
+/// callback (a UserError, not an optparse error).
+fn check_value(info: &OptInfo, label: &str, value: &str) -> Result<(), PreError> {
+    match &info.kind {
+        ValueKind::Any => Ok(()),
+        ValueKind::Choice(choices) => {
+            if choices.iter().any(|c| c == value) {
+                return Ok(());
+            }
+            let quoted: Vec<String> = choices.iter().map(|c| format!("'{c}'")).collect();
+            Err(PreError::ValueError(format!(
+                "option {label}: invalid choice: '{value}' (choose from {})",
+                quoted.join(", ")
+            )))
+        }
+        ValueKind::Int => {
+            // `int()`: surrounding whitespace and a leading sign are fine.
+            let trimmed = value.trim();
+            let digits = trimmed.strip_prefix(['+', '-']).unwrap_or(trimmed);
+            if digits.is_empty() || !digits.chars().all(|c| c.is_ascii_digit()) {
+                return Err(PreError::ValueError(format!(
+                    "option {label}: invalid integer value: '{value}'"
+                )));
+            }
+            if info.long.as_deref() == Some("limit") && trimmed.starts_with('-') {
+                // beets' `_set_limit` (ui/__init__.py): negative limits are a
+                // UserError, printed without the usage block, exit 1.
+                return Err(PreError::User(format!(
+                    "{label} argument must be a non-negative integer"
+                )));
+            }
+            if digits != "0" && digits.starts_with('0') {
+                // Python's int() accepts these; clap's integers do too.
+            }
+            Ok(())
+        }
+        ValueKind::Float => match value.trim().parse::<f64>() {
+            Ok(_) => Ok(()),
+            Err(_) => Err(PreError::ValueError(format!(
+                "option {label}: invalid floating-point value: '{value}'"
+            ))),
+        },
+    }
+}
+
+/// The value as optparse's `int`/`float` conversion sees it (it strips
+/// surrounding whitespace).
+fn normalize_value(info: &OptInfo, value: &std::ffi::OsStr) -> std::ffi::OsString {
+    match info.kind {
+        ValueKind::Int | ValueKind::Float => {
+            std::ffi::OsString::from(value.to_string_lossy().trim())
+        }
+        _ => value.to_os_string(),
+    }
+}
+
+impl PreError {
+    #[cfg(test)]
+    fn message(&self) -> String {
+        option_error(self)
+    }
 }
 
 /// beets' `OptionParser.error` text for an option error.
-fn option_error(err: PreError) -> String {
+fn option_error(err: &PreError) -> String {
     match err {
         PreError::Unknown(opt) => format!("no such option: {opt}"),
         PreError::Ambiguous(opt, possibilities) => {
             format!("ambiguous option: {opt} ({}?)", possibilities.join(", "))
         }
         PreError::Missing(opt) => format!("{opt} option requires 1 argument"),
+        PreError::ValueError(message) | PreError::User(message) => message.clone(),
     }
 }
 
@@ -625,11 +749,16 @@ fn command_usage(name: &str) -> String {
 }
 
 fn exit_option_error(command: Option<&str>, err: PreError) -> ! {
+    if let PreError::User(message) = err {
+        // beets logs the UserError as `error: ...` and exits 1.
+        eprintln!("error: {message}");
+        std::process::exit(1);
+    }
     let (usage, prog) = match command {
         Some(name) => (command_usage(name), format!("beet {name}")),
         None => (root_usage(), "beet".to_string()),
     };
-    eprintln!("{usage}\n\n{prog}: error: {}", option_error(err));
+    eprintln!("{usage}\n\n{prog}: error: {}", option_error(&err));
     std::process::exit(2);
 }
 
@@ -681,18 +810,22 @@ fn process_option(
             .unwrap();
         let mut new = std::ffi::OsString::from(format!("--{full}"));
         if info.takes_value {
+            let label = format!("--{full}");
             match inline {
                 Some(v) => {
+                    check_value(info, &label, &v).unwrap_or_else(|e| fail(e));
                     new.push("=");
-                    new.push(v);
+                    new.push(normalize_value(info, v.as_ref()));
                     *i += 1;
                 }
                 None if *i + 1 < args.len() => {
+                    check_value(info, &label, &args[*i + 1].to_string_lossy())
+                        .unwrap_or_else(|e| fail(e));
                     new.push("=");
-                    new.push(&args[*i + 1]);
+                    new.push(normalize_value(info, &args[*i + 1]));
                     *i += 2;
                 }
-                None => fail(PreError::Missing(format!("--{full}"))),
+                None => fail(PreError::Missing(label)),
             }
         } else {
             *i += 1;
@@ -711,11 +844,15 @@ fn process_option(
         };
         new.push(c.to_string());
         if info.takes_value {
+            let label = format!("-{c}");
             let rest: String = cluster[j + 1..].iter().collect();
             if !rest.is_empty() {
-                new.push(rest);
+                check_value(info, &label, &rest).unwrap_or_else(|e| fail(e));
+                new.push(normalize_value(info, rest.as_ref()));
                 j = cluster.len();
             } else if *i + 1 < args.len() {
+                check_value(info, &label, &args[*i + 1].to_string_lossy())
+                    .unwrap_or_else(|e| fail(e));
                 // The value is the next argument, even an empty one or one
                 // starting with `-`: use the long `--option=value` form so
                 // clap sees it as a value.
@@ -730,20 +867,20 @@ fn process_option(
                 match &info.long {
                     Some(long) => {
                         let mut tok = std::ffi::OsString::from(format!("--{long}="));
-                        tok.push(&args[*i + 1]);
+                        tok.push(normalize_value(info, &args[*i + 1]));
                         out.push(tok);
                     }
                     None => {
                         // clap doesn't take attached short values: pass
                         // `-n value` as two arguments.
                         out.push(std::ffi::OsString::from(format!("-{c}")));
-                        out.push(args[*i + 1].clone());
+                        out.push(normalize_value(info, &args[*i + 1]));
                     }
                 }
                 *i += 1;
                 j = cluster.len();
             } else {
-                fail(PreError::Missing(format!("-{c}")));
+                fail(PreError::Missing(label));
             }
         } else {
             j += 1;
@@ -1303,6 +1440,59 @@ Commands:
                 .unwrap()
                 .aliases,
             ["?"]
+        );
+    }
+
+    fn opt(long: &str, kind: ValueKind) -> OptInfo {
+        OptInfo {
+            short: None,
+            long: Some(long.into()),
+            takes_value: true,
+            kind,
+        }
+    }
+
+    #[test]
+    fn optparse_value_errors() {
+        let int = opt("limit", ValueKind::Int);
+        assert_eq!(
+            check_value(&int, "-l", "a").unwrap_err().message(),
+            "option -l: invalid integer value: 'a'"
+        );
+        assert_eq!(
+            check_value(&int, "--limit", "").unwrap_err().message(),
+            "option --limit: invalid integer value: ''"
+        );
+        // Python's int(): a sign is fine, so -1 reaches beets' limit check.
+        assert!(check_value(&int, "-l", "+2").is_ok());
+        assert!(check_value(&int, "-l", " 3 ").is_ok());
+        assert_eq!(
+            check_value(&int, "-l", "-1").unwrap_err().message(),
+            "-l argument must be a non-negative integer"
+        );
+        assert!(matches!(
+            check_value(&int, "--limit=-1", "-1"),
+            Err(PreError::User(_))
+        ));
+        // Other integer options take negatives.
+        let threads = opt("threads", ValueKind::Int);
+        assert!(check_value(&threads, "-t", "-1").is_ok());
+        let choice = opt(
+            "format",
+            ValueKind::Choice(vec!["json".into(), "csv".into()]),
+        );
+        assert!(check_value(&choice, "-f", "json").is_ok());
+        assert_eq!(
+            check_value(&choice, "-f", "yaml").unwrap_err().message(),
+            "option -f: invalid choice: 'yaml' (choose from 'json', 'csv')"
+        );
+        let float = opt("threshold", ValueKind::Float);
+        assert!(check_value(&float, "--threshold", "0.5").is_ok());
+        assert_eq!(
+            check_value(&float, "--threshold", "x")
+                .unwrap_err()
+                .message(),
+            "option --threshold: invalid floating-point value: 'x'"
         );
     }
 
