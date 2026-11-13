@@ -9,7 +9,9 @@
 //! `MusicBrainz::album_for_id_variants`), driven by `ParseOpts`.
 
 use crate::config::Config;
+use crate::events::{Event, Listener};
 use crate::plugins::Plugin;
+use std::rc::Rc;
 
 pub struct MBPseudoPlugin;
 
@@ -19,12 +21,37 @@ impl Plugin for MBPseudoPlugin {
     }
 }
 
+/// beets' `album_matched` listener (`_adjust_final_album_match`): the
+/// match's info came from this plugin ("MusicBrainzPseudoRelease"), so the
+/// library records it as plain MusicBrainz metadata. The merged candidate
+/// already exposes the pseudo-release's fields (beets switches its
+/// `PseudoAlbumInfo` view here and re-assigns the mapping, which our merged
+/// info did when the candidates were built).
+struct MatchAdjust;
+
+impl Listener for MatchAdjust {
+    fn wants(&self, event: &str) -> bool {
+        event == "album_matched"
+    }
+
+    fn on(&self, ev: &Event) {
+        let Some(cell) = ev.match_album() else {
+            return;
+        };
+        let mut m = cell.borrow_mut();
+        if m.info.data_source == "MusicBrainzPseudoRelease" {
+            m.info.data_source = "MusicBrainz".into();
+        }
+    }
+}
+
 pub fn load(cfg: &Config) -> anyhow::Result<MBPseudoPlugin> {
     if crate::plugins::enabled(cfg, "musicbrainz") {
         anyhow::bail!(
             "The musicbrainz plugin should not be enabled together with the mbpseudo plugin"
         );
     }
+    crate::events::register(Rc::new(MatchAdjust));
     Ok(MBPseudoPlugin)
 }
 
@@ -45,6 +72,8 @@ inventory::submit! {
         artist_transl: artist
 "#,
         config_keys: &["mbpseudo"],
+        item_types: &[],
+        album_types: &[],
         redacted: &[],
         make: Some(registry_make),
         fatal: true,

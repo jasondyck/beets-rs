@@ -1023,6 +1023,8 @@ inventory::submit! {
     auto: yes
 "#,
         config_keys: &["chroma"],
+        item_types: &[],
+        album_types: &[],
         redacted: &["acoustid.apikey"],
         make: Some(registry_make),
         fatal: false,

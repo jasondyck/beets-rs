@@ -680,6 +680,8 @@ inventory::submit! {
     search_query_ascii: no
 "#,
         config_keys: &["deezer"],
+        item_types: crate::plugins::deezer::ITEM_TYPES,
+        album_types: &[],
         redacted: &[],
         make: Some(registry_make),
         fatal: false,

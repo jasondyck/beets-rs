@@ -177,6 +177,8 @@ inventory::submit! {
     bracket: '[]'
 "#,
         config_keys: &["albumtypes"],
+        item_types: &[],
+        album_types: &[],
         redacted: &[],
         make: Some(registry_make),
         fatal: false,

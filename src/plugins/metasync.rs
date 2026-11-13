@@ -20,7 +20,7 @@ pub const ITEM_TYPES: &[(&str, FieldType)] = &[
     ("itunes_lastskipped", FieldType::Date),
     ("itunes_dateadded", FieldType::Date),
     ("amarok_rating", FieldType::Int),
-    ("amarok_score", FieldType::Float),
+    ("amarok_score", FieldType::Float(1)),
     ("amarok_uid", FieldType::Str),
     ("amarok_playcount", FieldType::Int),
     ("amarok_firstplayed", FieldType::Date),
@@ -543,6 +543,8 @@ inventory::submit! {
         // is added when that source is instantiated.
         defaults: r#""#,
         config_keys: &[],
+        item_types: crate::plugins::metasync::ITEM_TYPES,
+        album_types: &[],
         redacted: &[],
         make: Some(registry_make),
         fatal: false,

@@ -428,6 +428,8 @@ inventory::submit! {
     nocopy: no
 "#,
         config_keys: &["ipfs"],
+        item_types: &[],
+        album_types: &[],
         redacted: &[],
         make: Some(registry_make),
         fatal: false,

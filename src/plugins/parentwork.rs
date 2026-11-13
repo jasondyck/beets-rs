@@ -267,6 +267,8 @@ inventory::submit! {
     force: no
 "#,
         config_keys: &["parentwork"],
+        item_types: &[],
+        album_types: &[],
         redacted: &[],
         make: Some(registry_make),
         fatal: false,

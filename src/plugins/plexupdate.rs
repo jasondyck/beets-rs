@@ -505,6 +505,8 @@ inventory::submit! {
     token: ''
 "#,
         config_keys: &["plex"],
+        item_types: &[],
+        album_types: &[],
         redacted: &["plex.token"],
         make: Some(registry_make),
         fatal: false,

@@ -76,6 +76,8 @@ inventory::submit! {
     skip: []
 "#,
         config_keys: &["ihate"],
+        item_types: &[],
+        album_types: &[],
         redacted: &[],
         make: Some(registry_make),
         fatal: false,

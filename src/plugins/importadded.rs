@@ -259,6 +259,8 @@ inventory::submit! {
     preserve_write_mtimes: no
 "#,
         config_keys: &["importadded"],
+        item_types: &[],
+        album_types: &[],
         redacted: &[],
         make: Some(registry_make),
         fatal: false,

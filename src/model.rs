@@ -12,7 +12,8 @@ pub enum FieldType {
     Int,
     /// Integer formatted with zero padding to the given width (beets' PaddedInt).
     Padded(usize),
-    Float,
+    /// A float formatted with this many decimal places (beets' `Float(digits)`).
+    Float(usize),
     Bool,
     /// Seconds, formatted as M:SS.
     Duration,
@@ -38,7 +39,7 @@ impl FieldType {
             self,
             FieldType::Int
                 | FieldType::Padded(_)
-                | FieldType::Float
+                | FieldType::Float(_)
                 | FieldType::NullFloat
                 | FieldType::Duration
                 | FieldType::Bitrate
@@ -50,7 +51,7 @@ impl FieldType {
         match self {
             FieldType::Str | FieldType::List(_) | FieldType::MusicalKey => "TEXT",
             FieldType::Path => "BLOB",
-            FieldType::Float | FieldType::NullFloat | FieldType::Duration | FieldType::Date => {
+            FieldType::Float(_) | FieldType::NullFloat | FieldType::Duration | FieldType::Date => {
                 "REAL"
             }
             _ => "INTEGER",
@@ -63,7 +64,7 @@ impl FieldType {
             FieldType::NullFloat | FieldType::MusicalKey => Value::Null,
             FieldType::Path => Value::Path(PathBuf::new()),
             FieldType::Bool => Value::Bool(false),
-            FieldType::Float | FieldType::Duration | FieldType::Date => Value::Float(0.0),
+            FieldType::Float(_) | FieldType::Duration | FieldType::Date => Value::Float(0.0),
             _ => Value::Int(0),
         }
     }
@@ -85,7 +86,7 @@ impl FieldType {
                 s.to_lowercase().as_str(),
                 "yes" | "1" | "true" | "t" | "y"
             )),
-            FieldType::Float => Value::Float(float()),
+            FieldType::Float(_) => Value::Float(float()),
             // "M:SS", else a number of seconds.
             FieldType::Duration => Value::Float(match s.split_once(':') {
                 Some((m, ss))
@@ -220,7 +221,8 @@ impl Value {
         let num = self.as_f64().unwrap_or(0.0);
         match ty {
             Some(FieldType::Padded(w)) => format!("{:0w$}", num as i64, w = w),
-            Some(FieldType::Float | FieldType::NullFloat) => format!("{num:.1}"),
+            Some(FieldType::Float(digits)) => format!("{num:.digits$}"),
+            Some(FieldType::NullFloat) => format!("{num:.1}"),
             Some(FieldType::List(d)) => split_list(&self.raw(), d).join(SEMI),
             Some(FieldType::Bool) => if num != 0.0 { "True" } else { "False" }.into(),
             Some(FieldType::Duration) => format_duration(num),
@@ -562,7 +564,7 @@ fn flex_text(value: &Value, ty: FieldType) -> String {
             "0"
         }
         .into(),
-        (FieldType::Float | FieldType::Date | FieldType::NullFloat, Value::Float(f)) => {
+        (FieldType::Float(_) | FieldType::Date | FieldType::NullFloat, Value::Float(f)) => {
             crate::hooks::py_float(*f)
         }
         (_, v) => v.raw(),
@@ -814,7 +816,7 @@ fn coerce(value: Value, ty: FieldType) -> Value {
         (FieldType::Bool, Value::Bool(b)) => Value::Bool(b),
         (FieldType::Bool, Value::Str(s)) => Value::Bool(parse_bool(&s).unwrap_or(false)),
         (FieldType::Bool, v) => Value::Bool(v.as_f64().unwrap_or(0.0) != 0.0),
-        (FieldType::Float | FieldType::Duration | FieldType::Date, v) => {
+        (FieldType::Float(_) | FieldType::Duration | FieldType::Date, v) => {
             Value::Float(v.as_f64().unwrap_or(0.0))
         }
         (_, v) => Value::Int(v.as_f64().unwrap_or(0.0) as i64),

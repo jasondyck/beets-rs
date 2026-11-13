@@ -379,6 +379,8 @@ inventory::submit! {
     base_url:
 "#,
         config_keys: &["absubmit"],
+        item_types: &[],
+        album_types: &[],
         redacted: &[],
         make: Some(registry_make),
         fatal: false,

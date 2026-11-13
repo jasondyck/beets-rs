@@ -1368,6 +1368,8 @@ inventory::submit! {
     keep_new: no
 "#,
         config_keys: &["convert"],
+        item_types: &[],
+        album_types: &[],
         redacted: &[],
         make: Some(registry_make),
         fatal: false,

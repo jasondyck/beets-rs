@@ -1445,6 +1445,8 @@ inventory::submit! {
     noclip: yes
 "#,
         config_keys: &["replaygain"],
+        item_types: &[],
+        album_types: &[],
         redacted: &[],
         make: Some(registry_make),
         fatal: false,

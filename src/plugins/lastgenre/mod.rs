@@ -1220,6 +1220,8 @@ inventory::submit! {
     aliases: yes
 "#,
         config_keys: &["lastgenre"],
+        item_types: &[],
+        album_types: &[],
         redacted: &[],
         make: Some(registry_make),
         fatal: false,

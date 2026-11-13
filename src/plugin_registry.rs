@@ -38,6 +38,11 @@ pub struct PluginDef {
     /// The top-level keys `defaults` sets (beets copies them into the
     /// effective configuration while the plugin is enabled).
     pub config_keys: &'static [&'static str],
+    /// beets' `item_types`: the flexible attribute types this plugin
+    /// declares for items.
+    pub item_types: &'static [(&'static str, crate::model::FieldType)],
+    /// beets' `album_types`: the flexible attribute types for albums.
+    pub album_types: &'static [(&'static str, crate::model::FieldType)],
     /// Dotted defaults keys `beet config` shows as REDACTED while the
     /// plugin is enabled (beets' `redact` flags).
     pub redacted: &'static [&'static str],
@@ -108,28 +113,127 @@ pub fn command(name: &str) -> Option<&'static PluginCommand> {
     commands().into_iter().find(|c| canonical(&(c.build)()))
 }
 
-/// Every plugin's default settings, merged as beets' `config.add` calls
-/// would leave them (regardless of whether the plugin is enabled; the
-/// effective configuration only copies the enabled ones).
-pub fn default_tree() -> Y {
-    let mut out = Mapping::new();
-    for def in defs() {
-        if def.defaults.trim().is_empty() {
-            continue;
+/// What a plugin's defaults may need from the effective configuration
+/// (beets computes some of them at load time).
+pub struct DefaultsCtx {
+    /// `config["directory"].as_filename()`: the resolved music directory.
+    pub directory: String,
+}
+
+impl DefaultsCtx {
+    /// The context of a raw configuration tree (the user sources over the
+    /// core defaults).
+    pub fn from_tree(tree: &Y) -> Self {
+        let raw = match tree.get("directory") {
+            Some(Y::String(s)) => s.clone(),
+            Some(Y::Number(n)) => n.to_string(),
+            _ => "~/Music".to_string(),
+        };
+        DefaultsCtx {
+            directory: crate::config::expand_tilde(&raw)
+                .to_string_lossy()
+                .into_owned(),
         }
-        let text = def.defaults.replace(
-            "CPU_COUNT",
-            &crate::plugins::replaygain::cpu_count().to_string(),
-        );
-        let y: Y = serde_yaml::from_str(&crate::config::yaml11_bools(&text))
-            .unwrap_or_else(|e| panic!("{}: invalid default config: {e}", def.name));
-        if let Y::Mapping(m) = y {
-            for (k, v) in m {
-                out.insert(k, v);
+    }
+}
+
+/// The tokens plugin defaults may use for beets' computed values:
+/// `CPU_COUNT` (int), `MUSIC_DIRECTORY` (`config["directory"]`),
+/// `MPD_HOST`/`MPD_PORT` (the environment, else the fallbacks beets uses).
+fn substitute(value: &mut Y, ctx: &DefaultsCtx) {
+    match value {
+        Y::String(s) => {
+            *value = match s.as_str() {
+                "CPU_COUNT" => Y::Number(crate::plugins::replaygain::cpu_count().into()),
+                "MUSIC_DIRECTORY" => Y::String(ctx.directory.clone()),
+                "MPD_HOST" => {
+                    Y::String(std::env::var("MPD_HOST").unwrap_or_else(|_| "localhost".into()))
+                }
+                "MPD_PORT" => {
+                    let port = std::env::var("MPD_PORT")
+                        .ok()
+                        .and_then(|p| p.parse::<u64>().ok())
+                        .unwrap_or(6600);
+                    Y::Number(port.into())
+                }
+                _ => return,
+            };
+        }
+        Y::Sequence(items) => {
+            for item in items {
+                substitute(item, ctx);
+            }
+        }
+        Y::Mapping(map) => {
+            for (_, v) in map.iter_mut() {
+                substitute(v, ctx);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Parse one plugin's `defaults` YAML, with beets' computed values filled
+/// in.
+fn parsed_defaults(def: &PluginDef, ctx: &DefaultsCtx) -> Option<Y> {
+    if def.defaults.trim().is_empty() {
+        return None;
+    }
+    let mut y: Y = serde_yaml::from_str(&crate::config::yaml11_bools(def.defaults))
+        .unwrap_or_else(|e| panic!("{}: invalid default config: {e}", def.name));
+    substitute(&mut y, ctx);
+    Some(y)
+}
+
+/// Deep-merge `over` under `base`: keys `base` already has win (beets'
+/// `config.add` appends a lower-priority source, so the first plugin to set
+/// a key keeps it); new keys are appended in `over`'s order.
+pub fn merge_first(base: &mut Y, over: &Y) {
+    match (&mut *base, over) {
+        (Y::Mapping(b), Y::Mapping(o)) => {
+            for (k, v) in o {
+                match b.get_mut(k) {
+                    Some(existing) => merge_first(existing, v),
+                    None => {
+                        b.insert(k.clone(), v.clone());
+                    }
+                }
+            }
+        }
+        (b, o) => {
+            if b.is_null() {
+                *b = o.clone();
             }
         }
     }
-    Y::Mapping(out)
+}
+
+/// The defaults the enabled plugins add (`beets`' `config.add` in each
+/// `__init__`), merged in `names` order: a shared section such as `mpd`
+/// gets each plugin's keys, and a key two plugins set keeps the first
+/// plugin's value. `beets` can only load plugins that are enabled, so
+/// another plugin's defaults never show up.
+pub fn defaults_for(names: &[String], ctx: &DefaultsCtx) -> Y {
+    let mut out = Y::Mapping(Mapping::new());
+    for name in names {
+        let Some(def) = find(name) else { continue };
+        if let Some(y) = parsed_defaults(def, ctx) {
+            merge_first(&mut out, &y);
+        }
+    }
+    out
+}
+
+/// Every bundled plugin's default settings, merged in registry order. (The
+/// effective configuration uses [`defaults_for`] with the enabled plugins.)
+pub fn default_tree(ctx: &DefaultsCtx) -> Y {
+    let mut out = Y::Mapping(Mapping::new());
+    for def in defs() {
+        if let Some(y) = parsed_defaults(def, ctx) {
+            merge_first(&mut out, &y);
+        }
+    }
+    out
 }
 
 #[cfg(test)]
@@ -161,5 +265,37 @@ mod tests {
             (def.order, def.name)
         });
         assert_eq!(names, sorted);
+    }
+
+    /// Computed defaults: `MUSIC_DIRECTORY` is the effective music
+    /// directory, `MPD_HOST`/`MPD_PORT` the environment (beets' fallbacks
+    /// otherwise).
+    #[test]
+    fn computed_defaults() {
+        let ctx = DefaultsCtx {
+            directory: "/srv/music".into(),
+        };
+        let y = defaults_for(&["mpdstats".to_string()], &ctx);
+        let mpd = &y["mpd"];
+        assert_eq!(mpd["music_directory"], "/srv/music");
+        assert_eq!(
+            mpd["host"],
+            std::env::var("MPD_HOST").unwrap_or_else(|_| "localhost".into())
+        );
+        let port = std::env::var("MPD_PORT")
+            .ok()
+            .and_then(|p| p.parse::<u64>().ok())
+            .unwrap_or(6600);
+        assert_eq!(mpd["port"], port);
+        // A shared section keeps the first plugin's key order and values.
+        let y = defaults_for(&["mpdupdate".to_string(), "mpdstats".to_string()], &ctx);
+        let keys: Vec<&str> = y["mpd"]
+            .as_mapping()
+            .unwrap()
+            .keys()
+            .map(|k| k.as_str().unwrap())
+            .collect();
+        assert_eq!(keys[..3], ["host", "port", "password"]);
+        assert!(keys.contains(&"music_directory"));
     }
 }

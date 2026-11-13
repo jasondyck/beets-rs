@@ -25,18 +25,18 @@ const DEFAULT_WAITING_TIME: u64 = 5;
 /// Spotify's item fields and their types (`SpotifyPlugin.item_types`).
 pub const ITEM_TYPES: &[(&str, FieldType)] = &[
     ("spotify_track_popularity", FieldType::Int),
-    ("spotify_acousticness", FieldType::Float),
-    ("spotify_danceability", FieldType::Float),
-    ("spotify_energy", FieldType::Float),
-    ("spotify_instrumentalness", FieldType::Float),
-    ("spotify_key", FieldType::Float),
-    ("spotify_liveness", FieldType::Float),
-    ("spotify_loudness", FieldType::Float),
+    ("spotify_acousticness", FieldType::Float(1)),
+    ("spotify_danceability", FieldType::Float(1)),
+    ("spotify_energy", FieldType::Float(1)),
+    ("spotify_instrumentalness", FieldType::Float(1)),
+    ("spotify_key", FieldType::Float(1)),
+    ("spotify_liveness", FieldType::Float(1)),
+    ("spotify_loudness", FieldType::Float(1)),
     ("spotify_mode", FieldType::Int),
-    ("spotify_speechiness", FieldType::Float),
-    ("spotify_tempo", FieldType::Float),
+    ("spotify_speechiness", FieldType::Float(1)),
+    ("spotify_tempo", FieldType::Float(1)),
     ("spotify_time_signature", FieldType::Int),
-    ("spotify_valence", FieldType::Float),
+    ("spotify_valence", FieldType::Float(1)),
     ("spotify_updated", FieldType::Date),
 ];
 
@@ -1418,6 +1418,8 @@ inventory::submit! {
     tokenfile: spotify_token.json
 "#,
         config_keys: &["spotify"],
+        item_types: crate::plugins::spotify::ITEM_TYPES,
+        album_types: &[],
         redacted: &["spotify.client_id", "spotify.client_secret"],
         make: Some(registry_make),
         fatal: false,

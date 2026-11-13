@@ -86,6 +86,9 @@ pub enum Arg<'a> {
     Task(&'a TaskInfo),
     /// The tags of a `write` event (`{name: value}` as Python's `str()`).
     Tags(&'a [(String, String)]),
+    /// `album_matched`'s `match`: mutable, as beets' listeners adjust it
+    /// (mbpseudo switches its data source).
+    Match(&'a std::cell::RefCell<crate::autotag::AlbumMatch>),
     /// An object listeners here only see as Python would print it
     /// (`<beets.importer.session.ImportSession object at 0x...>`).
     Opaque(&'static str),
@@ -126,6 +129,13 @@ impl<'a> Event<'a> {
     pub fn path(&self, key: &str) -> Option<&'a Path> {
         match self.arg(key)? {
             Arg::Path(p) => Some(p),
+            _ => None,
+        }
+    }
+
+    pub fn match_album(&self) -> Option<&'a std::cell::RefCell<crate::autotag::AlbumMatch>> {
+        match self.arg("match")? {
+            Arg::Match(m) => Some(m),
             _ => None,
         }
     }

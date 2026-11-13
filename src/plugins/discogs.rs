@@ -1557,6 +1557,8 @@ inventory::submit! {
         album_artist: no
 "#,
         config_keys: &["discogs"],
+        item_types: &[],
+        album_types: &[],
         redacted: &["discogs.apikey", "discogs.apisecret", "discogs.user_token"],
         make: Some(registry_make),
         fatal: false,

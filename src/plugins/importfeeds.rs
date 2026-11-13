@@ -246,6 +246,8 @@ inventory::submit! {
     absolute_path: no
 "#,
         config_keys: &["importfeeds"],
+        item_types: &[],
+        album_types: &[],
         redacted: &[],
         make: Some(registry_make),
         fatal: false,

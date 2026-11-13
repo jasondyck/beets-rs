@@ -426,6 +426,8 @@ inventory::submit! {
         // beets adds no defaults: `token` and `username` must be set.
         defaults: r#""#,
         config_keys: &[],
+        item_types: crate::plugins::listenbrainz::ITEM_TYPES,
+        album_types: &[],
         redacted: &["listenbrainz.token"],
         make: Some(registry_make),
         fatal: false,

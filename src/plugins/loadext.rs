@@ -78,6 +78,8 @@ inventory::submit! {
         order: 76,
         defaults: r#""#,
         config_keys: &["loadext"],
+        item_types: &[],
+        album_types: &[],
         redacted: &[],
         make: Some(registry_make),
         fatal: false,

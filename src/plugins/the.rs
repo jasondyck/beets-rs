@@ -311,6 +311,8 @@ inventory::submit! {
     patterns: []
 "#,
         config_keys: &["the"],
+        item_types: &[],
+        album_types: &[],
         redacted: &[],
         make: Some(registry_make),
         fatal: false,

@@ -449,6 +449,8 @@ inventory::submit! {
     bom: no
 "#,
         config_keys: &["play"],
+        item_types: &[],
+        album_types: &[],
         redacted: &[],
         make: Some(registry_make),
         fatal: false,

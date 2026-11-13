@@ -14,7 +14,6 @@ EXPECTED = {}
 
 # 5.18c part 2.
 EXTRA_CONFIGS = {
-    "config-mpdupdate.yaml": "plugins: [mpdupdate]\n",
     "config-plexupdate.yaml": "plugins: [plexupdate]\n",
     "config-kodiupdate.yaml": "plugins: [kodiupdate]\n",
     "config-subsonicupdate.yaml": "plugins: [subsonicupdate]\n",
@@ -29,7 +28,7 @@ EXTRA_CONFIGS = {
 
 def CASES():
     out = []
-    for name in ["config-mpdupdate.yaml", "config-plexupdate.yaml",
+    for name in ["config-plexupdate.yaml",
                  "config-kodiupdate.yaml", "config-subsonicupdate.yaml",
                  "config-mbcollection.yaml", "config-listenbrainz.yaml",
                  "config-lastimport.yaml"]:

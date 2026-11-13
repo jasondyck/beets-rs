@@ -30,7 +30,7 @@ pub fn config_types(cfg: &Config) -> Result<Vec<(String, FieldType)>> {
         let key = scalar(k);
         let ty = match v {
             Y::String(s) if s == "int" => FieldType::Int,
-            Y::String(s) if s == "float" => FieldType::Float,
+            Y::String(s) if s == "float" => FieldType::Float(1),
             Y::String(s) if s == "bool" => FieldType::Bool,
             Y::String(s) if s == "date" => FieldType::Date,
             other => bail!(
@@ -53,30 +53,20 @@ fn scalar(v: &Y) -> String {
     }
 }
 
-/// The flexible attribute types a plugin declares, for items and albums.
+/// The flexible attribute types a plugin declares, for items and albums
+/// (beets' `item_types`/`album_types`, registered in each plugin's
+/// `PluginDef`); the `types` plugin's own are configured.
 fn declared(cfg: &Config, plugin: &str) -> Result<[Vec<(String, FieldType)>; 2]> {
     let own = |v: &[(&str, FieldType)]| -> Vec<(String, FieldType)> {
         v.iter().map(|(k, t)| (k.to_string(), *t)).collect()
     };
-    Ok(match plugin {
-        "types" => {
-            let t = config_types(cfg)?;
-            [t.clone(), t]
-        }
-        "lyrics" => [own(crate::plugins::lyrics::ITEM_TYPES), vec![]],
-        "acousticbrainz" => [own(crate::plugins::acousticbrainz::ITEM_TYPES), vec![]],
-        "mpdstats" => [own(crate::plugins::mpdstats::ITEM_TYPES), vec![]],
-        "missing" => [vec![], own(crate::plugins::missing::ALBUM_TYPES)],
-        // 5.18c part 2.
-        "listenbrainz" => [own(crate::plugins::listenbrainz::ITEM_TYPES), vec![]],
-        "lastimport" => [own(crate::plugins::lastimport::ITEM_TYPES), vec![]],
-        // 5.20b
-        "metasync" => [own(crate::plugins::metasync::ITEM_TYPES), vec![]],
-        "tidal" => [own(crate::plugins::tidal::ITEM_TYPES), own(crate::plugins::tidal::ALBUM_TYPES)],
-        // 5.19
-        "deezer" => [own(crate::plugins::deezer::ITEM_TYPES), vec![]],
-        "spotify" => [own(crate::plugins::spotify::ITEM_TYPES), vec![]],
-        _ => [vec![], vec![]],
+    if plugin == "types" {
+        let t = config_types(cfg)?;
+        return Ok([t.clone(), t]);
+    }
+    Ok(match crate::plugin_registry::find(plugin) {
+        Some(def) => [own(def.item_types), own(def.album_types)],
+        None => [vec![], vec![]],
     })
 }
 
@@ -120,6 +110,8 @@ inventory::submit! {
         order: 25,
         defaults: r#""#,
         config_keys: &["types"],
+        item_types: &[],
+        album_types: &[],
         redacted: &[],
         make: Some(registry_make),
         fatal: false,

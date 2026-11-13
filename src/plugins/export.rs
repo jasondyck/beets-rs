@@ -409,6 +409,8 @@ inventory::submit! {
         formatting: {}
 "#,
         config_keys: &["export"],
+        item_types: &[],
+        album_types: &[],
         redacted: &[],
         make: Some(registry_make),
         fatal: false,

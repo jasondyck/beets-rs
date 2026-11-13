@@ -131,6 +131,8 @@ inventory::submit! {
         order: 29,
         defaults: r#""#,
         config_keys: &["substitute"],
+        item_types: &[],
+        album_types: &[],
         redacted: &[],
         make: Some(registry_make),
         fatal: false,

@@ -1828,6 +1828,8 @@ inventory::submit! {
     fanarttv_key: null
 "#,
         config_keys: &["fetchart"],
+        item_types: &[],
+        album_types: &[],
         redacted: &["fetchart.google_key", "fetchart.google_engine", "fetchart.fanarttv_key", "fetchart.lastfm_key"],
         make: Some(registry_make),
         fatal: false,

@@ -2005,6 +2005,8 @@ inventory::submit! {
     volume: 100
 "#,
         config_keys: &["bpd"],
+        item_types: &[],
+        album_types: &[],
         redacted: &["bpd.password"],
         make: Some(registry_make),
         fatal: false,

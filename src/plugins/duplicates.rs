@@ -747,6 +747,8 @@ inventory::submit! {
     remove: no
 "#,
         config_keys: &["duplicates"],
+        item_types: &[],
+        album_types: &[],
         redacted: &[],
         make: Some(registry_make),
         fatal: false,

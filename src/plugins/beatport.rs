@@ -802,6 +802,8 @@ inventory::submit! {
     tokenfile: beatport_token.json
 "#,
         config_keys: &["beatport"],
+        item_types: &[],
+        album_types: &[],
         redacted: &["beatport.apikey", "beatport.apisecret"],
         make: Some(registry_make),
         fatal: false,

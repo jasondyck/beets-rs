@@ -317,6 +317,8 @@ inventory::submit! {
     password: ''
 "#,
         config_keys: &["subsonicplaylist"],
+        item_types: &[],
+        album_types: &[],
         redacted: &["subsonicplaylist.password"],
         make: Some(registry_make),
         fatal: false,

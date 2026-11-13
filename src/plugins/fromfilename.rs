@@ -241,6 +241,8 @@ inventory::submit! {
         order: 32,
         defaults: r#""#,
         config_keys: &["fromfilename"],
+        item_types: &[],
+        album_types: &[],
         redacted: &[],
         make: Some(registry_make),
         fatal: false,

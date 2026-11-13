@@ -334,6 +334,8 @@ inventory::submit! {
     dolphin: no
 "#,
         config_keys: &["thumbnails"],
+        item_types: &[],
+        album_types: &[],
         redacted: &[],
         make: Some(registry_make),
         fatal: false,

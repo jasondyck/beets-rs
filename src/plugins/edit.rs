@@ -70,7 +70,7 @@ fn raw_value(obj: &Record, key: &str) -> PyVal {
         (FieldType::Int | FieldType::Padded(_) | FieldType::Bitrate | FieldType::SampleRate, v) => {
             PyVal::Int(v.as_f64().unwrap_or(0.0) as i128)
         }
-        (FieldType::Float | FieldType::Duration | FieldType::Date | FieldType::NullFloat, v) => {
+        (FieldType::Float(_) | FieldType::Duration | FieldType::Date | FieldType::NullFloat, v) => {
             PyVal::Float(v.as_f64().unwrap_or(0.0))
         }
         (_, v) => PyVal::Str(v.raw()),
@@ -93,7 +93,7 @@ fn safe_value(obj: &Record, key: &str, value: &PyVal) -> bool {
         Some(
             FieldType::Int | FieldType::Padded(_) | FieldType::Bitrate | FieldType::SampleRate,
         ) => matches!(value, PyVal::Int(_) | PyVal::Bool(_)),
-        Some(FieldType::Float | FieldType::Duration | FieldType::Date | FieldType::NullFloat) => {
+        Some(FieldType::Float(_) | FieldType::Duration | FieldType::Date | FieldType::NullFloat) => {
             matches!(value, PyVal::Float(_))
         }
         Some(FieldType::Bool) => matches!(value, PyVal::Bool(_)),
@@ -724,6 +724,8 @@ inventory::submit! {
     ignore_fields: id path
 "#,
         config_keys: &["edit"],
+        item_types: &[],
+        album_types: &[],
         redacted: &[],
         make: Some(registry_make),
         fatal: false,

@@ -335,6 +335,8 @@ inventory::submit! {
     import_action_on_error: ask
 "#,
         config_keys: &["badfiles"],
+        item_types: &[],
+        album_types: &[],
         redacted: &[],
         make: Some(registry_make),
         fatal: false,

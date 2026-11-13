@@ -113,6 +113,8 @@ inventory::submit! {
     ignore_subdirectories: []
 "#,
         config_keys: &["unimported"],
+        item_types: &[],
+        album_types: &[],
         redacted: &[],
         make: Some(registry_make),
         fatal: false,

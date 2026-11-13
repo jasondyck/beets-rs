@@ -101,6 +101,8 @@ inventory::submit! {
     path: .*
 "#,
         config_keys: &["filefilter"],
+        item_types: &[],
+        album_types: &[],
         redacted: &[],
         make: Some(registry_make),
         fatal: false,

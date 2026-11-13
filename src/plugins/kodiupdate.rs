@@ -197,6 +197,8 @@ inventory::submit! {
         defaults: r#"kodi: [{host: localhost, port: 8080, user: kodi, pwd: kodi}]
 "#,
         config_keys: &["kodi"],
+        item_types: &[],
+        album_types: &[],
         redacted: &["kodi.user", "kodi.pwd"],
         make: Some(registry_make),
         fatal: false,
