@@ -4,6 +4,22 @@
 ~/.cache/beets-reference/venv/bin/python tools/diffbeets/diffbeets.py
 ```
 
+The suite must pass with networking removed. Every fake service (the import
+phase's MusicBrainz, the art phase's image server, the plugin tests' servers)
+listens on `127.0.0.1:0`, so no case may reach a real host:
+
+```sh
+unshare -rn sh -c 'ip link set lo up; exec \
+    ~/.cache/beets-reference/venv/bin/python tools/diffbeets/diffbeets.py --no-build'
+```
+
+(`unshare -rn` starts a new network namespace whose loopback is down; `ip link
+set lo up` is needed for the fake servers, while there is no route to anything
+else. Build the release binary outside the namespace first so cargo doesn't
+need the network.) The same command around `cargo test` must pass too, and any
+case or test that changes its result there, or logs a connection/DNS error, is
+touching the network.
+
 It builds `target/release/beet` (skip with `--no-build`), then in a fresh temp
 dir (under `$TMPDIR`, or `--workdir DIR`):
 
