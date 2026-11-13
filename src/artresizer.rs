@@ -40,6 +40,8 @@ pub fn temp_filename(prefix: &str, like: Option<&Path>) -> PathBuf {
 
 /// A name like Python's `tempfile.NamedTemporaryFile`: `tmp` and eight
 /// random characters, in the temp directory.
+// Matches beets/PIL image and temp-name integer math (Python int()/float()).
+#[allow(clippy::cast_possible_truncation)]
 pub fn py_temp_name() -> PathBuf {
     static COUNTER: AtomicU64 = AtomicU64::new(0);
     const CHARS: &[u8] = b"abcdefghijklmnopqrstuvwxyz0123456789_";
@@ -47,7 +49,7 @@ pub fn py_temp_name() -> PathBuf {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_nanos() as u64)
         .unwrap_or(0)
-        ^ (std::process::id() as u64) << 32
+        ^ u64::from(std::process::id()) << 32
         ^ COUNTER
             .fetch_add(1, Ordering::Relaxed)
             .wrapping_mul(0x9E37_79B9_7F4A_7C15);
@@ -158,6 +160,8 @@ pub fn encode(img: &DynamicImage, format: ImageFormat, quality: u8) -> image::Im
 /// A baseline JPEG as ImageMagick (libjpeg) writes one: 4:2:0 chroma
 /// subsampling below quality 90 (none from 90 up). JPEG has no alpha: it's
 /// dropped.
+// Matches beets/PIL image and temp-name integer math (Python int()/float()).
+#[allow(clippy::cast_possible_truncation)]
 fn encode_jpeg(img: &DynamicImage, quality: u8) -> image::ImageResult<Vec<u8>> {
     use jpeg_encoder::{ColorType, Encoder};
     let to_err = |e: jpeg_encoder::EncodingError| {
@@ -167,7 +171,7 @@ fn encode_jpeg(img: &DynamicImage, quality: u8) -> image::ImageResult<Vec<u8>> {
         ))
     };
     let (w, h) = (img.width(), img.height());
-    if w > u16::MAX as u32 || h > u16::MAX as u32 {
+    if w > u32::from(u16::MAX) || h > u32::from(u16::MAX) {
         return Err(image::ImageError::Limits(
             image::error::LimitError::from_kind(image::error::LimitErrorKind::DimensionError),
         ));
@@ -217,7 +221,7 @@ pub fn scaled_size(w: u32, h: u32, maxwidth: u32) -> (u32, u32) {
     if maxwidth == 0 || w <= maxwidth {
         return (w, h);
     }
-    let nh = ((h as f64) * (maxwidth as f64) / (w as f64))
+    let nh = (f64::from(h) * f64::from(maxwidth) / f64::from(w))
         .round()
         .max(1.0) as u32;
     (maxwidth, nh)
@@ -365,15 +369,15 @@ pub fn phash(img: &DynamicImage) -> [f64; 8] {
         );
     }
     let gray = image::imageops::blur(&gray, 1.0);
-    let v = |x: u32, y: u32| gray.get_pixel(x, y).0[0] as f64 / 255.0;
+    let v = |x: u32, y: u32| f64::from(gray.get_pixel(x, y).0[0]) / 255.0;
 
     let (mut m00, mut m10, mut m01) = (0.0, 0.0, 0.0);
     for y in 0..h {
         for x in 0..w {
             let p = v(x, y);
             m00 += p;
-            m10 += x as f64 * p;
-            m01 += y as f64 * p;
+            m10 += f64::from(x) * p;
+            m01 += f64::from(y) * p;
         }
     }
     let recip = |d: f64| if d.abs() < 1e-12 { 0.0 } else { 1.0 / d };
@@ -384,8 +388,8 @@ pub fn phash(img: &DynamicImage) -> [f64; 8] {
     for y in 0..h {
         for x in 0..w {
             let p = v(x, y);
-            let dx = x as f64 - cx;
-            let dy = y as f64 - cy;
+            let dx = f64::from(x) - cx;
+            let dy = f64::from(y) - cy;
             m11 += dx * dy * p;
             m20 += dx * dx * p;
             m02 += dy * dy * p;
@@ -446,6 +450,12 @@ pub mod tests {
 
     /// A test picture: a gradient with a few shapes, so it has structure
     /// for the perceptual hash. `variant` changes the shapes.
+    // Matches beets/PIL image and temp-name integer math (Python int()/float()).
+    #[allow(
+        clippy::cast_possible_truncation,
+        clippy::cast_precision_loss,
+        clippy::cast_sign_loss
+    )]
     pub fn picture(w: u32, h: u32, variant: u32) -> DynamicImage {
         let img = RgbImage::from_fn(w, h, |x, y| {
             let fx = x as f32 / w as f32;
@@ -575,7 +585,9 @@ pub mod tests {
             let err: f64 = orig
                 .pixels()
                 .zip(back.pixels())
-                .flat_map(|(a, b)| (0..3).map(move |i| (a.0[i] as f64 - b.0[i] as f64).abs()))
+                .flat_map(|(a, b)| {
+                    (0..3).map(move |i| (f64::from(a.0[i]) - f64::from(b.0[i])).abs())
+                })
                 .sum::<f64>()
                 / (500.0 * 490.0 * 3.0);
             assert!(err < 6.0, "quality {q}: mean error {err}");

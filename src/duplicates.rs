@@ -177,6 +177,8 @@ pub fn human_bytes(size: u64) -> String {
 
 /// beets' `summarize_items`: "N items, FORMAT, NNNkbps, M:SS, SIZE" for the
 /// duplicate prompt (no item count for a single track).
+// beets' summary truncates/formats these numbers like Python int()/round().
+#[allow(clippy::cast_possible_truncation, clippy::cast_precision_loss)]
 pub fn summarize_items(items: &[Item], singleton: bool) -> String {
     let mut parts = vec![];
     if !singleton {

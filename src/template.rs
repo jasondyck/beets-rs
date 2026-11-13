@@ -317,7 +317,7 @@ fn check_arity(name: &str, sig: &Sig, given: usize) -> Result<(), String> {
         ));
     }
     if given > sig.params.len() {
-        let extra = sig.method as usize;
+        let extra = usize::from(sig.method);
         let (min, max, given) = (
             sig.required + extra,
             sig.params.len() + extra,
@@ -379,7 +379,7 @@ pub fn py_int(s: &str) -> Result<i64, String> {
     }
     let mut n: i64 = 0;
     for c in digits.chars().filter(|&c| c != '_') {
-        let d = c.to_digit(10).ok_or_else(err)? as i64;
+        let d = i64::from(c.to_digit(10).ok_or_else(err)?);
         n = n
             .checked_mul(10)
             .and_then(|n| n.checked_add(d))
@@ -394,6 +394,12 @@ fn int_arg(s: &str) -> Result<i64, String> {
 }
 
 /// Python slice bounds `[start:end]` over a sequence of length `len`.
+// Python slicing: indices truncate/wrap like CPython's int().
+#[allow(
+    clippy::cast_possible_truncation,
+    clippy::cast_possible_wrap,
+    clippy::cast_sign_loss
+)]
 fn py_slice(len: usize, start: Option<i64>, end: Option<i64>) -> (usize, usize) {
     let len = len as i64;
     let clamp = |i: i64| -> usize {

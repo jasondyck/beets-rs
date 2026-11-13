@@ -789,7 +789,7 @@ impl Raw {
     fn as_int(&self) -> i64 {
         match self {
             Raw::I(i) => *i,
-            Raw::B(b) => *b as i64,
+            Raw::B(b) => i64::from(*b),
             Raw::F(f) => *f as i64,
             Raw::S(s) => {
                 let t = s.trim();
@@ -825,11 +825,13 @@ impl Raw {
     }
 
     /// `safe_cast(float, ...)`: a decimal number from the front of a string.
+    // Matches mutagen/Python: tag values are truncated/rounded as Python does.
+    #[allow(clippy::cast_precision_loss)]
     fn as_float(&self) -> f64 {
         match self {
             Raw::I(i) => *i as f64,
             Raw::F(f) => *f,
-            Raw::B(b) => *b as i64 as f64,
+            Raw::B(b) => i64::from(*b) as f64,
             Raw::S(s) => {
                 static NUM: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
                     regex::Regex::new(r"^[\+-]?([0-9]+\.?[0-9]*|[0-9]*\.[0-9]+)").unwrap()
@@ -862,7 +864,7 @@ impl In {
         match self {
             In::S(s) => s.clone(),
             In::I(i) => i.to_string(),
-            In::B(b) => (*b as i64).to_string(),
+            In::B(b) => i64::from(*b).to_string(),
             In::F(f) => format!("{:.*}", st.places, f),
         }
     }
@@ -870,16 +872,18 @@ impl In {
     fn int(&self) -> i64 {
         match self {
             In::I(i) => *i,
-            In::B(b) => *b as i64,
+            In::B(b) => i64::from(*b),
             In::F(f) => *f as i64,
             In::S(s) => Raw::S(s.clone()).as_int(),
         }
     }
 
+    // Matches mutagen/Python: tag values are truncated/rounded as Python does.
+    #[allow(clippy::cast_precision_loss)]
     fn float(&self) -> f64 {
         match self {
             In::I(i) => *i as f64,
-            In::B(b) => *b as i64 as f64,
+            In::B(b) => i64::from(*b) as f64,
             In::F(f) => *f,
             In::S(s) => Raw::S(s.clone()).as_float(),
         }
@@ -914,11 +918,11 @@ fn sc_decode(data: &str) -> (f64, f64) {
         .collect();
     let maxgain = n[0].max(n[1]);
     let gain = if maxgain > 0 {
-        (maxgain as f64 / 1000.0).log10() * -10.0
+        (f64::from(maxgain) / 1000.0).log10() * -10.0
     } else {
         0.0
     };
-    let peak = n[6].max(n[7]) as f64 / 32768.0;
+    let peak = f64::from(n[6].max(n[7])) / 32768.0;
     (round_to(gain, 2), round_to(peak, 6))
 }
 
@@ -928,6 +932,8 @@ fn round_to(x: f64, places: usize) -> f64 {
 }
 
 /// `sc_encode`: ReplayGain gain and peak as a Sound Check string.
+// Matches mutagen/Python: tag values are truncated/rounded as Python does.
+#[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
 fn sc_encode(gain: f64, peak: f64) -> String {
     let peak = peak * 32768.0;
     let g = |reference: f64| -> i64 {
@@ -1247,8 +1253,8 @@ fn mp4_ident(key: &str) -> AtomIdent<'static> {
 fn mp4_raw(d: &AtomData) -> Option<Raw> {
     Some(match d {
         AtomData::UTF8(s) | AtomData::UTF16(s) => Raw::S(s.clone()),
-        AtomData::SignedInteger(i) => Raw::I(*i as i64),
-        AtomData::UnsignedInteger(u) => Raw::I(*u as i64),
+        AtomData::SignedInteger(i) => Raw::I(i64::from(*i)),
+        AtomData::UnsignedInteger(u) => Raw::I(i64::from(*u)),
         AtomData::Bool(b) => Raw::B(*b),
         AtomData::Unknown { data, .. } => Raw::S(String::from_utf8_lossy(data).into_owned()),
         AtomData::Picture(_) => return None,
@@ -1258,13 +1264,13 @@ fn mp4_raw(d: &AtomData) -> Option<Raw> {
 /// An MP4 integer atom's value (any width, big-endian, signed).
 fn mp4_int(d: &AtomData) -> Option<i64> {
     match d {
-        AtomData::SignedInteger(i) => Some(*i as i64),
-        AtomData::UnsignedInteger(u) => Some(*u as i64),
-        AtomData::Bool(b) => Some(*b as i64),
+        AtomData::SignedInteger(i) => Some(i64::from(*i)),
+        AtomData::UnsignedInteger(u) => Some(i64::from(*u)),
+        AtomData::Bool(b) => Some(i64::from(*b)),
         AtomData::Unknown { data, .. } if !data.is_empty() && data.len() <= 8 => {
             let mut v: i64 = if data[0] & 0x80 != 0 { -1 } else { 0 };
             for b in data {
-                v = (v << 8) | *b as i64;
+                v = (v << 8) | i64::from(*b);
             }
             Some(v)
         }
@@ -1741,7 +1747,7 @@ impl Tags {
             Tuple(key, idx) => {
                 let (a, b) = self.mp4_tuple(key).unwrap_or((0, 0));
                 let v = if idx == 0 { a } else { b };
-                (v != 0).then_some(Raw::I(v as i64))
+                (v != 0).then_some(Raw::I(i64::from(v)))
             }
             Mp4Bool(key) => {
                 let atom = self.mp4().get(&mp4_ident(key))?;
@@ -1769,6 +1775,8 @@ impl Tags {
     }
 
     /// A style's `set` (one value).
+    // Matches mutagen/Python: tag values are truncated/rounded as Python does.
+    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
     fn set(&mut self, st: &S, v: &In) {
         match st.k {
             SlashPack(id, pos) => {
@@ -1796,7 +1804,7 @@ impl Tags {
             }
             Tuple(key, idx) => {
                 let (mut a, mut b) = self.mp4_tuple(key).unwrap_or((0, 0));
-                let n = v.int().clamp(0, u16::MAX as i64) as u16;
+                let n = v.int().clamp(0, i64::from(u16::MAX)) as u16;
                 if idx == 0 {
                     a = n;
                 } else {
@@ -1809,7 +1817,7 @@ impl Tags {
             }
             Mp4Int(key) => {
                 // mutagen writes `tmpo` as a 16-bit integer.
-                let n = v.int().clamp(i16::MIN as i64, i16::MAX as i64) as i16;
+                let n = v.int().clamp(i64::from(i16::MIN), i64::from(i16::MAX)) as i16;
                 self.mp4_set_data(
                     key,
                     AtomData::Unknown {
@@ -2252,6 +2260,8 @@ impl MediaFile {
         }
     }
 
+    // Matches mutagen/Python: tag values are truncated/rounded as Python does.
+    #[allow(clippy::cast_possible_truncation)]
     fn update_field(&mut self, field: &Field, item: &Item, null: bool) {
         let value = if null { None } else { item.get(field.name) };
         let styles: Vec<&'static S> = self.styles(field).collect();

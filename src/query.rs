@@ -162,9 +162,11 @@ impl PyVal {
         }
     }
 
+    // beets' query values use Python int()/float() conversions.
+    #[allow(clippy::cast_precision_loss)]
     fn number(&self) -> Option<f64> {
         match self {
-            PyVal::Bool(b) => Some(*b as i64 as f64),
+            PyVal::Bool(b) => Some(i64::from(*b) as f64),
             PyVal::Int(i) => Some(*i as f64),
             PyVal::Float(f) => Some(*f),
             _ => None,
@@ -715,6 +717,8 @@ fn like_escape(s: &str) -> String {
 }
 
 impl FieldQuery {
+    // beets' query values use Python int()/float() conversions.
+    #[allow(clippy::cast_possible_truncation, clippy::cast_possible_wrap)]
     fn clause(&self) -> Option<(String, Vec<SqlValue>)> {
         if !self.fast {
             return None;
@@ -737,7 +741,7 @@ impl FieldQuery {
                 format!("{col} = ?"),
                 vec![match v {
                     PyVal::Int(i) => SqlValue::Integer(*i),
-                    PyVal::Bool(b) => SqlValue::Integer(*b as i64),
+                    PyVal::Bool(b) => SqlValue::Integer(i64::from(*b)),
                     PyVal::Float(f) => SqlValue::Real(*f),
                     PyVal::Bytes(b) => SqlValue::Blob(b.clone()),
                     PyVal::None => SqlValue::Null,
@@ -1169,6 +1173,8 @@ impl Period {
 }
 
 /// A local naive datetime as a Unix timestamp (`datetime.timestamp()`).
+// beets' query values use Python int()/float() conversions.
+#[allow(clippy::cast_precision_loss)]
 fn timestamp(d: NaiveDateTime) -> f64 {
     let local = Local.from_local_datetime(&d).earliest().or_else(|| {
         Local
@@ -1176,7 +1182,7 @@ fn timestamp(d: NaiveDateTime) -> f64 {
             .earliest()
     });
     match local {
-        Some(l) => l.timestamp() as f64 + l.timestamp_subsec_micros() as f64 / 1e6,
+        Some(l) => l.timestamp() as f64 + f64::from(l.timestamp_subsec_micros()) / 1e6,
         None => d.and_utc().timestamp() as f64,
     }
 }
@@ -1370,7 +1376,7 @@ fn field_query(kind: Kind, field: &str, pattern: &str, class: Class) -> Result<P
         Class::Numeric => numeric_test(&pattern, false)?,
         Class::Duration => numeric_test(&pattern, true)?,
         Class::Date => date_test(&pattern)?,
-        Class::Boolean => Test::Match(PyVal::Int(str2bool(&pattern) as i64)),
+        Class::Boolean => Test::Match(PyVal::Int(i64::from(str2bool(&pattern)))),
         Class::Path => path_test(&pattern),
         Class::Singleton => {
             let q = Pred::Field(FieldQuery {

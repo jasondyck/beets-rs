@@ -96,9 +96,11 @@ impl PyVal {
     }
 
     /// Python's `==` (numbers compare across int, float and bool).
+    // PyYAML exposes byte offsets/codes; Python indexes them via int().
+    #[allow(clippy::cast_precision_loss)]
     pub fn py_eq(&self, other: &PyVal) -> bool {
         let num = |v: &PyVal| match v {
-            PyVal::Bool(b) => Some(*b as i64 as f64),
+            PyVal::Bool(b) => Some(i64::from(*b) as f64),
             PyVal::Int(i) => Some(*i as f64),
             PyVal::Float(f) => Some(*f),
             _ => None,
@@ -427,7 +429,7 @@ fn base64(data: &[u8]) -> String {
             *chunk.get(1).unwrap_or(&0),
             *chunk.get(2).unwrap_or(&0),
         ];
-        let n = (b[0] as u32) << 16 | (b[1] as u32) << 8 | b[2] as u32;
+        let n = u32::from(b[0]) << 16 | u32::from(b[1]) << 8 | u32::from(b[2]);
         for i in 0..4 {
             if i <= chunk.len() {
                 out.push(T[(n >> (18 - 6 * i) & 63) as usize] as char);
@@ -590,6 +592,8 @@ struct Mark {
 }
 
 impl Mark {
+    // PyYAML exposes byte offsets/codes; Python indexes them via int().
+    #[allow(clippy::cast_possible_truncation)]
     fn from_sys(m: unsafe_sys::yaml_mark_t) -> Self {
         Mark {
             line: m.line as usize,
@@ -598,6 +602,8 @@ impl Mark {
     }
 
     /// PyYAML's `Mark.__str__` (with its snippet) for a string input.
+    // PyYAML exposes byte offsets/codes; Python indexes them via int().
+    #[allow(clippy::cast_precision_loss)]
     fn describe(&self, input: &str) -> String {
         let mut out = format!(
             "  in \"<unicode string>\", line {}, column {}",
@@ -850,6 +856,8 @@ fn pyyaml_problem(input: &str, problem: &str, mark: unsafe_sys::yaml_mark_t) -> 
     }
 }
 
+// PyYAML exposes byte offsets/codes; Python indexes them via int().
+#[allow(clippy::cast_possible_truncation)]
 fn char_at(input: &str, mark: unsafe_sys::yaml_mark_t) -> Option<char> {
     let line = input.split('\n').nth(mark.line as usize)?;
     line.chars().nth(mark.column as usize)
@@ -1174,7 +1182,7 @@ fn debase64(s: &str) -> Vec<u8> {
             b'/' => 63,
             _ => continue,
         };
-        buf = buf << 6 | v as u32;
+        buf = buf << 6 | u32::from(v);
         bits += 6;
         if bits >= 8 {
             bits -= 8;

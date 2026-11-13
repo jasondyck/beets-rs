@@ -194,11 +194,13 @@ pub enum Value {
 }
 
 impl Value {
+    // beets formats ints/floats through Python's int()/float() conversions.
+    #[allow(clippy::cast_precision_loss)]
     pub fn as_f64(&self) -> Option<f64> {
         match self {
             Value::Int(i) => Some(*i as f64),
             Value::Float(f) => Some(*f),
-            Value::Bool(b) => Some(*b as i64 as f64),
+            Value::Bool(b) => Some(i64::from(*b) as f64),
             Value::Str(s) => s.trim().parse().ok(),
             Value::Path(_) | Value::Null => None,
         }
@@ -217,6 +219,8 @@ impl Value {
     }
 
     /// Human-readable form, as used in templates and listings.
+    // beets formats ints/floats through Python's int()/float() conversions.
+    #[allow(clippy::cast_possible_truncation)]
     pub fn format(&self, ty: Option<FieldType>) -> String {
         let num = self.as_f64().unwrap_or(0.0);
         match ty {
