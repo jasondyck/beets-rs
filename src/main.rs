@@ -1,3 +1,9 @@
+//! The `beet` binary: a Rust port of the beets music library manager.
+//!
+//! This file is the entry point and the beets-compatible command line
+//! (global options, subcommands, the optparse-style help formatting and the
+//! pre-parse checks). The commands themselves are in [`commands`].
+
 mod artresizer;
 mod autotag;
 mod commands;
@@ -80,6 +86,7 @@ pub struct Cli {
 }
 
 /// beets' comma-separated list options (`-p`, `-P`): empty entries dropped.
+#[must_use]
 pub fn comma_list(s: &str) -> Vec<String> {
     s.split(',')
         .filter(|p| !p.is_empty())
@@ -387,6 +394,7 @@ struct OptInfo {
 
 /// The value checks the option's clap parser implies, as optparse would
 /// make them: enumeration choices and integer/float conversions.
+#[must_use]
 fn value_kind(arg: &clap::Arg) -> ValueKind {
     let choices: Vec<String> = arg
         .get_possible_values()
@@ -423,6 +431,7 @@ fn value_kind(arg: &clap::Arg) -> ValueKind {
     }
 }
 
+#[must_use]
 fn options_of(cmd: &clap::Command) -> Vec<OptInfo> {
     let mut out: Vec<OptInfo> = cmd
         .get_arguments()
@@ -562,6 +571,7 @@ pub struct HelpCommand {
 
 /// The command list beets prints: the core commands and the enabled
 /// plugins', hidden ones (and disabled plugin commands) left out.
+#[must_use]
 pub fn help_commands(enabled_plugins: &[String]) -> Vec<HelpCommand> {
     use clap::CommandFactory;
     let row = |cmd: &clap::Command| {
@@ -571,7 +581,7 @@ pub fn help_commands(enabled_plugins: &[String]) -> Vec<HelpCommand> {
         Some(HelpCommand {
             name: cmd.get_name().to_string(),
             aliases: cmd.get_visible_aliases().map(str::to_string).collect(),
-            help: cmd.get_about().map(|a| a.to_string()).unwrap_or_default(),
+            help: cmd.get_about().map(ToString::to_string).unwrap_or_default(),
         })
     };
     let mut out: Vec<HelpCommand> = Cli::command().get_subcommands().filter_map(row).collect();
@@ -587,6 +597,7 @@ pub fn help_commands(enabled_plugins: &[String]) -> Vec<HelpCommand> {
 }
 
 /// optparse's output width: `$COLUMNS`, or 80, less two columns.
+#[must_use]
 fn optparse_width() -> usize {
     std::env::var("COLUMNS")
         .ok()
@@ -596,12 +607,14 @@ fn optparse_width() -> usize {
 }
 
 /// optparse's `max_help_position`: the help starts at column 24 at most.
+#[must_use]
 fn max_help_position(width: usize) -> usize {
     (width.saturating_sub(20)).clamp(4, 24)
 }
 
 /// textwrap.wrap's hyphen splitting: a word breaks after a hyphen between
 /// word characters ("already-" + "imported"), as optparse's help wraps.
+#[must_use]
 fn split_hyphens(word: &str) -> Vec<String> {
     let chars: Vec<char> = word.chars().collect();
     let word_char = |c: char| c.is_alphanumeric() || c == '_';
@@ -627,6 +640,7 @@ fn split_hyphens(word: &str) -> Vec<String> {
 /// `textwrap.wrap(text, width)` for optparse's help, whose arguments collapse
 /// whitespace; long words and hyphenated words are broken as textwrap does by
 /// default.
+#[must_use]
 fn wrap_help(text: &str, width: usize) -> Vec<String> {
     let width = width.max(1);
     let mut lines = vec![];
@@ -668,6 +682,7 @@ fn wrap_help(text: &str, width: usize) -> Vec<String> {
 
 /// One optparse help table (`Commands:`/`Options:`): two-space indent, names
 /// padded to `help_position`, the help wrapped in the rest of the width.
+#[must_use]
 fn render_table(rows: &[(String, String)], width: usize, help_position: usize) -> String {
     let indent = 2;
     let name_width = help_position.saturating_sub(indent + 2);
@@ -731,10 +746,12 @@ const ROOT_OPTIONS: &[(&str, &str)] = &[
 /// `beet help CMD`/`beet CMD -h`: beets' optparse help for a command (usage,
 /// blank line, `Options:` and the option table), as the reference's parser
 /// shows it. None for commands beets doesn't have (ours: `migrate-beets`).
+#[must_use]
 pub fn subcommand_help_text(name: &str) -> Option<String> {
     subcommand_help_text_at(name, optparse_width())
 }
 
+#[must_use]
 fn subcommand_help_text_at(name: &str, width: usize) -> Option<String> {
     let help = subcommand_help::find(name)?;
     let rows: Vec<(String, String)> = help
@@ -760,16 +777,19 @@ fn subcommand_help_text_at(name: &str, width: usize) -> Option<String> {
 
 /// The canonical name of a command (by name or alias) among the enabled
 /// ones, as beets' `_subcommand_for_name` resolves it.
+#[must_use]
 pub fn canonical_command(name: &str, enabled_plugins: &[String]) -> Option<String> {
     resolve_command(&cli(enabled_plugins), name).map(|(canonical, _)| canonical)
 }
 
 /// `beet --help`/`beet help`, byte for byte as beets' optparse prints it.
+#[must_use]
 pub fn root_help_text(enabled_plugins: &[String]) -> String {
     root_help_text_at(enabled_plugins, optparse_width())
 }
 
 /// The same at a given optparse width (for tests).
+#[must_use]
 fn root_help_text_at(enabled_plugins: &[String], width: usize) -> String {
     let rows: Vec<(String, String)> = ROOT_OPTIONS
         .iter()
@@ -807,6 +827,7 @@ fn root_help_text_at(enabled_plugins: &[String], width: usize) -> String {
     out
 }
 
+#[must_use]
 fn command_usage(name: &str) -> String {
     if name == "list" {
         "Usage: beet [options]\nExample: beet list -f '$album: $title' artist:beatles".to_string()
@@ -875,7 +896,7 @@ fn process_option(
         let info = opts
             .iter()
             .find(|o| o.long.as_deref() == Some(&full))
-            .unwrap();
+            .expect("BUG: match_long resolved the name of one of opts' long options");
         let mut new = std::ffi::OsString::from(format!("--{full}"));
         if info.takes_value {
             let label = format!("--{full}");
@@ -1159,6 +1180,7 @@ pub enum Parsed {
 /// `version`/`help`/`config`, as the old central enum ordered them), each
 /// built at run time. As in beets, a disabled plugin's commands aren't
 /// registered at all (`beet web` is then an unknown command).
+#[must_use]
 pub fn cli(enabled_plugins: &[String]) -> clap::Command {
     use clap::CommandFactory;
     let base = Cli::command();
@@ -1220,6 +1242,7 @@ where
 }
 
 /// The command name in a clap "unrecognized subcommand" error.
+#[must_use]
 pub fn unknown_command(e: &clap::Error) -> Option<String> {
     if e.kind() != ErrorKind::InvalidSubcommand {
         return None;
@@ -1278,7 +1301,7 @@ fn main() {
             command,
             globals,
             matches,
-        } => commands::run_plugin(command, globals, &matches),
+        } => commands::run_plugin(command, &globals, &matches),
     };
     if let Err(e) = result {
         // As beets: `invalid query: 'QUERY': EXPLANATION`.
@@ -1337,12 +1360,11 @@ mod tests {
                 .chain(args.iter().copied())
                 .map(String::from)
                 .collect();
-            let enabled: Vec<String> = enabled.iter().map(|s| s.to_string()).collect();
+            let enabled: Vec<String> = enabled.iter().map(ToString::to_string).collect();
             on_big_stack(move || parse_args(args, &enabled))
         };
-        let disabled = match parse_with(&["fetchart"], &[]) {
-            Err(e) => e,
-            Ok(_) => panic!("a disabled plugin's command parsed"),
+        let Err(disabled) = parse_with(&["fetchart"], &[]) else {
+            panic!("a disabled plugin's command parsed");
         };
         assert_eq!(unknown_command(&disabled).as_deref(), Some("fetchart"));
         assert!(parse_with(&["fetchart"], &["fetchart"]).is_ok());
