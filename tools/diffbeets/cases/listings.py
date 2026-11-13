@@ -720,6 +720,9 @@ def _build_cases():
 # (no album artist in the corpus has a MusicBrainz id, so no lookups; the
 # musicbrainz plugin isn't loaded, so the track mode never looks up either).
 _NOMB = ["-c", f"{ROOT}/nomb.yaml"]
+# Port 9 on loopback is never a service here: even if one of these cases
+# somehow made a lookup, it stays on the machine (the musicbrainz plugin
+# isn't loaded, so it doesn't).
 EXTRA_CONFIGS["nomb.yaml"] = "musicbrainz:\n    host: 127.0.0.1:9\n"
 MISSING_ARGS = [
     ["missing"],
