@@ -36,6 +36,8 @@ pub enum HttpError {
         code: u16,
         url: String,
         body: Vec<u8>,
+        /// The response's headers (a 401's `WWW-Authenticate` challenge).
+        headers: Vec<(String, String)>,
     },
     /// Transport failures and exhausted retries (`ConnectionError`,
     /// `RetryError`), with requests' message.
@@ -111,9 +113,18 @@ pub struct Response {
     content_type: String,
     pub status: u16,
     pub body: Vec<u8>,
+    pub headers: Vec<(String, String)>,
 }
 
 impl Response {
+    /// A header's value, case-insensitively (the last one sent).
+    pub fn header(&self, name: &str) -> Option<&str> {
+        self.headers
+            .iter()
+            .rev()
+            .find(|(k, _)| k.eq_ignore_ascii_case(name))
+            .map(|(_, v)| v.as_str())
+    }
     /// The `Content-Type` header, if the server sent one.
     pub fn content_type(&self) -> Option<&str> {
         (!self.content_type.is_empty()).then_some(self.content_type.as_str())
@@ -207,10 +218,16 @@ impl Session {
     pub fn get_any(&self, url: &str, req: Request) -> Result<Response, HttpError> {
         match self.request("GET", url, req) {
             Ok(r) => Ok(r),
-            Err(HttpError::Status { code, body, .. }) => Ok(Response {
+            Err(HttpError::Status {
+                code,
+                body,
+                headers,
+                ..
+            }) => Ok(Response {
                 content_type: String::new(),
                 status: code,
                 body,
+                headers,
             }),
             Err(e) => Err(e),
         }
@@ -261,6 +278,7 @@ impl Session {
                         return Err(HttpError::Status {
                             code,
                             url: url.to_string(),
+                            headers: resp.headers.clone(),
                             body: resp.body,
                         });
                     }
@@ -292,12 +310,19 @@ fn read(resp: ureq::Response) -> Response {
     use std::io::Read;
     let content_type = resp.header("content-type").unwrap_or_default().to_string();
     let status = resp.status();
+    let mut headers = vec![];
+    for name in resp.headers_names() {
+        for v in resp.all(&name) {
+            headers.push((name.clone(), v.to_string()));
+        }
+    }
     let mut body = vec![];
     let _ = resp.into_reader().take(64 << 20).read_to_end(&mut body);
     Response {
         content_type,
         status,
         body,
+        headers,
     }
 }
 

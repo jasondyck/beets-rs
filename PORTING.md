@@ -40,6 +40,7 @@ config`, plugins fetchart / lyrics / embedart, release preferences.
 - [x] **2.7 config dump format**: `beet config` / `config -d` output as confuse prints it (4-space indent, inline lists, empty values instead of `null`, comments copied from the defaults)
 - [x] **2.8 modify display when deleting a field the album also has** (found in 5.17): `modify field!` on an item whose album has an attribute of the same name: beets shows `field: 2 -> 1` (the album's value shows through) or "No changes to make."; we show `field: 2` / list changes
 - [ ] **2.9 unknown options become query terms** (found in 6.1): subcommands accept hyphen values in the query argument, so `beet rm -y` treats `-y` as a query term; beets (optparse) errors with "no such option: -y". Match beets: reject unknown options, keep negative-number/`-field` query terms working as beets parses them
+- [ ] **2.10 `beet --help` command order** (found 2026-11-13): beets sorts the subcommand list by name (ui/__init__.py `subcommands.sort(key=lambda c: c.name)`, hidden ones left out) and prints it with optparse's layout; ours lists core commands in clap order, then plugin commands by registry `order`. Match beets' list and layout exactly; then a PluginCommand `order` is no longer needed (drop it, so parallel plugin work can't collide on it)
 
 ## 3. Core: queries, templates, library
 

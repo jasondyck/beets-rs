@@ -67,6 +67,9 @@ fn declared(cfg: &Config, plugin: &str) -> Result<[Vec<(String, FieldType)>; 2]>
         "acousticbrainz" => [own(crate::plugins::acousticbrainz::ITEM_TYPES), vec![]],
         "mpdstats" => [own(crate::plugins::mpdstats::ITEM_TYPES), vec![]],
         "missing" => [vec![], own(crate::plugins::missing::ALBUM_TYPES)],
+        // 5.18c part 2.
+        "listenbrainz" => [own(crate::plugins::listenbrainz::ITEM_TYPES), vec![]],
+        "lastimport" => [own(crate::plugins::lastimport::ITEM_TYPES), vec![]],
         _ => [vec![], vec![]],
     })
 }
