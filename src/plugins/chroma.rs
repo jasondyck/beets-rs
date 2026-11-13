@@ -25,6 +25,7 @@ use crate::template::Template;
 use anyhow::{Result, bail};
 use serde_json::Value as J;
 use std::collections::HashMap;
+use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 use std::sync::{LazyLock, Mutex};
 use std::time::{Duration, Instant};
@@ -109,7 +110,7 @@ fn bytes_repr(p: &Path) -> String {
                 out.push(c as char);
             }
             0x20..=0x7e => out.push(c as char),
-            c => out.push_str(&format!("\\x{c:02x}")),
+            c => write!(out, "\\x{c:02x}").unwrap(),
         }
     }
     out.push(q as char);

@@ -7,6 +7,7 @@ use crate::config::{Config, expand_tilde};
 use crate::library::Library;
 use anyhow::{Context, Result, bail};
 use rusqlite::{Connection, OpenFlags};
+use std::fmt::Write as _;
 use std::os::unix::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
 
@@ -121,7 +122,7 @@ fn uri_escape(path: &[u8]) -> String {
         if b.is_ascii_alphanumeric() || b"/-_.~".contains(&b) {
             out.push(b as char);
         } else {
-            out.push_str(&format!("%{b:02X}"));
+            write!(out, "%{b:02X}").unwrap();
         }
     }
     out
