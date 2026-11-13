@@ -466,7 +466,7 @@ fn relations<'j>(v: &'j J, target: &str) -> Vec<&'j J> {
 }
 
 /// Lucene-escape a search term (beets' `LUCENE_SPECIAL_CHAR_PAT`).
-fn escape(term: &str) -> String {
+pub(crate) fn escape(term: &str) -> String {
     let mut out = String::new();
     for c in term.chars() {
         if "-+&|!(){}[]^\"~*?:\\/".contains(c) {
@@ -1024,7 +1024,7 @@ fn item_value_str(item: &Item, field: &str) -> String {
 /// beets' search query: each filter as `field:(term)`, the term
 /// lower-cased, stripped and escaped (empty ones left out), joined by
 /// spaces.
-fn search_query(filters: &[(&str, String)]) -> String {
+pub(crate) fn search_query(filters: &[(&str, String)]) -> String {
     filters
         .iter()
         .filter_map(|(field, term)| {
