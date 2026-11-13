@@ -34,7 +34,7 @@ reflink-copy = "0.1.32"
 regex = "1.13.1"
 rodio = { version = "0.21", optional = true }
 roxmltree = "0.21"
-rusqlite = { version = "0.41.1", features = ["bundled", "functions"] }
+rusqlite = { version = "0.41.1", features = ["bundled", "functions", "load_extension"] }
 rustfft = "6.4.1"
 scraper = "0.29.0"
 serde = { version = "1.0.229", features = ["derive"] }

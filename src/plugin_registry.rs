@@ -56,6 +56,26 @@ pub struct PluginDef {
 
 inventory::collect!(PluginDef);
 
+/// Config a plugin writes while it loads, as beets' plugins do
+/// (`config["importfeeds"]["relative_to"] = ...`): confuse's `set` puts
+/// it above every other source, so `beet config` lists those keys first.
+pub struct PluginLoadSet {
+    /// The plugin the values belong to (only applied while it is enabled).
+    pub plugin: &'static str,
+    /// Dotted keys and their values.
+    pub set: fn(&Config) -> Vec<(&'static str, Y)>,
+}
+
+inventory::collect!(PluginLoadSet);
+
+/// Every plugin's load-time `config` assignments.
+pub fn load_sets() -> Vec<&'static PluginLoadSet> {
+    let mut sets: Vec<&'static PluginLoadSet> =
+        inventory::iter::<PluginLoadSet>.into_iter().collect();
+    sets.sort_by_key(|s| s.plugin);
+    sets
+}
+
 /// Every registered plugin, in the order of beets' bundled plugin list.
 /// `order` is the primary key; `name` breaks ties so the order is
 /// deterministic (the registry's link order is not).
