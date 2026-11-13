@@ -44,12 +44,26 @@ pub fn run(cli: Cli) -> Result<()> {
         debug!("YamlSource {}", s.display());
     }
     debug!("data directory: {}", cfg.config_dir.display());
+    // beets' `config.set_args`: the command line is the highest-priority
+    // source, its keys in option order (`beet config` shows them).
     if let Some(l) = &cli.library {
         cfg.set("library", Y::String(l.to_string_lossy().into()));
     }
     if let Some(d) = &cli.directory {
         cfg.set("directory", Y::String(d.to_string_lossy().into()));
     }
+    if cli.verbose > 0 {
+        cfg.set("verbose", Y::Number(cli.verbose.into()));
+    }
+    cfg.set(
+        "configs",
+        Y::Sequence(
+            cli.config
+                .iter()
+                .map(|p| Y::String(p.to_string_lossy().into()))
+                .collect(),
+        ),
+    );
     let csl = |s: &str| Y::Sequence(crate::comma_list(s).into_iter().map(Y::String).collect());
     if let Some(p) = &cli.plugins {
         cfg.set("plugins", csl(p));
@@ -1176,6 +1190,26 @@ fn modified(lib: &Library, obj: &Record, mods: &[Modification], dels: &[String])
     Ok(new)
 }
 
+/// The records `show_model_changes` sees: as beets' `Item.get`, an item
+/// falls back to its album's flexible attributes for fields it doesn't set
+/// (so deleting one shows the album's value as the new one).
+fn display_pair(lib: &Library, old: &Record, new: &Record) -> Result<(Record, Record)> {
+    if old.kind != Kind::Item {
+        return Ok((old.clone(), new.clone()));
+    }
+    let album = lib.get_album(old.int("album_id"))?;
+    let with_album = |r: &Record| {
+        let mut out = r.clone();
+        if let Some(album) = &album {
+            for (k, v) in &album.flex {
+                out.flex.entry(k.clone()).or_insert_with(|| v.clone());
+            }
+        }
+        out
+    };
+    Ok((with_album(old), with_album(new)))
+}
+
 /// beets' `modify_func` / `modify_objects`.
 fn modify(cfg: &Config, lib: &Library, opts: ModifyOpts, args: &[String]) -> Result<()> {
     let album = opts.album;
@@ -1222,7 +1256,11 @@ fn modify(cfg: &Config, lib: &Library, opts: ModifyOpts, args: &[String]) -> Res
     let mut changed: Vec<(Record, Record)> = vec![];
     for obj in objs {
         let new = modified(lib, &obj, &mods, &dels)?;
-        if show_model_changes(&format_record(&t, &obj, Some(lib)), &obj, &new) {
+        let (shown_old, shown_new) = match display_pair(lib, &obj, &new) {
+            Ok(p) => p,
+            Err(_) => (obj.clone(), new.clone()),
+        };
+        if show_model_changes(&format_record(&t, &obj, Some(lib)), &shown_old, &shown_new) {
             changed.push((obj, new));
         }
     }
@@ -1245,7 +1283,9 @@ fn modify(cfg: &Config, lib: &Library, opts: ModifyOpts, args: &[String]) -> Res
             (false, false) => "",
         };
         ui::select_objects(&format!("Really modify{extra}"), &changed, |(old, new)| {
-            show_model_changes(&format_record(&t, old, Some(lib)), old, new);
+            let (shown_old, shown_new) =
+                display_pair(lib, old, new).unwrap_or_else(|_| (old.clone(), new.clone()));
+            show_model_changes(&format_record(&t, old, Some(lib)), &shown_old, &shown_new);
         })
     };
 

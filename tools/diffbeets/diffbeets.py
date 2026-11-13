@@ -50,6 +50,7 @@ from cases import (  # noqa: E402
     IMPORTS,
     LAME_CORPUS,
     MODIFIES,
+    NORMALIZERS,
     TAG_TEMPLATE,
     TAG_WRITES,
     cases,
@@ -430,12 +431,12 @@ def main():
             # From inside the library directory: implicit relative path
             # queries need the path to exist there (beets checks the cwd, then
             # matches relative to the library directory).
-            return (
-                cid,
-                args,
-                outcome(ref, args, os.path.join(ref.root, "lib")),
-                outcome(rs, args, os.path.join(rs.root, "lib")),
-            )
+            r = outcome(ref, args, os.path.join(ref.root, "lib"))
+            s = outcome(rs, args, os.path.join(rs.root, "lib"))
+            if normalise_case := NORMALIZERS.get(cid):
+                r = dict(r, out=normalise_case(r["out"]), err=normalise_case(r["err"]))
+                s = dict(s, out=normalise_case(s["out"]), err=normalise_case(s["err"]))
+            return cid, args, r, s
 
         with concurrent.futures.ThreadPoolExecutor(opts.jobs) as pool:
             results = list(pool.map(run_case, todo))
