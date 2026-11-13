@@ -450,7 +450,7 @@ enum PreError {
 
 /// optparse's value checks (`type="int"`, `type="float"`, `type="choice"`),
 /// with its wording, plus the non-negative check of beets' `add_limit_option`
-/// callback (a UserError, not an optparse error).
+/// callback (a `UserError`, not an optparse error).
 fn check_value(info: &OptInfo, label: &str, value: &str) -> Result<(), PreError> {
     match &info.kind {
         ValueKind::Any => Ok(()),
