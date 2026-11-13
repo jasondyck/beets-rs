@@ -512,13 +512,17 @@ fn boxes(f: &mut File, start: u64, end: u64) -> Vec<([u8; 4], u64, u64)> {
     let mut pos = start;
     while pos + 8 <= end {
         let Some(h) = read_at(f, pos, 8) else { break };
-        let mut size = u32::from_be_bytes(h[..4].try_into().unwrap()) as u64;
+        let mut size = u32::from_be_bytes(
+            h[..4]
+                .try_into()
+                .expect("BUG: read_at returned eight bytes"),
+        ) as u64;
         let mut header = 8;
         if size == 1 {
             let Some(l) = read_at(f, pos + 8, 8) else {
                 break;
             };
-            size = u64::from_be_bytes(l.try_into().unwrap());
+            size = u64::from_be_bytes(l.try_into().expect("BUG: read_at returned eight bytes"));
             header = 16;
         } else if size == 0 {
             size = end - pos;
@@ -526,7 +530,13 @@ fn boxes(f: &mut File, start: u64, end: u64) -> Vec<([u8; 4], u64, u64)> {
         if size < header || pos + size > end {
             break;
         }
-        out.push((h[4..8].try_into().unwrap(), pos + header, pos + size));
+        out.push((
+            h[4..8]
+                .try_into()
+                .expect("BUG: read_at returned eight bytes"),
+            pos + header,
+            pos + size,
+        ));
         pos += size;
     }
     out
@@ -927,13 +937,21 @@ fn iff_chunks(f: &mut File, size: u64, le: bool) -> Vec<([u8; 4], u64, u64)> {
     let mut pos = 12;
     while pos + 8 <= size {
         let Some(h) = read_at(f, pos, 8) else { break };
-        let n: [u8; 4] = h[4..8].try_into().unwrap();
+        let n: [u8; 4] = h[4..8]
+            .try_into()
+            .expect("BUG: read_at returned eight bytes");
         let len = if le {
             u32::from_le_bytes(n)
         } else {
             u32::from_be_bytes(n)
         } as u64;
-        out.push((h[..4].try_into().unwrap(), pos + 8, len));
+        out.push((
+            h[..4]
+                .try_into()
+                .expect("BUG: read_at returned eight bytes"),
+            pos + 8,
+            len,
+        ));
         pos += 8 + len + (len & 1);
     }
     out

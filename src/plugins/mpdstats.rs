@@ -10,6 +10,7 @@ use crate::library::Library;
 use crate::model::{FieldType, Item, Kind, Value};
 use crate::plugins::{Plugin, PluginLog};
 use crate::query::Query;
+use anyhow::Result;
 use std::collections::BTreeMap;
 use std::io::{BufRead, BufReader, Write};
 use std::net::TcpStream;
@@ -265,11 +266,11 @@ impl<'a, C: Client> MPDStats<'a, C> {
         attribute: &str,
         value: Option<Value>,
         increment: Option<f64>,
-    ) {
-        let Some(item) = item else { return };
+    ) -> Result<()> {
+        let Some(item) = item else { return Ok(()) };
         let mut item = match self.lib.get_item(item.id.unwrap_or(0)) {
             Ok(Some(i)) => i,
-            _ => return,
+            _ => return Ok(()),
         };
         let value = match increment {
             Some(inc) => {
@@ -284,13 +285,15 @@ impl<'a, C: Client> MPDStats<'a, C> {
         };
         if let Some(value) = value {
             item.set(attribute, value);
-            let _ = self.lib.store(&item);
+            // beets' `item.store()`: a failure ends the run.
+            self.lib.store(&item)?;
             self.log.debug(&format!(
                 "updated: {attribute} = {} [{}]",
                 item.get(attribute).map(|v| v.raw()).unwrap_or_default(),
                 item.path().display()
             ));
         }
+        Ok(())
     }
 
     fn lib_flex_f64(&self, item: &Item, attribute: &str) -> Option<f64> {
@@ -298,11 +301,11 @@ impl<'a, C: Client> MPDStats<'a, C> {
     }
 
     /// beets' `update_rating`.
-    pub fn update_rating(&self, item: &Option<Item>, skipped: bool) {
-        let Some(it) = item else { return };
+    pub fn update_rating(&self, item: &Option<Item>, skipped: bool) -> Result<()> {
+        let Some(it) = item else { return Ok(()) };
         let mut it = match self.lib.get_item(it.id.unwrap_or(0)) {
             Ok(Some(i)) => i,
-            _ => return,
+            _ => return Ok(()),
         };
         let num = |name: &str, default: f64| -> f64 {
             it.get(name)
@@ -317,58 +320,59 @@ impl<'a, C: Client> MPDStats<'a, C> {
             skipped,
         );
         it.set("rating", Value::Float(rating));
-        let _ = self.lib.store(&it);
+        // beets' `update_item` -> `item.store()`: a failure ends the run.
+        self.lib.store(&it)?;
+        Ok(())
     }
 
     /// beets' `handle_song_change`: skipped or played?
-    pub fn handle_song_change(&mut self, song: &NowPlaying) -> bool {
+    pub fn handle_song_change(&mut self, song: &NowPlaying) -> Result<bool> {
         let elapsed = song.elapsed_at_start as f64 + (now() - song.started);
         let skipped = elapsed / song.duration as f64 >= 0.0
             && elapsed / (song.duration.max(1) as f64) < self.played_ratio_threshold;
         if skipped {
-            self.handle_skipped(song);
+            self.handle_skipped(song)?;
         } else {
-            self.handle_played(song);
+            self.handle_played(song)?;
         }
         if self.do_rating {
-            self.update_rating(&song.beets_item, skipped);
+            self.update_rating(&song.beets_item, skipped)?;
         }
-        skipped
+        Ok(skipped)
     }
 
-    pub fn handle_played(&self, song: &NowPlaying) {
-        self.update_item(
-            &song.beets_item,
-            "play_count",
-            None,
-            Some(1.0),
-        );
+    pub fn handle_played(&self, song: &NowPlaying) -> Result<()> {
+        self.update_item(&song.beets_item, "play_count", None, Some(1.0))?;
         self.log.info(&format!("played {}", song.path));
+        Ok(())
     }
 
-    pub fn handle_skipped(&self, song: &NowPlaying) {
-        self.update_item(&song.beets_item, "skip_count", None, Some(1.0));
+    pub fn handle_skipped(&self, song: &NowPlaying) -> Result<()> {
+        self.update_item(&song.beets_item, "skip_count", None, Some(1.0))?;
         self.log.info(&format!("skipped {}", song.path));
+        Ok(())
     }
 
-    pub fn on_stop(&mut self, status: &BTreeMap<String, String>) {
+    pub fn on_stop(&mut self, status: &BTreeMap<String, String>) -> Result<()> {
         self.log.info("stop");
         if let Some(np) = self.now_playing.take()
             && status.get("songid") != Some(&np.id)
         {
-            self.handle_song_change(&np);
+            self.handle_song_change(&np)?;
         }
+        Ok(())
     }
 
-    pub fn on_pause(&mut self, _status: &BTreeMap<String, String>) {
+    pub fn on_pause(&mut self, _status: &BTreeMap<String, String>) -> Result<()> {
         self.log.info("pause");
         self.now_playing = None;
+        Ok(())
     }
 
-    pub fn on_play(&mut self, status: &BTreeMap<String, String>) {
+    pub fn on_play(&mut self, status: &BTreeMap<String, String>) -> Result<()> {
         let (path, songid) = self.mpd.currentsong();
         let (Some(path), Some(songid)) = (path, songid) else {
-            return;
+            return Ok(());
         };
         let time = status.get("time").cloned().unwrap_or_default();
         let (played, duration) = match time.split_once(':') {
@@ -378,22 +382,22 @@ impl<'a, C: Client> MPDStats<'a, C> {
         if let Some(np) = &self.now_playing {
             if np.path != path {
                 let np = np.clone();
-                self.handle_song_change(&np);
+                self.handle_song_change(&np)?;
             } else {
                 let diff = (now() - np.started).abs();
                 if diff <= DUPLICATE_PLAY_THRESHOLD {
-                    return;
+                    return Ok(());
                 }
                 if played == 0 {
                     let np = np.clone();
-                    self.handle_song_change(&np);
+                    self.handle_song_change(&np)?;
                 }
             }
         }
         if is_url(&path) {
             self.log.info(&format!("playing stream {path}"));
             self.now_playing = None;
-            return;
+            return Ok(());
         }
         self.log.info(&format!("playing {path}"));
         let beets_item = self.get_item(&path);
@@ -410,19 +414,19 @@ impl<'a, C: Client> MPDStats<'a, C> {
             "last_played",
             Some(Value::Float(now().trunc())),
             None,
-        );
+        )
     }
 
     /// beets' `run`.
-    pub fn run(&mut self) {
+    pub fn run(&mut self) -> Result<()> {
         let mut events = vec!["player".to_string()];
         loop {
             if events.iter().any(|e| e == "player") {
                 let status = self.mpd.status();
                 match status.get("state").map(String::as_str) {
-                    Some("play") => self.on_play(&status),
-                    Some("pause") => self.on_pause(&status),
-                    _ => self.on_stop(&status),
+                    Some("play") => self.on_play(&status)?,
+                    Some("pause") => self.on_pause(&status)?,
+                    _ => self.on_stop(&status)?,
                 }
             }
             events = self.mpd.events();
@@ -478,7 +482,7 @@ pub fn command(
     let log2 = PluginLog::new("mpdstats");
     let client = MPDClientWrapper::new(&cfg, log2, host, port, password);
     let mut stats = MPDStats::new(lib, log, client, &cfg);
-    stats.run();
+    stats.run()?;
     Ok(())
 }
 

@@ -466,7 +466,10 @@ impl<'a, 'g> Interp<'a, 'g> {
     fn bind_scope(&mut self, t: &Target, v: V<'a>) -> PyResult<()> {
         match t {
             Target::Name(n) => {
-                self.scopes.last_mut().unwrap().insert(n.clone(), v);
+                self.scopes
+                    .last_mut()
+                    .expect("BUG: the interpreter always has the global scope")
+                    .insert(n.clone(), v);
                 Ok(())
             }
             Target::Tuple(ts) => {
@@ -693,7 +696,10 @@ pub fn binary<'a>(op: &str, a: &V<'a>, b: &V<'a>) -> PyResult<V<'a>> {
         | ("*", n, s @ (V::Str(_) | V::Bytes(_) | V::List(_) | V::Tuple(_)))
             if n.int().is_some() =>
         {
-            Ok(repeat(s, n.int().unwrap()))
+            Ok(repeat(
+                s,
+                n.int().expect("BUG: the guard checked n.int() is Some"),
+            ))
         }
         ("*", V::Str(_), V::Str(_)) => err(
             "TypeError",
@@ -711,12 +717,16 @@ fn unary<'a>(op: &str, v: &V<'a>) -> PyResult<V<'a>> {
         ("+", V::Float(f)) => Ok(V::Float(*f)),
         ("-", v) if v.int().is_some() => v
             .int()
-            .unwrap()
+            .expect("BUG: the guard checked v.int() is Some")
             .checked_neg()
             .map(V::Int)
             .map_or_else(overflow, Ok),
-        ("+", v) if v.int().is_some() => Ok(V::Int(v.int().unwrap())),
-        ("~", v) if v.int().is_some() => Ok(V::Int(!v.int().unwrap())),
+        ("+", v) if v.int().is_some() => Ok(V::Int(
+            v.int().expect("BUG: the guard checked v.int() is Some"),
+        )),
+        ("~", v) if v.int().is_some() => Ok(V::Int(
+            !v.int().expect("BUG: the guard checked v.int() is Some"),
+        )),
         (op, v) => err(
             "TypeError",
             format!("bad operand type for unary {op}: '{}'", v.type_name()),
@@ -874,7 +884,7 @@ fn slice_indices(
     } else {
         let start = clamp(a.map_or(n - 1, norm), -1, n - 1);
         let stop = clamp(z.map_or(-1, |x| norm(x).max(-1)), -1, n - 1);
-        let stop = if z.is_some() && norm(z.unwrap()) < 0 {
+        let stop = if z.is_some() && norm(z.expect("BUG: the guard checked z is Some")) < 0 {
             -1
         } else {
             stop
@@ -1144,7 +1154,9 @@ fn builtin<'a>(name: &str, args: Vec<V<'a>>, kwargs: Vec<(String, V<'a>)>) -> Py
                 });
             }
             match v {
-                V::Int(_) | V::Bool(_) => Ok(V::Int(v.int().unwrap())),
+                V::Int(_) | V::Bool(_) => Ok(V::Int(
+                    v.int().expect("BUG: Int and Bool values have int()"),
+                )),
                 V::Float(f) => {
                     if f.is_nan() {
                         err("ValueError", "cannot convert float NaN to integer")
@@ -1206,7 +1218,7 @@ fn builtin<'a>(name: &str, args: Vec<V<'a>>, kwargs: Vec<(String, V<'a>)>) -> Py
                 V::Float(f) => Ok(V::Float(f.abs())),
                 v if v.int().is_some() => v
                     .int()
-                    .unwrap()
+                    .expect("BUG: the guard checked v.int() is Some")
                     .checked_abs()
                     .map(V::Int)
                     .map_or_else(overflow, Ok),
@@ -1245,7 +1257,7 @@ fn builtin<'a>(name: &str, args: Vec<V<'a>>, kwargs: Vec<(String, V<'a>)>) -> Py
                     }
                 }
                 v if v.int().is_some() => {
-                    let i = v.int().unwrap();
+                    let i = v.int().expect("BUG: the guard checked v.int() is Some");
                     match nd {
                         Some(n) if n < 0 => {
                             let p = 10f64.powi((-n) as i32);
@@ -1414,7 +1426,12 @@ fn builtin<'a>(name: &str, args: Vec<V<'a>>, kwargs: Vec<(String, V<'a>)>) -> Py
         "ord" => {
             check("ord", &args, 1, 1)?;
             match &args[0] {
-                V::Str(s) if s.chars().count() == 1 => Ok(V::Int(s.chars().next().unwrap() as i64)),
+                V::Str(s) if s.chars().count() == 1 => Ok(V::Int(
+                    s.chars()
+                        .next()
+                        .expect("BUG: a one-character string has a first char")
+                        as i64,
+                )),
                 V::Str(s) => err(
                     "TypeError",
                     format!(
@@ -1670,7 +1687,13 @@ fn str_method<'a>(
                             for _ in 0..m {
                                 let st = rest
                                     .rfind(is_py_space)
-                                    .map(|k| k + rest[k..].chars().next().unwrap().len_utf8())
+                                    .map(|k| {
+                                        k + rest[k..]
+                                            .chars()
+                                            .next()
+                                            .expect("BUG: rfind found a char")
+                                            .len_utf8()
+                                    })
                                     .unwrap_or(0);
                                 out.push(rest[st..].to_string());
                                 rest = rest[..st].trim_end_matches(is_py_space);
@@ -1776,7 +1799,10 @@ fn str_method<'a>(
             check(name, args, 1, 2)?;
             let w = args[0].int().unwrap_or(0).max(0) as usize;
             let fill = match args.get(1) {
-                Some(V::Str(f)) if f.chars().count() == 1 => f.chars().next().unwrap(),
+                Some(V::Str(f)) if f.chars().count() == 1 => f
+                    .chars()
+                    .next()
+                    .expect("BUG: a one-character string has a first char"),
                 Some(_) => {
                     return err(
                         "TypeError",

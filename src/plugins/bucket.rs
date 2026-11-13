@@ -24,7 +24,7 @@ pub struct SpanFormat {
 }
 
 fn digits(s: &str) -> Vec<i64> {
-    let re = regex::Regex::new(r"\d+").unwrap();
+    let re = regex::Regex::new(r"\d+").expect("BUG: the digits regex is valid");
     re.find_iter(s)
         .filter_map(|m| m.as_str().parse().ok())
         .collect()
@@ -58,7 +58,10 @@ pub fn span_from_str(span_str: &str) -> Result<YearSpan> {
     }
     Ok(YearSpan {
         from: out[0],
-        to: (out.len() > 1).then(|| *out.last().unwrap()),
+        to: (out.len() > 1).then(|| {
+            *out.last()
+                .expect("BUG: out has more than one year")
+        }),
         str: Some(span_str.to_string()),
     })
 }
@@ -100,7 +103,13 @@ fn extend_year_spans(spans: &[YearSpan], spanlen: i64) -> Vec<YearSpan> {
     let (start, end) = (1900, 2014);
     let mut ext = spans.to_vec();
     for w in spans.windows(2) {
-        for f in py_range(w[0].to.unwrap() + 1, w[1].from, spanlen) {
+        for f in py_range(
+            w[0].to
+                .expect("BUG: complete_year_spans fills every span's `to`")
+                + 1,
+            w[1].from,
+            spanlen,
+        ) {
             ext.push(YearSpan {
                 from: f,
                 ..Default::default()
@@ -113,7 +122,16 @@ fn extend_year_spans(spans: &[YearSpan], spanlen: i64) -> Vec<YearSpan> {
             ..Default::default()
         });
     }
-    for f in py_range(spans.last().unwrap().to.unwrap() + 1, end, spanlen) {
+    for f in py_range(
+        spans
+            .last()
+            .expect("BUG: extend_year_spans is called with a non-empty list")
+            .to
+            .expect("BUG: complete_year_spans fills every span's `to`")
+            + 1,
+        end,
+        spanlen,
+    ) {
         ext.push(YearSpan {
             from: f,
             ..Default::default()
@@ -128,7 +146,7 @@ fn str2fmt(s: &str) -> SpanFormat {
     let re = regex::Regex::new(
         r"^(?P<bef>\D*)(?P<fromyear>\d+)(?P<sep>\D*)(?P<toyear>\d*)(?P<after>\D*)",
     )
-    .unwrap();
+    .expect("BUG: the str2fmt pattern is valid");
     match re.captures(s) {
         Some(c) => {
             let g = |n: &str| c.name(n).map_or("", |m| m.as_str());
@@ -177,11 +195,18 @@ fn format_span(f: &SpanFormat, from: i64, to: i64) -> String {
 fn mode<T: Clone + PartialEq>(xs: &[T]) -> T {
     let mut v: Vec<T> = xs.to_vec();
     v.sort_by_key(|x| xs.iter().filter(|y| *y == x).count());
-    v.last().unwrap().clone()
+    v.last()
+        .expect("BUG: mode is called with at least one value")
+        .clone()
 }
 
 fn extract_modes(spans: &[YearSpan]) -> (i64, SpanFormat) {
-    let mut lens: Vec<i64> = spans.iter().map(|s| s.to.unwrap() - s.from + 1).collect();
+    let mut lens: Vec<i64> = spans
+        .iter()
+        .map(|s| {
+            s.to.expect("BUG: complete_year_spans fills every span's `to`") - s.from + 1
+        })
+        .collect();
     lens.sort();
     let reprs: Vec<SpanFormat> = spans
         .iter()
@@ -256,7 +281,10 @@ impl Bucket {
                     .find(c)
                     .ok_or_else(|| anyhow::anyhow!("substring not found"))
             };
-            let (b, e) = (index(chars[0])?, index(*chars.last().unwrap())?);
+            let (b, e) = (
+                index(chars[0])?,
+                index(*chars.last().expect("BUG: chars is non-empty (checked above)"))?,
+            );
             alpha_spans.push(Regex::new(&format!(
                 "(?i)^[{}]",
                 &ASCII_DIGITS[b..=e.max(b)]
@@ -282,8 +310,15 @@ impl Bucket {
                 if let Some(s) = &ys.str {
                     return Ok(s.clone());
                 }
-                let f = self.repr_mode.as_ref().unwrap();
-                return Ok(format_span(f, ys.from, ys.to.unwrap()));
+                let f = self
+                    .repr_mode
+                    .as_ref()
+                    .expect("BUG: generated spans come from extend_year_spans, which sets repr_mode");
+                return Ok(format_span(
+                    f,
+                    ys.from,
+                    ys.to.expect("BUG: complete_year_spans fills every span's `to`"),
+                ));
             }
         }
         Ok(year.to_string())
