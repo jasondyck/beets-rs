@@ -17,7 +17,7 @@ fn cfg_with(yaml: &str) -> Config {
 }
 
 fn words(w: &[&str]) -> Vec<String> {
-    w.iter().map(|s| s.to_string()).collect()
+    w.iter().map(ToString::to_string).collect()
 }
 
 /// `test_ftintitle_functional`: (config, drop flag, (artist, title,

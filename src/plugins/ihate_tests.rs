@@ -57,7 +57,7 @@ fn hate() {
         ),
     ];
     for (patterns, expected) in cases {
-        let patterns: Vec<String> = patterns.iter().map(|s| s.to_string()).collect();
+        let patterns: Vec<String> = patterns.iter().map(ToString::to_string).collect();
         assert_eq!(
             do_i_hate_this(std::slice::from_ref(&it), false, &patterns),
             *expected,

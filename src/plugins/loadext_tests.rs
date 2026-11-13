@@ -13,7 +13,7 @@ fn build_extension(dir: &std::path::Path, name: &str) -> Option<std::path::PathB
         "sqlite3_{}_init",
         name.trim_start_matches("lib")
             .chars()
-            .filter(|c| c.is_ascii_alphanumeric())
+            .filter(char::is_ascii_alphanumeric)
             .collect::<String>()
     );
     let source = format!(

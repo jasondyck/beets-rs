@@ -151,9 +151,9 @@ mod tests {
 
     #[test]
     fn fromfilename() {
+        type Song = (&'static str, i64, &'static str, &'static str);
         let mut cfg = Config::defaults();
         cfg.set("plugins", serde_yaml::from_str("[fromfilename]").unwrap());
-        type Song = (&'static str, i64, &'static str, &'static str);
         let cases: &[(Song, Song)] = &[
             (
                 (

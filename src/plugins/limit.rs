@@ -54,7 +54,7 @@ fn format_one(cfg: &Config, lib: &Library, rec: &Record, fmt: &Option<String>, p
     crate::commands::format_record(&Template::parse(&template), rec, Some(lib))
 }
 
-pub fn command(cfg: &Config, lib: &Library, opts: CmdOpts) -> Result<()> {
+pub fn command(cfg: &Config, lib: &Library, opts: &CmdOpts) -> Result<()> {
     if opts.head.is_some() && opts.tail.is_some() {
         anyhow::bail!("Only use one of --head and --tail");
     }
@@ -153,7 +153,7 @@ pub fn run_lslimit(
     crate::plugins::limit::command(
         cfg,
         lib,
-        crate::plugins::limit::CmdOpts {
+        &crate::plugins::limit::CmdOpts {
             album: a.album,
             head: a.head,
             limit: a.limit,

@@ -26,7 +26,7 @@ impl Env {
         self.cfg.set(key, serde_yaml::from_str(yaml).unwrap());
     }
 
-    fn run(&self, opts: CmdOpts) -> String {
+    fn run(&self, opts: &CmdOpts) -> String {
         let mut out = vec![];
         run(&self.cfg, &self.lib, opts, &mut out).unwrap();
         String::from_utf8(out).unwrap()
@@ -69,7 +69,7 @@ fn dups(count: usize) -> Env {
 }
 
 fn run_cmd(env: &Env, count: bool, path: bool) -> String {
-    env.run(CmdOpts {
+    env.run(&CmdOpts {
         count,
         path,
         ..Default::default()
@@ -133,16 +133,16 @@ fn groups_skip_empty_keys_and_strict_needs_all() {
         ..Default::default()
     };
     // Not strict: (A, L) and (A) differ; the two empty ones are skipped.
-    assert_eq!(env.run(keys(false)), "");
+    assert_eq!(env.run(&keys(false)), "");
     let opts = CmdOpts {
         keys: vec!["title".into(), "nonexistent".into()],
         full: true,
         format: Some("$title".into()),
         ..Default::default()
     };
-    assert_eq!(env.run(opts), "A\nA\n");
+    assert_eq!(env.run(&opts), "A\nA\n");
     // Strict: nothing has every key.
-    assert_eq!(env.run(keys(true)), "");
+    assert_eq!(env.run(&keys(true)), "");
 }
 
 #[test]
@@ -173,12 +173,12 @@ fn order_by_completeness_and_tiebreak() {
         format: Some("$id".into()),
         ..Default::default()
     };
-    assert_eq!(env.run(opts()), "2\n3\n1\n");
+    assert_eq!(env.run(&opts()), "2\n3\n1\n");
     // tiebreak: by the fields, highest first; ties keep their order.
     env.set("duplicates.tiebreak", "{items: [id]}");
-    assert_eq!(env.run(opts()), "3\n2\n1\n");
+    assert_eq!(env.run(&opts()), "3\n2\n1\n");
     env.set("duplicates.tiebreak", "{items: [label]}");
-    assert_eq!(env.run(opts()), "2\n3\n1\n");
+    assert_eq!(env.run(&opts()), "2\n3\n1\n");
 }
 
 #[test]
@@ -190,7 +190,7 @@ fn merge_fills_the_head_from_the_rest() {
         &[("title", "A"), ("grouping", "H"), ("bpm", "120")],
         "3.mp3",
     );
-    let out = env.run(CmdOpts {
+    let out = env.run(&CmdOpts {
         keys: vec!["title".into()],
         merge: true,
         full: true,
@@ -206,7 +206,7 @@ fn merge_fills_the_head_from_the_rest() {
 #[test]
 fn tag_sets_a_field_on_each_duplicate() {
     let env = dups(3);
-    env.run(CmdOpts {
+    env.run(&CmdOpts {
         tag: Some("dup=yes".into()),
         ..Default::default()
     });
@@ -226,7 +226,7 @@ fn tag_sets_a_field_on_each_duplicate() {
     let err = run(
         &env.cfg,
         &env.lib,
-        CmdOpts {
+        &CmdOpts {
             tag: Some("a=b=c".into()),
             ..Default::default()
         },
@@ -244,7 +244,7 @@ fn tag_sets_a_field_on_each_duplicate() {
 #[test]
 fn remove_drops_the_duplicates() {
     let env = dups(3);
-    env.run(CmdOpts {
+    env.run(&CmdOpts {
         remove: true,
         ..Default::default()
     });
@@ -264,17 +264,17 @@ fn checksum_groups_by_program_output_and_caches_it() {
         format: Some("$title".into()),
         ..Default::default()
     };
-    assert_eq!(env.run(opts()), "1.mp3\n2.mp3\n");
+    assert_eq!(env.run(&opts()), "1.mp3\n2.mp3\n");
     let cached: Vec<String> = env.items().iter().map(|i| i.flex["sh"].clone()).collect();
     assert!(cached[0].ends_with('\n') && cached[0] == cached[1] && cached[0] != cached[2]);
     // Cached now: the same groups without running the program.
-    assert_eq!(env.run(opts()), "1.mp3\n2.mp3\n");
+    assert_eq!(env.run(&opts()), "1.mp3\n2.mp3\n");
     // A failing program leaves nothing to group by.
     let failing = CmdOpts {
         checksum: Some("false {file}".into()),
         ..Default::default()
     };
-    assert_eq!(env.run(failing), "");
+    assert_eq!(env.run(&failing), "");
 }
 
 #[test]
@@ -308,7 +308,7 @@ fn albums_group_by_mb_albumid() {
         }
         env.lib.add_album(&mut items).unwrap();
     }
-    let out = env.run(CmdOpts {
+    let out = env.run(&CmdOpts {
         album: true,
         full: true,
         count: true,

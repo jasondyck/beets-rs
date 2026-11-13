@@ -72,7 +72,7 @@ pub fn py_repr(s: &str) -> String {
                 out.push(c);
             }
             c if (c as u32) < 0x20 || c as u32 == 0x7f => {
-                out.push_str(&format!("\\x{:02x}", c as u32))
+                out.push_str(&format!("\\x{:02x}", c as u32));
             }
             c => out.push(c),
         }
@@ -860,26 +860,20 @@ impl FetchArt {
             .contains(&self.conf.maxwidth)
             .then(|| self.conf.maxwidth.to_string());
         let image_urls = |url: &str| -> Vec<String> {
-            let resp = match self.get(url, &[]) {
-                Ok(r) => r,
-                Err(_) => {
-                    self.log.debug(&format!(
-                        "{}: error receiving response",
-                        SourceKind::CoverArt.name()
-                    ));
-                    return vec![];
-                }
+            let Ok(resp) = self.get(url, &[]) else {
+                self.log.debug(&format!(
+                    "{}: error receiving response",
+                    SourceKind::CoverArt.name()
+                ));
+                return vec![];
             };
-            let data = match resp.json() {
-                Ok(d) => d,
-                Err(_) => {
-                    self.log.debug(&format!(
-                        "{}: error loading response: {}",
-                        SourceKind::CoverArt.name(),
-                        resp.text(false)
-                    ));
-                    return vec![];
-                }
+            let Ok(data) = resp.json() else {
+                self.log.debug(&format!(
+                    "{}: error loading response: {}",
+                    SourceKind::CoverArt.name(),
+                    resp.text(false)
+                ));
+                return vec![];
             };
             let mut out = vec![];
             for item in data
@@ -1352,7 +1346,7 @@ impl FetchArt {
                 for page in pages.values() {
                     match page.pointer("/imageinfo/0/url").and_then(J::as_str) {
                         Some(u) => {
-                            out.push(Candidate::url("wikipedia", u, Some(MetadataMatch::Exact)))
+                            out.push(Candidate::url("wikipedia", u, Some(MetadataMatch::Exact)));
                         }
                         None => {
                             self.log.debug("wikipedia: error scraping imageinfo");
@@ -1788,7 +1782,7 @@ pub struct CmdOpts {
 }
 
 /// The `fetchart` command.
-pub fn command(ctx: &PluginCtx, lib: &Library, opts: CmdOpts) -> Result<()> {
+pub fn command(ctx: &PluginCtx, lib: &Library, opts: &CmdOpts) -> Result<()> {
     let fa = FetchArt::new(ctx.cfg)?;
     fa.log.set_base_level(INFO);
     let mut albums = lib.albums(&Query::parse(Kind::Album, &opts.query)?)?;
@@ -1881,7 +1875,7 @@ pub fn run_command(
     crate::plugins::fetchart::command(
         &ctx(cfg, lib),
         lib,
-        crate::plugins::fetchart::CmdOpts {
+        &crate::plugins::fetchart::CmdOpts {
             force: a.force,
             quiet: a.quiet,
             limit: a.limit,

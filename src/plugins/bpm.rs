@@ -113,7 +113,7 @@ pub fn get_bpm(
         }
     }
 
-    let max_strokes = cfg.get("bpm.max_strokes").and_then(|v| v.as_f64()).unwrap_or(3.0);
+    let max_strokes = cfg.get("bpm.max_strokes").and_then(serde_yaml::Value::as_f64).unwrap_or(3.0);
     log.info(&format!(
         "Press Enter {} times to the rhythm or Ctrl-D to exit",
         py_int(max_strokes)

@@ -45,7 +45,7 @@ pub struct CmdOpts {
 }
 
 /// `beet missing`, printing to stdout.
-pub fn command(cfg: &Config, lib: &Library, opts: CmdOpts) -> Result<()> {
+pub fn command(cfg: &Config, lib: &Library, opts: &CmdOpts) -> Result<()> {
     run(cfg, lib, opts, &mut std::io::stdout().lock())
 }
 
@@ -86,13 +86,13 @@ impl Settings {
 }
 
 /// `beet missing`, writing to `out`.
-pub fn run(cfg: &Config, lib: &Library, opts: CmdOpts, out: &mut impl Write) -> Result<()> {
-    let s = Settings::new(cfg, &opts);
+pub fn run(cfg: &Config, lib: &Library, opts: &CmdOpts, out: &mut impl Write) -> Result<()> {
+    let s = Settings::new(cfg, opts);
     let log = PluginLog::new("missing");
     if s.album {
-        missing_albums(cfg, lib, &s, &opts, &log, out)
+        missing_albums(cfg, lib, &s, opts, &log, out)
     } else {
-        missing_tracks(cfg, lib, &s, &opts, &log, out)
+        missing_tracks(cfg, lib, &s, opts, &log, out)
     }
 }
 
@@ -423,7 +423,7 @@ pub fn run_missing(
     crate::plugins::missing::command(
         cfg,
         lib,
-        crate::plugins::missing::CmdOpts {
+        &crate::plugins::missing::CmdOpts {
             count: a.count,
             total: a.total,
             album: a.album,

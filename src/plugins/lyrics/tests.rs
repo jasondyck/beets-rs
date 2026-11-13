@@ -149,7 +149,7 @@ fn slugs() {
 fn sanitized_sources() {
     let s = |v: &[&str]| {
         sanitize_choices(
-            &v.iter().map(|s| s.to_string()).collect::<Vec<_>>(),
+            &v.iter().map(ToString::to_string).collect::<Vec<_>>(),
             backends::NAMES,
         )
     };
@@ -642,7 +642,7 @@ const LYRICS_DURATION: f64 = 950.0;
 const ITEM_DURATION: i64 = 999;
 const SYNCED: &str = "[00:00.00] synced";
 
-fn lyrics_match(overrides: J) -> J {
+fn lyrics_match(overrides: &J) -> J {
     let mut m = json!({
         "id": 1,
         "instrumental": false,
@@ -677,7 +677,7 @@ fn lrclib_fetch(yaml: &str, search: J) -> Option<Lyrics> {
 #[test]
 fn lrclib_synced_config_option() {
     for (yaml, expected) in [("synced: yes", SYNCED), ("synced: no", "plain")] {
-        let l = lrclib_fetch(yaml, json!([lyrics_match(json!({}))])).unwrap();
+        let l = lrclib_fetch(yaml, json!([lyrics_match(&json!({}))])).unwrap();
         assert_eq!(l.text, expected);
         assert_eq!(l.backend.as_deref(), Some("lrclib"));
     }
@@ -687,7 +687,7 @@ fn lrclib_synced_config_option() {
 fn lrclib_null_plain_lyrics_falls_back_to_synced() {
     let l = lrclib_fetch(
         "synced: no",
-        json!([lyrics_match(json!({"plainLyrics": null}))]),
+        json!([lyrics_match(&json!({"plainLyrics": null}))]),
     )
     .unwrap();
     assert_eq!(l.text, "synced");
@@ -695,7 +695,7 @@ fn lrclib_null_plain_lyrics_falls_back_to_synced() {
 
 #[test]
 fn lrclib_fetch_lyrics() {
-    let m = |o: J| lyrics_match(o);
+    let m = |o: J| lyrics_match(&o);
     let cases: Vec<(&str, J, Option<&str>)> = vec![
         ("handle non-matching lyrics", json!([]), None),
         ("synced when available", json!([m(json!({}))]), Some(SYNCED)),

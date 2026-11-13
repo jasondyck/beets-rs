@@ -229,8 +229,8 @@ impl Listener for State {
             "import_task_files" => {
                 // `record_reimported`.
                 let Some(task) = ev.task() else { return };
-                *self.reimported_item_ids.borrow_mut() = task.reimported_item_ids.clone();
-                *self.replaced_album_paths.borrow_mut() = task.replaced_album_paths.clone();
+                self.reimported_item_ids.borrow_mut().clone_from(&task.reimported_item_ids);
+                self.replaced_album_paths.borrow_mut().clone_from(&task.replaced_album_paths);
             }
             "album_imported" => self.album_imported(ev),
             "item_imported" => self.item_imported(ev),

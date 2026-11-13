@@ -97,7 +97,7 @@ impl Source for RegistrySource<'_> {
 }
 
 /// `beet mbsync`.
-pub fn command(cfg: &Config, lib: &Library, opts: CmdOpts) -> Result<()> {
+pub fn command(cfg: &Config, lib: &Library, opts: &CmdOpts) -> Result<()> {
     let mut cfg = cfg.clone();
     if let Some(f) = &opts.format {
         // `add_format_option()` without a target: both formats.
@@ -105,7 +105,7 @@ pub fn command(cfg: &Config, lib: &Library, opts: CmdOpts) -> Result<()> {
         cfg.set("format_album", Y::String(f.clone()));
     }
     let mb = MusicBrainz::new(&cfg);
-    Sync::new(&cfg, lib, &opts, &mb).run(&opts)
+    Sync::new(&cfg, lib, opts, &mb).run(opts)
 }
 
 pub struct Sync<'a> {
@@ -443,7 +443,7 @@ pub fn run_mbsync(
     crate::plugins::mbsync::command(
         cfg,
         lib,
-        crate::plugins::mbsync::CmdOpts {
+        &crate::plugins::mbsync::CmdOpts {
             pretend: a.pretend,
             // The last of -m/-M given wins (clap's overrides).
             mv: if a.mv {

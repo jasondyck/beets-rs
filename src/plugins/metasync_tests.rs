@@ -224,7 +224,7 @@ fn the_format_option_labels_the_no_match_warning() {
         command(
             &c,
             &lib,
-            CmdOpts {
+            &CmdOpts {
                 pretend: false,
                 sources: vec!["itunes".into()],
                 limit: None,

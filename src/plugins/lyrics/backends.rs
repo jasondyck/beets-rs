@@ -11,6 +11,9 @@ use std::sync::LazyLock;
 
 type Fetched = Result<Option<Lyrics>, HttpError>;
 
+/// The tags stripped from Musixmatch's HTML lyrics fragments.
+static CLEAN: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^[^>]+>|</p>.*").unwrap());
+
 /// `BACKEND_BY_NAME`, in beets' order.
 pub const NAMES: &[&str] = &[
     "lrclib",
@@ -421,7 +424,6 @@ fn musixmatch(p: &LyricsPlugin, artist: &str, title: &str) -> Fetched {
         p.error(&format!("{}: Failed: Blocked IP address", b.class()));
         return Ok(None);
     }
-    static CLEAN: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^[^>]+>|</p>.*").unwrap());
     let parts: Vec<String> = html
         .split("<p class=\"mxm-lyrics__content")
         .map(|part| CLEAN.replace_all(part, "").into_owned())

@@ -187,7 +187,7 @@ impl Deezer {
             }
             None => (String::new(), None),
         };
-        let num = |k: &str| data.get(k).and_then(|v| v.as_i64());
+        let num = |k: &str| data.get(k).and_then(serde_json::Value::as_i64);
         let mut extra = vec![];
         if let Some(id) = data.get("id") {
             extra.push(("deezer_track_id".to_string(), V::Int(id.as_i64().unwrap_or(0))));
@@ -517,13 +517,12 @@ impl MetadataSource for Deezer {
             return Ok(None);
         };
         let mut track = self.get_track(&data);
-        let album_id = match data
+        let Some(album_id) = data
             .get("album")
             .and_then(|a| a.get("id"))
             .and_then(id_str)
-        {
-            Some(id) => id,
-            None => return Ok(None),
+        else {
+            return Ok(None);
         };
         let Some(tracks_obj) = self.fetch_data(&format!("{}{album_id}/tracks", self.conf.urls.album))
         else {
@@ -536,7 +535,7 @@ impl MetadataSource for Deezer {
         };
         let mut medium_total = 0;
         for (i, t) in album_tracks.iter().enumerate() {
-            if t.get("disk_number").and_then(|v| v.as_i64()).unwrap_or(0) as usize == track.medium {
+            if t.get("disk_number").and_then(serde_json::Value::as_i64).unwrap_or(0) as usize == track.medium {
                 medium_total += 1;
                 if t.get("id").and_then(id_str) == Some(track.track_id.clone()) {
                     track.index = i + 1;
@@ -601,7 +600,7 @@ pub struct CmdOpts {
 }
 
 /// `beet deezerupdate`.
-pub fn command(cfg: &Config, lib: &crate::library::Library, opts: CmdOpts) -> Result<()> {
+pub fn command(cfg: &Config, lib: &crate::library::Library, opts: &CmdOpts) -> Result<()> {
     let plugin = Deezer::new(cfg)?;
     let items = lib.items(&crate::query::Query::parse(Kind::Item, &opts.query)?)?;
     let mut items: Vec<Item> = match opts.limit {
@@ -662,7 +661,7 @@ pub fn run_deezerupdate(
     command(
         cfg,
         lib,
-        CmdOpts {
+        &CmdOpts {
             limit: a.limit,
             query: a.query,
         },

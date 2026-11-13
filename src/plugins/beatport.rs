@@ -195,7 +195,7 @@ pub struct BeatportTrack {
 
 impl BeatportTrack {
     pub fn from_data(data: &J) -> Self {
-        let length_ms = data.get("lengthMs").and_then(|v| v.as_f64()).unwrap_or(0.0);
+        let length_ms = data.get("lengthMs").and_then(serde_json::Value::as_f64).unwrap_or(0.0);
         let mut length = length_ms / 1000.0;
         if length == 0.0 {
             // `data.get("length", "0:0").split(":")`
@@ -219,8 +219,8 @@ impl BeatportTrack {
                     data.get("id").map(json_id).unwrap_or_default()
                 )
             }),
-            track_number: data.get("trackNumber").and_then(|n| n.as_i64()),
-            bpm: data.get("bpm").and_then(|b| b.as_i64()),
+            track_number: data.get("trackNumber").and_then(serde_json::Value::as_i64),
+            bpm: data.get("bpm").and_then(serde_json::Value::as_i64),
             // `str((data.get("key") or {}).get("shortName"))`
             initial_key: match data.get("key").and_then(|k| k.get("shortName")) {
                 Some(J::String(s)) => s.clone(),
@@ -525,9 +525,10 @@ impl Beatport {
             .map_err(|e| anyhow!("communication with Beatport failed: {e}"))?;
         println!("To authenticate with Beatport, visit:");
         println!("{url}");
-        let data = match crate::ui::read_line_or_eof("Enter the string displayed in your browser:") {
-            Some(d) => d,
-            None => bail!("Beatport token request failed"),
+        let Some(data) =
+            crate::ui::read_line_or_eof("Enter the string displayed in your browser:")
+        else {
+            bail!("Beatport token request failed");
         };
         let (token, secret) = auth_client
             .get_access_token(&data)

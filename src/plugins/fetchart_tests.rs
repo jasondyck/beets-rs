@@ -1186,8 +1186,8 @@ fn check(env: &Env, yaml: &str, w: u32, h: u32) -> ImageAction {
 /// `TestAlbumArtOperationConfiguration`.
 #[test]
 fn validation_minwidth_and_ratio() {
-    let env = Env::new("{}");
     use ImageAction::*;
+    let env = Env::new("{}");
     assert_eq!(check(&env, "{}", 100, 50), Exact, "no checks");
     assert_eq!(check(&env, "{minwidth: 100}", 99, 99), Bad);
     assert_eq!(check(&env, "{minwidth: 100}", 100, 100), Exact);
@@ -1203,8 +1203,8 @@ fn validation_minwidth_and_ratio() {
 
 #[test]
 fn validation_actions() {
-    let env = Env::new("{}");
     use ImageAction::*;
+    let env = Env::new("{}");
     assert_eq!(check(&env, "{maxwidth: 50}", 100, 100), Downscale);
     assert_eq!(check(&env, "{maxwidth: 100}", 100, 100), Exact);
     assert_eq!(check(&env, "{max_filesize: 10}", 100, 100), Downsize);

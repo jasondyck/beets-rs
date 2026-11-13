@@ -325,7 +325,7 @@ pub struct CmdOpts {
     pub query: Vec<String>,
 }
 
-pub fn command(cfg: &Config, lib: &Library, opts: CmdOpts) -> Result<()> {
+pub fn command(cfg: &Config, lib: &Library, opts: &CmdOpts) -> Result<()> {
     let log = PluginLog::new("ipfs");
     if opts.add {
         let mut albums = lib.albums(&Query::parse(Kind::Album, &opts.query)?)?;
@@ -404,7 +404,7 @@ pub fn run_ipfs(
     command(
         cfg,
         lib,
-        CmdOpts {
+        &CmdOpts {
             add: a.add,
             get: a.get,
             publish: a.publish,
