@@ -181,6 +181,9 @@ pub enum Cmd {
         /// Print with a custom format template
         #[arg(short = 'f', long)]
         format: Option<String>,
+        /// Limit query results
+        #[arg(short = 'l', long)]
+        limit: Option<usize>,
         query: Vec<String>,
     },
     /// Change metadata fields: `beet modify QUERY field=value field!`
@@ -357,6 +360,378 @@ pub enum Cmd {
     },
 }
 
+/// One option a subcommand knows (as optparse would see it).
+struct OptInfo {
+    short: Option<char>,
+    long: Option<String>,
+    takes_value: bool,
+}
+
+fn options_of(cmd: &clap::Command) -> Vec<OptInfo> {
+    let mut out: Vec<OptInfo> = cmd
+        .get_arguments()
+        .filter_map(|a| {
+            if a.get_index().is_some() {
+                return None;
+            }
+            let short = a.get_short();
+            let long = a.get_long().map(str::to_string);
+            if short.is_none() && long.is_none() {
+                return None;
+            }
+            let takes_value = matches!(a.get_action(), ArgAction::Set | ArgAction::Append);
+            Some(OptInfo {
+                short,
+                long,
+                takes_value,
+            })
+        })
+        .collect();
+    // clap adds `-h/--help` when it builds the command, which happens after
+    // this inspection; every command has it.
+    if !out.iter().any(|o| o.long.as_deref() == Some("help")) {
+        out.push(OptInfo {
+            short: Some('h'),
+            long: Some("help".into()),
+            takes_value: false,
+        });
+    }
+    out
+}
+
+enum PreError {
+    Unknown(String),
+    Ambiguous(String, Vec<String>),
+    /// An option that needs a value at the end of the command line.
+    Missing(String),
+}
+
+/// beets' `OptionParser.error` text for an option error.
+fn option_error(err: PreError) -> String {
+    match err {
+        PreError::Unknown(opt) => format!("no such option: {opt}"),
+        PreError::Ambiguous(opt, possibilities) => {
+            format!("ambiguous option: {opt} ({}?)", possibilities.join(", "))
+        }
+        PreError::Missing(opt) => format!("{opt} option requires 1 argument"),
+    }
+}
+
+fn root_usage() -> String {
+    "Usage: \n  beet COMMAND [ARGS...]\n  beet help COMMAND".to_string()
+}
+
+fn command_usage(name: &str) -> String {
+    if name == "list" {
+        "Usage: beet [options]\nExample: beet list -f '$album: $title' artist:beatles".to_string()
+    } else {
+        format!("Usage: beet {name} [options]")
+    }
+}
+
+fn exit_option_error(command: Option<&str>, err: PreError) -> ! {
+    let (usage, prog) = match command {
+        Some(name) => (command_usage(name), format!("beet {name}")),
+        None => (root_usage(), "beet".to_string()),
+    };
+    eprintln!("{usage}\n\n{prog}: error: {}", option_error(err));
+    std::process::exit(2);
+}
+
+/// Match a long option by exact name or optparse-style unambiguous prefix;
+/// return its full name.
+fn match_long(name: &str, opts: &[OptInfo]) -> Result<String, PreError> {
+    let names: Vec<&String> = opts.iter().filter_map(|o| o.long.as_ref()).collect();
+    if let Some(exact) = names.iter().find(|n| n.as_str() == name) {
+        return Ok((*exact).clone());
+    }
+    let possibilities: Vec<String> = names
+        .iter()
+        .filter(|n| n.starts_with(name))
+        .map(|n| format!("--{n}"))
+        .collect();
+    match possibilities.len() {
+        1 => Ok(possibilities[0].trim_start_matches("--").to_string()),
+        0 => Err(PreError::Unknown(format!("--{name}"))),
+        _ => {
+            let mut sorted = possibilities;
+            sorted.sort();
+            Err(PreError::Ambiguous(format!("--{name}"), sorted))
+        }
+    }
+}
+
+/// Validate/expand one option token (and its value, if separate), as
+/// optparse parses it: short options cluster left to right, a value-taking
+/// option takes the rest of the cluster or the next argument (even one
+/// starting with `-`), and long options may be abbreviated.
+fn process_option(
+    args: &[std::ffi::OsString],
+    i: &mut usize,
+    opts: &[OptInfo],
+    out: &mut Vec<std::ffi::OsString>,
+    command: Option<&str>,
+) {
+    let token = args[*i].to_string_lossy().into_owned();
+    let fail = |e: PreError| -> ! { exit_option_error(command, e) };
+    if let Some(body) = token.strip_prefix("--") {
+        let (name, inline) = match body.split_once('=') {
+            Some((n, v)) => (n, Some(v.to_string())),
+            None => (body, None),
+        };
+        let full = match_long(name, opts).unwrap_or_else(|e| fail(e));
+        let info = opts
+            .iter()
+            .find(|o| o.long.as_deref() == Some(&full))
+            .unwrap();
+        let mut new = std::ffi::OsString::from(format!("--{full}"));
+        if info.takes_value {
+            match inline {
+                Some(v) => {
+                    new.push("=");
+                    new.push(v);
+                    *i += 1;
+                }
+                None if *i + 1 < args.len() => {
+                    new.push("=");
+                    new.push(&args[*i + 1]);
+                    *i += 2;
+                }
+                None => fail(PreError::Missing(format!("--{full}"))),
+            }
+        } else {
+            *i += 1;
+        }
+        out.push(new);
+        return;
+    }
+    // Short options (or `-` alone, which is positional).
+    let cluster: Vec<char> = token[1..].chars().collect();
+    let mut new = std::ffi::OsString::from("-");
+    let mut j = 0;
+    while j < cluster.len() {
+        let c = cluster[j];
+        let Some(info) = opts.iter().find(|o| o.short == Some(c)) else {
+            fail(PreError::Unknown(format!("-{c}")));
+        };
+        new.push(c.to_string());
+        if info.takes_value {
+            let rest: String = cluster[j + 1..].iter().collect();
+            if !rest.is_empty() {
+                new.push(rest);
+                j = cluster.len();
+            } else if *i + 1 < args.len() {
+                // The value is the next argument, even an empty one or one
+                // starting with `-`: use the long `--option=value` form so
+                // clap sees it as a value.
+                // Any flags before this option in the cluster stay as
+                // their own token; the value-taking option becomes
+                // `--option=value`.
+                let prefix: String = cluster[..j].iter().collect();
+                if !prefix.is_empty() {
+                    out.push(std::ffi::OsString::from(format!("-{prefix}")));
+                }
+                new = std::ffi::OsString::from("-");
+                match &info.long {
+                    Some(long) => {
+                        let mut tok = std::ffi::OsString::from(format!("--{long}="));
+                        tok.push(&args[*i + 1]);
+                        out.push(tok);
+                    }
+                    None => {
+                        // clap doesn't take attached short values: pass
+                        // `-n value` as two arguments.
+                        out.push(std::ffi::OsString::from(format!("-{c}")));
+                        out.push(args[*i + 1].clone());
+                    }
+                }
+                *i += 1;
+                j = cluster.len();
+            } else {
+                fail(PreError::Missing(format!("-{c}")));
+            }
+        } else {
+            j += 1;
+        }
+    }
+    *i += 1;
+    if !new.is_empty() && new != "-" {
+        out.push(new);
+    }
+}
+
+/// The plugins enabled by the configuration and the global options, for
+/// knowing whether a plugin command is there at all (beets registers plugin
+/// commands only for enabled plugins). A configuration that doesn't load
+/// enables none; the real command reports the error later.
+fn enabled_plugins(raw: &[std::ffi::OsString], root_opts: &[OptInfo]) -> Vec<String> {
+    let mut overlays: Vec<PathBuf> = vec![];
+    let mut plugins: Option<std::ffi::OsString> = None;
+    let mut disabled: Option<std::ffi::OsString> = None;
+    let mut i = 1;
+    while i < raw.len() {
+        let s = raw[i].to_string_lossy().into_owned();
+        if s == "--" || s == "-" || !s.starts_with('-') {
+            break;
+        }
+        // A global option; its value may be attached or the next argument.
+        let mut inline: Option<std::ffi::OsString> = None;
+        let info = if let Some(body) = s.strip_prefix("--") {
+            let (name, val) = match body.split_once('=') {
+                Some((n, v)) => (n, Some(std::ffi::OsString::from(v))),
+                None => (body, None),
+            };
+            let Ok(full) = match_long(name, root_opts) else {
+                break;
+            };
+            inline = val;
+            root_opts.iter().find(|o| o.long.as_deref() == Some(&full))
+        } else {
+            let chars: Vec<char> = s[1..].chars().collect();
+            let c = chars.first().copied().unwrap_or(' ');
+            let rest: String = chars[1..].iter().collect();
+            if !rest.is_empty() {
+                inline = Some(std::ffi::OsString::from(rest));
+            }
+            root_opts.iter().find(|o| o.short == Some(c))
+        };
+        let Some(info) = info else { break };
+        let mut value = inline;
+        if value.is_none() && info.takes_value && i + 1 < raw.len() {
+            value = Some(raw[i + 1].clone());
+            i += 1;
+        }
+        if let Some(v) = value {
+            match info.long.as_deref() {
+                Some("config") => overlays.push(PathBuf::from(v)),
+                Some("plugins") => plugins = Some(v),
+                Some("disable_plugins") => disabled = Some(v),
+                _ => {}
+            }
+        }
+        i += 1;
+    }
+    let Ok(mut cfg) = crate::config::Config::load(&overlays) else {
+        return vec![];
+    };
+    let seq = |s: std::ffi::OsString| {
+        serde_yaml::Value::Sequence(
+            crate::comma_list(&s.to_string_lossy())
+                .into_iter()
+                .map(serde_yaml::Value::String)
+                .collect(),
+        )
+    };
+    if let Some(p) = plugins {
+        cfg.set("plugins", seq(p));
+    }
+    if let Some(d) = disabled {
+        cfg.set("disabled_plugins", seq(d));
+    }
+    crate::plugins::names(&cfg)
+}
+
+/// beets' optparse checks, before clap parses: unknown (and abbreviated
+/// long) options, with optparse's messages and exit code 2; `--` ends
+/// option parsing (and may precede the command). Returns the possibly
+/// rewritten arguments.
+fn precheck(raw: &[std::ffi::OsString]) -> Vec<std::ffi::OsString> {
+    // The full command line, including the registry's plugin commands
+    // (which clap only learns at run time).
+    let root = cli();
+    let root_opts = options_of(&root);
+    let enabled = enabled_plugins(raw, &root_opts);
+    let mut out: Vec<std::ffi::OsString> = vec![raw[0].clone()];
+    let mut command: Option<String> = None;
+    let mut sub_opts: Vec<OptInfo> = vec![];
+    let mut i = 1;
+    while i < raw.len() {
+        let s = raw[i].to_string_lossy().into_owned();
+        match &command {
+            None => {
+                if s == "--" {
+                    i += 1;
+                    if i < raw.len() {
+                        let name = raw[i].to_string_lossy().into_owned();
+                        match resolve_command(&root, &name) {
+                            Some((canonical, sub)) => {
+                                out.push(std::ffi::OsString::from(&canonical));
+                                i += 1;
+                                if plugin_enabled(&canonical, &enabled) {
+                                    sub_opts = options_of(sub);
+                                    command = Some(canonical);
+                                } else {
+                                    out.extend(raw[i..].iter().cloned());
+                                    break;
+                                }
+                            }
+                            None => {
+                                eprintln!("error: unknown command '{name}'");
+                                std::process::exit(1);
+                            }
+                        }
+                    }
+                    continue;
+                }
+                if s == "-" || !s.starts_with('-') {
+                    match resolve_command(&root, &s) {
+                        Some((canonical, sub)) => {
+                            out.push(std::ffi::OsString::from(&canonical));
+                            i += 1;
+                            if plugin_enabled(&canonical, &enabled) {
+                                sub_opts = options_of(sub);
+                                command = Some(canonical);
+                            } else {
+                                // A disabled plugin's command: clap still
+                                // knows it and the command reports it.
+                                out.extend(raw[i..].iter().cloned());
+                                break;
+                            }
+                        }
+                        None => {
+                            eprintln!("error: unknown command '{s}'");
+                            std::process::exit(1);
+                        }
+                    }
+                    continue;
+                }
+                process_option(raw, &mut i, &root_opts, &mut out, None);
+            }
+            Some(name) => {
+                if s == "--" {
+                    out.extend(raw[i..].iter().cloned());
+                    break;
+                }
+                if s == "-" || !s.starts_with('-') {
+                    out.push(raw[i].clone());
+                    i += 1;
+                    continue;
+                }
+                process_option(raw, &mut i, &sub_opts, &mut out, Some(name));
+            }
+        }
+    }
+    out
+}
+
+/// Whether a resolved command is a core command or an enabled plugin's.
+fn plugin_enabled(canonical: &str, enabled: &[String]) -> bool {
+    match crate::plugin_registry::command(canonical) {
+        Some(cmd) => enabled.iter().any(|p| p == cmd.plugin),
+        None => true,
+    }
+}
+
+/// The canonical name and clap command for a command name or alias.
+fn resolve_command<'a>(root: &'a clap::Command, name: &str) -> Option<(String, &'a clap::Command)> {
+    let sub = root.get_subcommands().find(|c| {
+        c.get_name() == name
+            || c.get_visible_aliases().any(|a| a == name)
+            || c.get_all_aliases().any(|a| a == name)
+    })?;
+    Some((sub.get_name().to_string(), sub))
+}
+
 /// Parse the command line; unknown commands get beets' error message.
 /// The parsed command line: a core command (beets' own), or one of the
 /// registry's plugin commands, which clap only learns at run time.
@@ -449,7 +824,8 @@ fn main() {
     unsafe {
         libc::signal(libc::SIGPIPE, libc::SIG_DFL);
     }
-    let parsed = match parse_args(std::env::args_os()) {
+    let raw: Vec<std::ffi::OsString> = std::env::args_os().collect();
+    let parsed = match parse_args(precheck(&raw)) {
         Ok(parsed) => parsed,
         Err(e) => match unknown_command(&e) {
             Some(name) => {

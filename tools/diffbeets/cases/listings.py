@@ -767,8 +767,6 @@ INFO_ARGS = [
 # ---------------------------------------------------------------------------
 # Deliberate or known differences: case id -> reason
 
-_CLI = ("beets' optparse and our clap word an unknown option differently "
-        "(both exit 1); with `--` the query itself is compared")
 _REGEX = ("regex syntax errors carry the regex engine's own message (Python re "
           "vs fancy-regex); the `invalid query: '...': '...' is not a regular "
           "expression:` part is the same")
@@ -786,7 +784,6 @@ _EMPTY_TAGS = ("beets writes an empty list field to APEv2 as an empty value (bee
 
 EXPECTED = {
     "tags:write id3v23": _EMPTY_TAGS,
-    **{f"ls (no --):{q}": _CLI for q in RAW_DASH},
     "ls:year::199(": _REGEX,
     "ls -a:year::199(": _REGEX,
     "ls:title::(": _REGEX,
