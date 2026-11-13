@@ -471,6 +471,13 @@ impl Beatport {
         if !LOGGED.swap(true, std::sync::atomic::Ordering::Relaxed) {
             PluginLog::new("beatport").warning(&deprecation_message());
         }
+        Self::from_config(cfg)
+    }
+
+    /// The plugin's client from the configuration, without the load-time
+    /// deprecation log (a command that builds its own instance, as bpsync
+    /// does, has already had its plugin's warnings).
+    pub fn from_config(cfg: &Config) -> Result<Self> {
         let conf = Conf {
             urls: Urls::default(),
             apikey: cfg.str("beatport.apikey"),
@@ -790,18 +797,23 @@ inventory::submit! {
     }
 }
 
-inventory::submit! {
-    crate::plugin_registry::PluginDef {
-        name: "beatport",
-        // 5.19
-        order: 89,
-        defaults: r#"beatport:
+/// The plugin's settings (beets' `BeatportPlugin.__init__` `config.add`);
+/// bpsync's `BeatportPlugin()` adds them too, so bpsync's registry entry
+/// carries them as well.
+pub const DEFAULT_CONFIG: &str = r#"beatport:
     search_limit: 5
     data_source_mismatch_penalty: 0.5
     apikey: 57713c3906af6f5def151b33601389176b37b429
     apisecret: b3fe08c93c80aefd749fe871a16cd2bb32e2b954
     tokenfile: beatport_token.json
-"#,
+"#;
+
+inventory::submit! {
+    crate::plugin_registry::PluginDef {
+        name: "beatport",
+        // 5.19
+        order: 89,
+        defaults: DEFAULT_CONFIG,
         config_keys: &["beatport"],
         item_types: &[],
         album_types: &[],
