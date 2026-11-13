@@ -572,13 +572,17 @@ struct CurrentTop {
 static MULTIDISC_PATTERNS: LazyLock<Vec<Regex>> = LazyLock::new(|| {
     [r"dis[ck]", r"cd", r"cassette", r"digital\s+media", r"vinyl"]
         .iter()
-        .map(|m| Regex::new(&format!(r"(?i)^(.*{m}[\W_]*)\d")).unwrap())
+        .map(|m| {
+            Regex::new(&format!(r"(?i)^(.*{m}[\W_]*)\d"))
+                .expect("BUG: MULTIDISC_PATTERNS are valid regexes")
+        })
         .collect()
 });
 
 /// beets' `get_numbered_variant_pattern`: the same prefix, then a digit.
 fn numbered_variant(prefix: &str) -> Regex {
-    Regex::new(&format!("(?i)^{}\\d", regex::escape(prefix))).unwrap()
+    Regex::new(&format!("(?i)^{}\\d", regex::escape(prefix)))
+        .expect("BUG: an escaped disc-marker prefix is a valid regex")
 }
 
 /// beets' `sorted_walk`: depth-first, each directory before its
@@ -1213,7 +1217,7 @@ impl<'a> Importer<'a> {
             // Re-read from the database: an earlier merge may have taken it.
             let items: Vec<Item> = self
                 .lib
-                .album_items(album.id.unwrap())?
+                .album_items(album.id.expect("BUG: albums from the library have an id"))?
                 .into_iter()
                 .filter(|i| !self.merged.contains(i.path()))
                 .map(|mut i| {
@@ -1807,7 +1811,9 @@ impl<'a> Importer<'a> {
                 if !duplicates::matches(&a, want) {
                     continue;
                 }
-                let album_items = self.lib.album_items(a.id.unwrap())?;
+                let album_items = self
+                    .lib
+                    .album_items(a.id.expect("BUG: duplicate candidate albums have an id"))?;
                 if !album_items.iter().all(|i| task_paths.contains(i.path())) {
                     found.push(Found {
                         album_id: a.id,
@@ -1983,7 +1989,11 @@ impl<'a> Importer<'a> {
             self.lib.remove(d)?;
         }
         for a in &r.albums {
-            if self.lib.album_items(a.id.unwrap())?.is_empty() {
+            if self
+                .lib
+                .album_items(a.id.expect("BUG: replaced albums have an id"))?
+                .is_empty()
+            {
                 self.lib.remove(a)?;
             }
         }
@@ -1998,10 +2008,10 @@ impl<'a> Importer<'a> {
             && let Some(dir) = items.first().and_then(|i| i.path().parent())
         {
             let old = r.albums.iter().find(|a| {
-                r.items
-                    .iter()
-                    .flatten()
-                    .any(|d| d.int("album_id") == a.id.unwrap() && d.path().parent() == Some(dir))
+                r.items.iter().flatten().any(|d| {
+                    d.int("album_id") == a.id.expect("BUG: replaced albums have an id")
+                        && d.path().parent() == Some(dir)
+                })
             });
             if let Some(old) = old {
                 let mut fresh = REIMPORT_FRESH_FIELDS_ITEM.to_vec();
@@ -2056,7 +2066,10 @@ impl<'a> Importer<'a> {
         self.pending_albums.push_back(pending);
         // Beets' import stage can be one task ahead of the move stage.
         while self.pending_albums.len() > 1 {
-            let pending = self.pending_albums.pop_front().unwrap();
+            let pending = self
+                .pending_albums
+                .pop_front()
+                .expect("BUG: the queue holds more than one album");
             self.place_album(pending)?;
         }
         Ok(())
@@ -2155,8 +2168,11 @@ impl<'a> Importer<'a> {
         })?;
         if moved_in_library {
             // Kept art follows its reimported album, as beets' `Item.move`.
-            crate::commands::sync_art(self.cfg, lib, album.id.unwrap())?;
-            if let Some(a) = lib.get_album(album.id.unwrap())? {
+            let album_id = album
+                .id
+                .expect("BUG: a placed album was added to the library");
+            crate::commands::sync_art(self.cfg, lib, album_id)?;
+            if let Some(a) = lib.get_album(album_id)? {
                 album = a;
             }
         }

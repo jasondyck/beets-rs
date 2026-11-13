@@ -37,7 +37,9 @@ impl TidalApi {
                 self.urls.clone(),
             ));
         }
-        self.session.as_mut().unwrap()
+        self.session
+            .as_mut()
+            .expect("BUG: the session was created just above")
     }
 
     /// `TidalAPI.search_results`.
@@ -118,8 +120,10 @@ impl TidalApi {
         params: &[(&str, String)],
     ) -> Result<J> {
         let mut doc = empty_doc();
-        doc.as_object_mut().unwrap().insert(
-            "links".into(),
+        doc.as_object_mut()
+            .expect("BUG: empty_doc is a JSON object")
+            .insert(
+                "links".into(),
             J::Object(Map::from_iter([("next".into(), J::String(url.into()))])),
         );
         let mut guard = 0;
@@ -208,7 +212,9 @@ pub fn merge(a: &mut J, b: J) {
         .get("links")
         .cloned()
         .unwrap_or_else(|| J::Object(Map::new()));
-    a.as_object_mut().unwrap().insert("links".into(), links);
+    a.as_object_mut()
+        .expect("BUG: merged documents start as JSON objects (empty_doc)")
+        .insert("links".into(), links);
 }
 
 fn dedupe_included(doc: &mut J) {
@@ -228,7 +234,7 @@ fn dedupe_included(doc: &mut J) {
     }
     out.reverse();
     doc.as_object_mut()
-        .unwrap()
+        .expect("BUG: the paginated document is a JSON object")
         .insert("included".into(), J::Array(out));
 }
 

@@ -65,7 +65,7 @@ fn mock(statuses: Vec<BTreeMap<String, String>>, events: Vec<Vec<String>>) -> Mo
 fn update_rating_ignores_missing_items() {
     let (cfg, lib) = env();
     let stats = MPDStats::new(&lib, PluginLog::new("mpdstats"), mock(vec![], vec![]), &cfg);
-    stats.update_rating(&None, true);
+    stats.update_rating(&None, true).unwrap();
     assert!(stats.now_playing.is_none());
 }
 
@@ -77,7 +77,7 @@ fn update_rating_uses_play_and_skip_counts() {
     let stats = MPDStats::new(&lib, PluginLog::new("mpdstats"), mock(vec![], vec![]), &cfg);
     let before = stats.get_item("/foo/bar.flac").unwrap();
     assert_eq!(before.str("title"), "title");
-    stats.update_rating(&Some(it.clone()), true);
+    stats.update_rating(&Some(it.clone()), true).unwrap();
     let after = lib.get_item(it.id.unwrap()).unwrap().unwrap();
     let rating = after.str("rating").parse::<f64>().unwrap();
     // rating 0.5, skipped: rolling 0.25, stable 0.5 -> 0.4375
@@ -119,11 +119,11 @@ fn play_pause_stop_update_the_statistics() {
     let (_, lines) = crate::logging::capture(|| {
         // As `run` does, one status per "player" event.
         let s = stats.mpd.status();
-        stats.on_pause(&s);
+        stats.on_pause(&s).unwrap();
         let s = stats.mpd.status();
-        stats.on_play(&s);
+        stats.on_play(&s).unwrap();
         let s = stats.mpd.status();
-        stats.on_stop(&s);
+        stats.on_stop(&s).unwrap();
         let _ = stats.mpd.events();
     });
     assert!(lines.iter().any(|l| l == "mpdstats: pause"), "{lines:?}");

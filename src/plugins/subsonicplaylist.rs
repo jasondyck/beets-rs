@@ -219,7 +219,8 @@ impl State {
                 if let Err(e) = crate::media::write_item(&mut item) {
                     self.log.warning(&format!("{e:#}"));
                 }
-                let _ = lib.store(&item);
+                // beets' `try_sync`: a store failure aborts the command.
+                lib.store(&item)?;
             }
         }
         Ok(())
@@ -244,7 +245,8 @@ impl State {
                 if let Err(e) = crate::media::write_item(&mut item) {
                     self.log.warning(&format!("{e:#}"));
                 }
-                let _ = lib.store(&item);
+                // beets' `try_sync`: a store failure aborts the command.
+                lib.store(&item)?;
             }
         }
         self.update_tags(&playlist_dict, lib)

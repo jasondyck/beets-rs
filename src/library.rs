@@ -442,7 +442,9 @@ impl Migrator<'_> {
                     "remove_inherited_artpath" => self.remove_inherited_artpath(*kind)?,
                     "instrumental_lyrics_in_flex_field" => self.instrumental_lyrics(*kind)?,
                     _ => {
-                        let (old, new) = legacy_field_of(name).unwrap();
+                        let (old, new) = legacy_field_of(name).expect(
+                            "BUG: every MIGRATIONS entry is either handled above or has a legacy field",
+                        );
                         if columns.iter().any(|c| c == old) {
                             self.multi_value(*kind, old, new)?;
                         }
@@ -889,7 +891,9 @@ impl Library {
 
     fn store_flex(&self, rec: &Record) -> Result<()> {
         let a = attr_table(rec.kind);
-        let id = rec.id.unwrap();
+        let id = rec
+            .id
+            .expect("BUG: store_flex runs only for records added or loaded from the database");
         self.conn
             .prepare_cached(&format!("DELETE FROM {a} WHERE entity_id=?"))?
             .execute([id])?;
@@ -979,9 +983,12 @@ impl Library {
             let mut s = self.conn.prepare_cached(&format!(
                 "SELECT entity_id, key, value FROM {a} WHERE entity_id=?"
             ))?;
-            let rows = s.query_map([recs[0].id.unwrap()], |r| {
-                Ok((r.get(0)?, r.get(1)?, r.get::<_, Option<String>>(2)?))
-            })?;
+            let rows = s.query_map(
+                [recs[0]
+                    .id
+                    .expect("BUG: records loaded from the database have an id")],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get::<_, Option<String>>(2)?)),
+            )?;
             for row in rows {
                 let (id, k, v): (i64, String, Option<String>) = row?;
                 flex.entry(id).or_default().insert(k, v.unwrap_or_default());
@@ -1012,7 +1019,10 @@ impl Library {
             }
         }
         for r in &mut recs {
-            if let Some(f) = flex.remove(&r.id.unwrap()) {
+            if let Some(f) = flex.remove(
+                &r.id
+                    .expect("BUG: records loaded from the database have an id"),
+            ) {
                 r.flex = f;
             }
         }
@@ -1092,7 +1102,10 @@ impl Library {
             flex.entry(id).or_default().insert(k, v.unwrap_or_default());
         }
         for r in &mut recs {
-            if let Some(f) = flex.remove(&r.id.unwrap()) {
+            if let Some(f) = flex.remove(
+                &r.id
+                    .expect("BUG: records loaded from the database have an id"),
+            ) {
                 r.flex = f;
             }
         }
@@ -1106,7 +1119,12 @@ impl Library {
             Kind::Item => self
                 .load(Kind::Album, "", &[])?
                 .into_iter()
-                .map(|a| (a.id.unwrap(), a))
+                .map(|a| {
+                    (
+                        a.id.expect("BUG: albums loaded from the database have an id"),
+                        a,
+                    )
+                })
                 .collect(),
             Kind::Album => HashMap::new(),
         };
@@ -1134,7 +1152,11 @@ impl Library {
             let mut slots: Vec<Option<Record>> = recs.into_iter().map(Some).collect();
             recs = order
                 .into_iter()
-                .map(|i| slots[i].take().unwrap())
+                .map(|i| {
+                    slots[i]
+                        .take()
+                        .expect("BUG: the sort order visits each loaded record once")
+                })
                 .collect();
         }
         Ok(recs)
@@ -1508,7 +1530,7 @@ impl Library {
             }
         }
         self.add(&mut album)?;
-        let id = album.id.unwrap();
+        let id = album.id.expect("BUG: add() assigns the album an id");
         for item in items.iter_mut() {
             item.set_int("album_id", id);
             if item.id.is_some() {

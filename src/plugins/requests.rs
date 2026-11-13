@@ -283,12 +283,12 @@ impl Session {
                 (None, None) => r.call(),
             };
             let retry_cause = match result {
-                Ok(resp) => return Ok(read(resp)),
+                Ok(resp) => return read(resp),
                 // A plain session hands every response back, as `requests`.
-                Err(ureq::Error::Status(_, resp)) if !self.retries => return Ok(read(resp)),
+                Err(ureq::Error::Status(_, resp)) if !self.retries => return read(resp),
                 Err(ureq::Error::Status(code, resp)) => {
                     if !RETRY_STATUSES.contains(&code) || (code == 429 && !self.retry_429) {
-                        let resp = read(resp);
+                        let resp = read(resp)?;
                         return Err(HttpError::Status {
                             code,
                             url: url.to_string(),
@@ -320,7 +320,9 @@ impl Session {
     }
 }
 
-fn read(resp: ureq::Response) -> Response {
+/// Read a response's body (requests raises on a read error, e.g. a
+/// truncated chunked body).
+fn read(resp: ureq::Response) -> Result<Response, HttpError> {
     use std::io::Read;
     let content_type = resp.header("content-type").unwrap_or_default().to_string();
     let status = resp.status();
@@ -331,13 +333,16 @@ fn read(resp: ureq::Response) -> Response {
         }
     }
     let mut body = vec![];
-    let _ = resp.into_reader().take(64 << 20).read_to_end(&mut body);
-    Response {
+    resp.into_reader()
+        .take(64 << 20)
+        .read_to_end(&mut body)
+        .map_err(|e| HttpError::Request(e.to_string()))?;
+    Ok(Response {
         content_type,
         status,
         body,
         headers,
-    }
+    })
 }
 
 /// urllib3's `MaxRetryError` message, as requests reports it.
@@ -511,6 +516,7 @@ pub mod testserver {
                     .and_then(|(_, v)| v.parse::<usize>().ok())
                     .unwrap_or(0);
                 let mut body = vec![0; len];
+                // A test client that hangs up is not an error here.
                 let _ = reader.read_exact(&mut body);
                 let req = Seen {
                     method,
@@ -527,6 +533,7 @@ pub mod testserver {
                     reply.content_type,
                     reply.body.len()
                 );
+                // The test client may have gone away; nothing to log.
                 let _ = stream.write_all(head.as_bytes());
                 let _ = stream.write_all(&reply.body);
             }
@@ -580,5 +587,26 @@ mod tests {
         // Six retries after the first attempt.
         let bad = s.requests().iter().filter(|r| r.target == "/bad").count();
         assert_eq!(bad, 7);
+    }
+
+    #[test]
+    fn a_truncated_body_is_a_request_error() {
+        use std::io::{Read as _, Write as _};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut buf = [0u8; 1024];
+            let _ = stream.read(&mut buf);
+            // Promise 100 bytes and close after five.
+            stream
+                .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 100\r\n\r\nshort")
+                .unwrap();
+        });
+        // requests raises on a body read error; so does `read`.
+        let err = Session::plain("beets-test")
+            .get_any(&format!("http://{addr}/"), Request::default())
+            .unwrap_err();
+        assert!(matches!(err, HttpError::Request(_)), "{err:?}");
     }
 }
