@@ -341,8 +341,9 @@ pub fn run(cli: Cli) -> Result<()> {
             album,
             path,
             format,
+            limit,
             query,
-        } => list(&cfg, &lib, album, path, format, &query),
+        } => list(&cfg, &lib, album, path, format, limit, &query),
         Cmd::Modify {
             album,
             mv,
@@ -534,6 +535,7 @@ fn list(
     album: bool,
     path: bool,
     format: Option<String>,
+    limit: Option<usize>,
     q: &[String],
 ) -> Result<()> {
     let kind = if album { Kind::Album } else { Kind::Item };
@@ -547,7 +549,9 @@ fn list(
     };
     let t = Template::parse(&fmt);
     if album {
-        for a in lib.albums(&query)? {
+        let mut albums = lib.albums(&query)?;
+        albums.truncate(limit.unwrap_or(usize::MAX));
+        for a in albums {
             if path && fmt == "$path" {
                 // An album's path is the directory of its items.
                 let items = lib.album_items(a.id.unwrap())?;
@@ -559,7 +563,9 @@ fn list(
             }
         }
     } else {
-        for i in lib.items(&query)? {
+        let mut items = lib.items(&query)?;
+        items.truncate(limit.unwrap_or(usize::MAX));
+        for i in items {
             println!("{}", format_record(&t, &i, Some(lib)));
         }
     }
