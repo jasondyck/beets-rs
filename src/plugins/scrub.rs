@@ -56,7 +56,7 @@ pub fn scrub(path: &Path) -> Result<()> {
         FileType::Mp4 => remove(&[TagType::Mp4Ilst])?,
         FileType::Vorbis | FileType::Opus | FileType::Speex => remove(&[TagType::VorbisComments])?,
         FileType::WavPack | FileType::Ape | FileType::Mpc | FileType::Aac => {
-            remove(&[TagType::Ape])?
+            remove(&[TagType::Ape])?;
         }
         _ => {}
     }
@@ -139,7 +139,7 @@ pub fn command(lib: &Library, write: bool, limit: Option<usize>, query: &[String
     log.set_base_level(INFO);
     let mut items = lib.items(&Query::parse(Kind::Item, query)?)?;
     items.truncate(limit.unwrap_or(usize::MAX));
-    for item in items.iter_mut() {
+    for item in &mut items {
         log.info(&format!("scrubbing: {}", item.path().display()));
         scrub_item(item, write, &log);
     }

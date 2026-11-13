@@ -39,7 +39,7 @@ impl Env {
 
     /// `modify` (no write, no move) of the items or albums matching `q`.
     fn modify(&self, kind: Kind, q: &[&str], sets: &[(&str, &str)]) {
-        let q: Vec<String> = q.iter().map(|s| s.to_string()).collect();
+        let q: Vec<String> = q.iter().map(std::string::ToString::to_string).collect();
         let query = Query::parse(kind, &q).unwrap();
         let objs = match kind {
             Kind::Item => self.lib.items(&query).unwrap(),

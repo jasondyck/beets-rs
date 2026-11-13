@@ -220,7 +220,7 @@ impl Rewriter {
         let rules = self.rules.get(field)?;
         // A rule's query that looks at a rewritten field sees the stored
         // value (beets would recurse without end).
-        if IN_REWRITE.with(|c| c.get()) {
+        if IN_REWRITE.with(std::cell::Cell::get) {
             return None;
         }
         let orig = if is_list(field) {

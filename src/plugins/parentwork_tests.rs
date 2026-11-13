@@ -81,7 +81,7 @@ fn run(env: &Env, force: Option<bool>) {
     command(
         &env.cfg,
         &env.lib,
-        CmdOpts {
+        &CmdOpts {
             force,
             ..Default::default()
         },

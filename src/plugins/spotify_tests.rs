@@ -217,7 +217,7 @@ fn track_details_are_fetched_in_chunks_of_50() {
             .unwrap_or("")
             .replace("%2C", ",")
             .split(',')
-            .map(|s| s.to_string())
+            .map(std::string::ToString::to_string)
             .collect();
         Reply::json(json!({
             "tracks": ids.iter().map(|id| json!({

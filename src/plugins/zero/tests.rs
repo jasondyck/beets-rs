@@ -85,7 +85,7 @@ impl Env {
 
     fn run_zero(&self, query: &[&str]) {
         let plugins: Vec<Box<dyn Plugin>> = vec![Box::new(Zero::new(&self.cfg).unwrap())];
-        let q: Vec<String> = query.iter().map(|s| s.to_string()).collect();
+        let q: Vec<String> = query.iter().map(std::string::ToString::to_string).collect();
         command(&self.cfg, &self.lib, &plugins, None, &q).unwrap();
     }
 

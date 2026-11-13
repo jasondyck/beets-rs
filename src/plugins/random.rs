@@ -106,7 +106,7 @@ pub fn equal_chance_permutation(objs: Vec<Record>, field: &str, rng: &mut Rng) -
             }
         }
     }
-    for (_, vals) in groups.iter_mut() {
+    for (_, vals) in &mut groups {
         rng.shuffle(vals);
     }
     let mut out = vec![];
@@ -163,7 +163,7 @@ pub fn random_objs(
 }
 
 /// `beet random`.
-pub fn command(cfg: &Config, lib: &Library, opts: CmdOpts) -> Result<()> {
+pub fn command(cfg: &Config, lib: &Library, opts: &CmdOpts) -> Result<()> {
     run(cfg, lib, opts, &mut std::io::stdout().lock())
 }
 
@@ -171,7 +171,7 @@ pub fn command(cfg: &Config, lib: &Library, opts: CmdOpts) -> Result<()> {
 pub fn run(
     cfg: &Config,
     lib: &Library,
-    opts: CmdOpts,
+    opts: &CmdOpts,
     out: &mut impl std::io::Write,
 ) -> Result<()> {
     let kind = if opts.album { Kind::Album } else { Kind::Item };
@@ -267,9 +267,7 @@ pub struct RandomArgs {
 
 pub fn build_random() -> clap::Command {
     use clap::Args as _;
-    RandomArgs::augment_args(
-        clap::Command::new("random").about("choose a random track or album"),
-    )
+    RandomArgs::augment_args(clap::Command::new("random").about("choose a random track or album"))
 }
 
 pub fn run_random(
@@ -280,17 +278,14 @@ pub fn run_random(
 ) -> anyhow::Result<()> {
     use clap::FromArgMatches as _;
     let a = RandomArgs::from_arg_matches(m)?;
-    crate::plugins::random::command(
-        cfg,
-        lib,
-        crate::plugins::random::CmdOpts {
-            album: a.album,
-            equal_chance: a.equal_chance,
-            field: a.field,
-            limit: a.limit,
-            number: a.number,
-            time: a.time,
-            query: a.query,
-        },
-    )
+    let opts = crate::plugins::random::CmdOpts {
+        album: a.album,
+        equal_chance: a.equal_chance,
+        field: a.field,
+        limit: a.limit,
+        number: a.number,
+        time: a.time,
+        query: a.query,
+    };
+    crate::plugins::random::command(cfg, lib, &opts)
 }

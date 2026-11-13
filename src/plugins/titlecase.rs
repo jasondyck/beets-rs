@@ -294,11 +294,11 @@ impl Titlecase {
                 "artist" => info.artist = self.titlecase(&info.artist, field),
                 "artist_credit" => info.artist_credit = self.titlecase(&info.artist_credit, field),
                 "artists" => {
-                    info.artists = info.artists.iter().map(|s| self.titlecase(s, field)).collect()
+                    info.artists = info.artists.iter().map(|s| self.titlecase(s, field)).collect();
                 }
                 "artists_sort" => {
                     info.artists_sort =
-                        info.artists_sort.iter().map(|s| self.titlecase(s, field)).collect()
+                        info.artists_sort.iter().map(|s| self.titlecase(s, field)).collect();
                 }
                 _ => {}
             }
@@ -470,11 +470,11 @@ impl InfoListener for Titlecase {
                 "artist" => info.artist = self.titlecase(&info.artist, field),
                 "artist_credit" => info.artist_credit = self.titlecase(&info.artist_credit, field),
                 "artists" => {
-                    info.artists = info.artists.iter().map(|s| self.titlecase(s, field)).collect()
+                    info.artists = info.artists.iter().map(|s| self.titlecase(s, field)).collect();
                 }
                 "artists_sort" => {
                     info.artists_sort =
-                        info.artists_sort.iter().map(|s| self.titlecase(s, field)).collect()
+                        info.artists_sort.iter().map(|s| self.titlecase(s, field)).collect();
                 }
                 _ => {}
             }
@@ -494,7 +494,7 @@ pub struct CmdOpts {
     pub query: Vec<String>,
 }
 
-pub fn command(cfg: &Config, lib: &Library, opts: CmdOpts) -> Result<()> {
+pub fn command(cfg: &Config, lib: &Library, opts: &CmdOpts) -> Result<()> {
     let core = Titlecase::new(cfg);
     let mut items = lib.items(&Query::parse(crate::model::Kind::Item, &opts.query)?)?;
     if let Some(n) = opts.limit {
@@ -585,7 +585,7 @@ pub fn run_titlecase(
     crate::plugins::titlecase::command(
         cfg,
         lib,
-        crate::plugins::titlecase::CmdOpts {
+        &crate::plugins::titlecase::CmdOpts {
             limit: a.limit,
             query: a.query,
         },

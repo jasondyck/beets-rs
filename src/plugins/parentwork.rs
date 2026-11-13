@@ -178,7 +178,7 @@ impl ParentWorkPlugin {
             item.set("work_date", Value::Str(d));
         }
         if verbose {
-            let fields: Vec<String> = FIELDS.iter().map(|f| f.to_string()).collect();
+            let fields: Vec<String> = FIELDS.iter().map(std::string::ToString::to_string).collect();
             let changed = FIELDS.iter().any(|f| old.get(f) != item.get(f));
             if changed {
                 let fmt = crate::template::Template::parse(&cfg.str("format_item"));
@@ -219,7 +219,7 @@ pub struct CmdOpts {
 }
 
 /// `beet parentwork`.
-pub fn command(cfg: &Config, lib: &Library, opts: CmdOpts) -> Result<()> {
+pub fn command(cfg: &Config, lib: &Library, opts: &CmdOpts) -> Result<()> {
     let plugin = ParentWorkPlugin::new(cfg);
     let force = opts.force.unwrap_or(plugin.force);
     let write = cfg.bool("import.write");
@@ -248,7 +248,7 @@ fn string(v: &J, key: &str) -> String {
 fn array<'a>(v: &'a J, key: &str) -> &'a [J] {
     v.get(key)
         .and_then(|v| v.as_array())
-        .map(|a| a.as_slice())
+        .map(std::vec::Vec::as_slice)
         .unwrap_or_default()
 }
 
@@ -319,7 +319,7 @@ pub fn run_parentwork(
     crate::plugins::parentwork::command(
         cfg,
         lib,
-        crate::plugins::parentwork::CmdOpts {
+        &crate::plugins::parentwork::CmdOpts {
             force: a.force.then_some(true),
             limit: a.limit,
             query: a.query,

@@ -475,7 +475,7 @@ pub fn load(cfg: &Config) -> PlexUpdate {
 
 /// `beet plexupdate [-a]`: `--auth` logs in; without it, the command's
 /// help is shown.
-pub fn command(cfg: &Config, opts: CmdOpts) -> anyhow::Result<()> {
+pub fn command(cfg: &Config, opts: &CmdOpts) -> anyhow::Result<()> {
     let plugin = PlexUpdate::new(cfg);
     if opts.auth {
         plugin.api().ui_authenticate_flow(&plugin.log)?;
@@ -552,5 +552,5 @@ pub fn run_plexupdate(
 ) -> anyhow::Result<()> {
     use clap::FromArgMatches as _;
     let a = PlexupdateArgs::from_arg_matches(m)?;
-    command(cfg, CmdOpts { auth: a.auth })
+    command(cfg, &CmdOpts { auth: a.auth })
 }

@@ -659,19 +659,19 @@ impl Spotify {
             artists_ids: ids,
             length: data
                 .get("duration_ms")
-                .and_then(|d| d.as_f64())
+                .and_then(serde_json::Value::as_f64)
                 .map(|d| d / 1000.0),
             index: data
                 .get("track_number")
-                .and_then(|n| n.as_i64())
+                .and_then(serde_json::Value::as_i64)
                 .unwrap_or(0) as usize,
             medium: data
                 .get("disc_number")
-                .and_then(|n| n.as_i64())
+                .and_then(serde_json::Value::as_i64)
                 .unwrap_or(0) as usize,
             medium_index: data
                 .get("track_number")
-                .and_then(|n| n.as_i64())
+                .and_then(serde_json::Value::as_i64)
                 .unwrap_or(0) as usize,
             data_source: self.data_source().to_string(),
             data_url: data
@@ -714,7 +714,7 @@ impl Spotify {
             .cloned()
             .unwrap_or_default();
         for (i, t) in items.iter().enumerate() {
-            let disc = t.get("disc_number").and_then(|n| n.as_i64()).unwrap_or(0) as usize;
+            let disc = t.get("disc_number").and_then(serde_json::Value::as_i64).unwrap_or(0) as usize;
             if disc == track.medium {
                 medium_total += 1;
                 if t.get("id").and_then(|i| i.as_str()) == Some(track.track_id.as_str()) {
@@ -1067,7 +1067,7 @@ impl Spotify {
             let mut item = items[*index].clone();
             if let Some((_, track)) = details.iter().find(|(id, _)| id == spotify_track_id) {
                 let external = track.get("external_ids").cloned().unwrap_or(J::Null);
-                if let Some(p) = track.get("popularity").and_then(|p| p.as_i64()) {
+                if let Some(p) = track.get("popularity").and_then(serde_json::Value::as_i64) {
                     item.set("spotify_track_popularity", crate::model::Value::Int(p));
                 }
                 if let Some(isrc) = external.get("isrc").and_then(|v| v.as_str()) {
@@ -1244,7 +1244,7 @@ impl Spotify {
 
 /// `track["popularity"]` as an integer (missing: 0).
 fn popularity(track: &J) -> i64 {
-    track.get("popularity").and_then(|p| p.as_i64()).unwrap_or(0)
+    track.get("popularity").and_then(serde_json::Value::as_i64).unwrap_or(0)
 }
 
 /// `{item}`: the `format_item` template.
@@ -1262,7 +1262,7 @@ impl super::Plugin for Spotify {
 // ---------------------------------------------------------------- commands
 
 /// `beet spotify`.
-pub fn command(cfg: &Config, lib: &crate::library::Library, opts: CmdOpts) -> Result<()> {
+pub fn command(cfg: &Config, lib: &crate::library::Library, opts: &CmdOpts) -> Result<()> {
     let mut plugin = Spotify::new(cfg)?;
     if !plugin.parse_opts(opts.mode.as_deref(), opts.show_failures) {
         return Ok(());
@@ -1274,7 +1274,7 @@ pub fn command(cfg: &Config, lib: &crate::library::Library, opts: CmdOpts) -> Re
 }
 
 /// `beet spotifysync`.
-pub fn sync_command(cfg: &Config, lib: &crate::library::Library, opts: SyncOpts) -> Result<()> {
+pub fn sync_command(cfg: &Config, lib: &crate::library::Library, opts: &SyncOpts) -> Result<()> {
     let mut plugin = Spotify::new(cfg)?;
     let mut items = lib.items(&crate::query::Query::parse(Kind::Item, &opts.query)?)?;
     if let Some(limit) = opts.limit {
@@ -1351,7 +1351,7 @@ pub fn run_spotify(
     command(
         cfg,
         lib,
-        CmdOpts {
+        &CmdOpts {
             mode: a.mode,
             show_failures: a.show_failures,
             query: a.query,
@@ -1391,7 +1391,7 @@ pub fn run_spotifysync(
     sync_command(
         cfg,
         lib,
-        SyncOpts {
+        &SyncOpts {
             force_refetch: a.force_refetch,
             limit: a.limit,
             query: a.query,

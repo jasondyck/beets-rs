@@ -156,7 +156,7 @@ fn command_prints_chosen_objects() {
     let mut picks = std::collections::HashSet::new();
     for _ in 0..50 {
         let mut out = vec![];
-        run(&cfg, &lib, opts.clone(), &mut out).unwrap();
+        run(&cfg, &lib, &opts, &mut out).unwrap();
         let out = String::from_utf8(out).unwrap();
         assert_eq!(out.lines().count(), 2);
         picks.extend(out.lines().map(String::from));
