@@ -64,3 +64,12 @@ tempfile = "3.27.0"
 [lints.clippy]
 # Every unsafe block needs a `// SAFETY:` comment (6.5 batch U).
 undocumented_unsafe_blocks = "warn"
+# rust-skills cleanup (PORTING 6.5): these are at zero; keep them there.
+assigning_clones = "warn"
+cast_lossless = "warn"
+default_trait_access = "warn"
+explicit_iter_loop = "warn"
+manual_let_else = "warn"
+needless_pass_by_value = "warn"
+redundant_closure_for_method_calls = "warn"
+semicolon_if_nothing_returned = "warn"
