@@ -53,13 +53,13 @@ impl Env {
     }
 
     /// `beet splupdate`, its result and log.
-    fn run(&self, opts: CmdOpts) -> (Result<()>, Vec<String>) {
+    fn run(&self, opts: &CmdOpts) -> (Result<()>, Vec<String>) {
         crate::logging::capture(|| command(&self.cfg, &self.lib, opts))
     }
 
     fn names(names: &[&str]) -> CmdOpts {
         CmdOpts {
-            names: names.iter().map(|s| s.to_string()).collect(),
+            names: names.iter().map(std::string::ToString::to_string).collect(),
             ..Default::default()
         }
     }
@@ -152,7 +152,7 @@ fn build_queries_with_sorts() {
 fn playlist_update() {
     let env = Env::new("[{name: '$title-my<playlist>.m3u', query: ''}]");
     env.add("/tagada.mp3", &[("title", "ta:ga:da")]);
-    let (r, _) = env.run(CmdOpts::default());
+    let (r, _) = env.run(&CmdOpts::default());
     r.unwrap();
     assert_eq!(
         env.playlist("ta_ga_da-my_playlist_.m3u").unwrap(),
@@ -171,7 +171,7 @@ fn playlist_update_output_extm3u() {
     );
     it.set("length", Value::Float(300.123));
     env.lib.store(&it).unwrap();
-    env.run(CmdOpts::default()).0.unwrap();
+    env.run(&CmdOpts::default()).0.unwrap();
     assert_eq!(
         env.playlist("ta_ga_da-my_playlist_.m3u").unwrap(),
         b"#EXTM3U\n#EXTINF:300,fake artist - ta:ga:da\nhttp://beets:8337/files/tagada.mp3\n"
@@ -193,7 +193,7 @@ fn playlist_update_output_extm3u_fields() {
     );
     it.set("length", Value::Float(300.123));
     env.lib.store(&it).unwrap();
-    env.run(CmdOpts::default()).0.unwrap();
+    env.run(&CmdOpts::default()).0.unwrap();
     assert_eq!(
         env.playlist("my.m3u").unwrap(),
         b"#EXTM3U\n#EXTINF:300 id=\"1\" genres=\"Rock%3B%20Pop\",Fake Artist - fake Title\n/tagada.mp3\n"
@@ -262,13 +262,13 @@ fn cli_env() -> (Env, Item) {
 fn splupdate() {
     let (env, it) = cli_env();
     let path = format!("{}\n", it.path().display()).into_bytes();
-    assert!(env.run(Env::names(&["tagada"])).0.is_err());
-    env.run(Env::names(&["my_playlist"])).0.unwrap();
+    assert!(env.run(&Env::names(&["tagada"])).0.is_err());
+    env.run(&Env::names(&["my_playlist"])).0.unwrap();
     assert_eq!(env.playlist("my_playlist.m3u").unwrap(), path);
     assert_eq!(env.playlist("all.m3u"), None);
-    env.run(Env::names(&["my_playlist.m3u"])).0.unwrap();
+    env.run(&Env::names(&["my_playlist.m3u"])).0.unwrap();
     assert_eq!(env.playlist("my_playlist.m3u").unwrap(), path);
-    env.run(CmdOpts::default()).0.unwrap();
+    env.run(&CmdOpts::default()).0.unwrap();
     for name in ["my_playlist.m3u", "all.m3u"] {
         assert_eq!(env.playlist(name).unwrap(), path);
     }
@@ -280,7 +280,7 @@ fn splupdate_unknown_playlist_error_is_sorted_and_quoted() {
         "[{name: z last.m3u, query: x}, {name: \"rock'n roll.m3u\", query: x},
           {name: a one.m3u, query: x}]",
     );
-    let err = env.run(Env::names(&["tagada"])).0.unwrap_err();
+    let err = env.run(&Env::names(&["tagada"])).0.unwrap_err();
     assert_eq!(
         err.to_string(),
         "No playlist matching any of 'a one.m3u' 'rock'\"'\"'n roll.m3u' 'z last.m3u' found"
@@ -290,7 +290,7 @@ fn splupdate_unknown_playlist_error_is_sorted_and_quoted() {
 #[test]
 fn splupdate_log_output() {
     let (env, _) = cli_env();
-    let (r, log) = env.run(Env::names(&["my_playlist"]));
+    let (r, log) = env.run(&Env::names(&["my_playlist"]));
     r.unwrap();
     assert_eq!(
         log,
@@ -322,7 +322,7 @@ fn splupdate_verbose_log_output() {
 #[test]
 fn splupdate_pretend_log_output() {
     let (env, _) = cli_env();
-    let (r, log) = env.run(CmdOpts {
+    let (r, log) = env.run(&CmdOpts {
         pretend: true,
         ..Env::names(&["my_playlist"])
     });
@@ -363,7 +363,7 @@ fn a_missing_field_stops_the_file_where_beets_does() {
     env.set("fields", "[rating]");
     env.add("/a.mp3", &[("title", "A"), ("rating", "5")]);
     env.add("/b.mp3", &[("title", "B")]);
-    let err = env.run(CmdOpts::default()).0.unwrap_err();
+    let err = env.run(&CmdOpts::default()).0.unwrap_err();
     assert_eq!(err.to_string(), "KeyError: 'rating'");
     assert_eq!(
         env.playlist("all.m3u").unwrap(),
@@ -378,7 +378,7 @@ fn urlencode_and_relative_to() {
     env.set("relative_to", "'/music'");
     env.add("/music/A b/é?.mp3", &[]);
     env.add("//net/x.mp3", &[]);
-    env.run(CmdOpts::default()).0.unwrap();
+    env.run(&CmdOpts::default()).0.unwrap();
     assert_eq!(
         String::from_utf8(env.playlist("all.m3u").unwrap()).unwrap(),
         "A%20b/%C3%A9%3F.mp3\n../net/x.mp3\n"

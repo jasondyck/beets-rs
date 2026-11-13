@@ -120,12 +120,9 @@ pub fn query_paths(pattern: &str, ctx: &Context) -> Vec<Vec<u8>> {
         if !is_m3u_file(&candidate) {
             continue;
         }
-        let data = match std::fs::read(&candidate) {
-            Ok(d) => d,
-            Err(_) => {
-                paths.clear();
-                continue;
-            }
+        let Ok(data) = std::fs::read(&candidate) else {
+            paths.clear();
+            continue;
         };
         let relative_to: PathBuf = match &ctx.playlist_relative_to {
             Some(base) => base.clone(),
@@ -152,7 +149,7 @@ type Changes = HashMap<Vec<u8>, Option<Vec<u8>>>;
 static CHANGES: Mutex<Option<Changes>> = Mutex::new(None);
 
 fn change_map() -> std::sync::MutexGuard<'static, Option<Changes>> {
-    CHANGES.lock().unwrap_or_else(|e| e.into_inner())
+    CHANGES.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
 fn auto(cfg: &Config) -> bool {
@@ -211,15 +208,12 @@ fn playlist_dir(cfg: &Config) -> PathBuf {
 /// `find_playlists`: the M3U files in the playlist directory.
 fn find_playlists(cfg: &Config, log: &PluginLog) -> Vec<PathBuf> {
     let dir = playlist_dir(cfg);
-    let entries = match std::fs::read_dir(&dir) {
-        Ok(e) => e,
-        Err(_) => {
-            log.warning(&format!(
-                "Unable to open playlist directory {}",
-                dir.display()
-            ));
-            return vec![];
-        }
+    let Ok(entries) = std::fs::read_dir(&dir) else {
+        log.warning(&format!(
+            "Unable to open playlist directory {}",
+            dir.display()
+        ));
+        return vec![];
     };
     let mut out = vec![];
     for e in entries.flatten() {

@@ -298,7 +298,7 @@ impl Settings {
 }
 
 /// `beet splupdate`, printing to stdout.
-pub fn command(cfg: &Config, lib: &Library, opts: CmdOpts) -> Result<()> {
+pub fn command(cfg: &Config, lib: &Library, opts: &CmdOpts) -> Result<()> {
     // A plugin that failed to load has no command.
     if SmartPlaylist::new(cfg).is_err() {
         bail!("unknown command 'splupdate'");
@@ -325,7 +325,7 @@ pub fn command(cfg: &Config, lib: &Library, opts: CmdOpts) -> Result<()> {
         }
         m
     };
-    let s = Settings::new(cfg, &opts);
+    let s = Settings::new(cfg, opts);
     update_playlists(cfg, lib, &s, &matched, &log)
 }
 
@@ -601,7 +601,7 @@ pub fn run_splupdate(
     crate::plugins::smartplaylist::command(
         cfg,
         lib,
-        crate::plugins::smartplaylist::CmdOpts {
+        &crate::plugins::smartplaylist::CmdOpts {
             pretend: a.pretend,
             format: a.format,
             playlist_dir: a.playlist_dir,

@@ -65,7 +65,7 @@ impl Env {
 }
 
 fn query(q: &[&str]) -> Vec<String> {
-    q.iter().map(|s| s.to_string()).collect()
+    q.iter().map(std::string::ToString::to_string).collect()
 }
 
 fn opts(q: &[&str]) -> CmdOpts {

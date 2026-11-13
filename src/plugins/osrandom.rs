@@ -2,13 +2,14 @@
 //! need unpredictable tokens: tidal's PKCE verifier and OAuth state, and
 //! the OAuth1 nonces of the discogs and beatport clients.
 
+use std::io::Read as _;
+
 /// Random bytes from the OS (`getrandom`, e.g. `getentropy`/`getrandom(2)`),
 /// falling back to `/dev/urandom`.
 pub fn random_bytes(buf: &mut [u8]) {
     if getrandom::fill(buf).is_ok() {
         return;
     }
-    use std::io::Read as _;
     std::fs::File::open("/dev/urandom")
         .and_then(|mut f| f.read_exact(buf))
         .expect("no OS CSPRNG");

@@ -116,7 +116,7 @@ fn write_lines(path: &Path, lines: &[PathBuf]) {
 
 #[test]
 fn query_with_absolute_paths_in_playlist() {
-    let _g = LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let _g = LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     let e = env("library");
     e.write_absolute();
     assert_eq!(e.titles("playlist:absolute"), ["another item", "some item"]);
@@ -131,7 +131,7 @@ fn query_with_absolute_paths_in_playlist() {
 
 #[test]
 fn query_with_relative_paths_in_playlist() {
-    let _g = LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let _g = LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     let e = env("library");
     e.write_relative();
     assert_eq!(e.titles("playlist:relative"), ["another item", "some item"]);
@@ -146,7 +146,7 @@ fn query_with_relative_paths_in_playlist() {
 
 #[test]
 fn query_relative_to_a_directory() {
-    let _g = LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let _g = LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     let mut e = env("library");
     e.cfg.set(
         "playlist.relative_to",
@@ -159,7 +159,7 @@ fn query_relative_to_a_directory() {
 
 #[test]
 fn query_relative_to_the_playlist() {
-    let _g = LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let _g = LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     let e = env("playlist");
     e.write_relative_to_playlist();
     assert_eq!(e.titles("playlist:relative"), ["another item", "some item"]);
@@ -167,7 +167,7 @@ fn query_relative_to_the_playlist() {
 
 #[test]
 fn nonexisting_playlists_match_nothing() {
-    let _g = LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let _g = LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     let e = env("library");
     assert!(e.titles("playlist:nonexisting").is_empty());
     assert!(e.titles("playlist:/does/not/exist.m3u").is_empty());
@@ -186,7 +186,7 @@ fn update_env(relative_to: &str) -> Env {
 
 #[test]
 fn item_moved_updates_playlists() {
-    let _g = LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let _g = LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     let e = update_env("library");
     let item = e.item("d/e/f.mp3");
     item_moved(&e.cfg, item.path(), &e.path("g/h/i.mp3"));
@@ -213,7 +213,7 @@ fn item_moved_updates_playlists() {
 
 #[test]
 fn item_removed_updates_playlists() {
-    let _g = LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let _g = LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     let e = update_env("library");
     let item = e.item("d/e/f.mp3");
     item_removed(&e.cfg, item.path());
@@ -231,7 +231,7 @@ fn item_removed_updates_playlists() {
 
 #[test]
 fn auto_off_keeps_playlists() {
-    let _g = LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let _g = LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     let e = env("library");
     e.write_absolute();
     let item = e.item("d/e/f.mp3");

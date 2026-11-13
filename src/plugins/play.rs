@@ -299,7 +299,7 @@ fn build_plan(
 
     let warning_threshold = cfg
         .get("play.warning_threshold")
-        .and_then(|v| v.as_f64())
+        .and_then(serde_yaml::Value::as_f64)
         .unwrap_or(0.0);
     if !opts.yes && warning_threshold != 0.0 && count as f64 > warning_threshold {
         let mut plural = item_type.to_string();

@@ -160,7 +160,7 @@ impl ZeroCore {
             // keeps both.
             let mut keep = cfg.list("zero.keep_fields");
             if keep.iter().any(|k| ARTWORK_FIELDS.contains(&k.as_str())) {
-                keep.extend(ARTWORK_FIELDS.iter().map(|s| s.to_string()));
+                keep.extend(ARTWORK_FIELDS.iter().map(std::string::ToString::to_string));
             }
             for field in MEDIAFILE_FIELDS {
                 if !keep.iter().any(|k| k == field) && !["id", "path", "album_id"].contains(field) {
@@ -298,7 +298,7 @@ impl Plugin for Zero {
     fn import_task_choice(&self, asis: bool) {
         if asis && !self.warned.get() {
             self.log.at_level(WARNING, || {
-                self.log.warning("cannot zero in \"as-is\" mode")
+                self.log.warning("cannot zero in \"as-is\" mode");
             });
             self.warned.set(true);
         }
@@ -331,7 +331,7 @@ pub fn command(
     let mut items = lib.items(&Query::parse(Kind::Item, query)?)?;
     items.truncate(limit.unwrap_or(usize::MAX));
     lib.transaction(|lib| {
-        for item in items.iter_mut() {
+        for item in &mut items {
             zero.process_item(lib, item)?;
         }
         Ok(())
