@@ -21,6 +21,23 @@ EXTRA_CONFIGS["discogs_token.json"] = '{{"token": "t", "secret": "s"}}'
 EXTRA_CONFIGS["spotify_token.json"] = '{{"access_token": "x"}}'
 EXTRA_CONFIGS["config-discogs.yaml"] = "plugins: [discogs]\n"
 EXTRA_CONFIGS["config-spotify.yaml"] = "plugins: [spotify]\n"
+# bpsync's command builds its own Beatport client (as beets' plugin does);
+# with a token file it loads offline, and the corpus has no Beatport ids, so
+# every item and album is skipped without an API call. (Its config dump
+# isn't comparable for the same reason as beatport's.)
+EXTRA_CONFIGS["config-bpsync.yaml"] = "plugins: [bpsync]\n"
+EXTRA_CONFIGS["beatport_token.json"] = '{{"token": "t", "secret": "s"}}'
+
+CASES += [
+    (f"-c config-bpsync.yaml {cmd}", ["-c", f"{ROOT}/config-bpsync.yaml", *cmd.split()])
+    for cmd in ["bpsync", "bpsync -p", "bpsync -m", "bpsync -M -W", "bpsync -l 1"]
+]
+CASES += [
+    ("-c config-bpsync.yaml bpsync -f", ["-c", f"{ROOT}/config-bpsync.yaml", "bpsync",
+                                         "-f", "$title", "artist:Artist A"]),
+    ("-c config-bpsync.yaml bpsync album", ["-c", f"{ROOT}/config-bpsync.yaml", "bpsync",
+                                             "album:Double Album"]),
+]
 
 CASES += [
     (f"-c {name} {cmd}",

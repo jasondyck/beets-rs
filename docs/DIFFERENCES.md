@@ -189,8 +189,13 @@ things that aren't ported yet are at the end and in
   [MIGRATING.md](MIGRATING.md)).
 - **bareasc**: its own `unidecode` wrapper (a deunicode table with fixes for
   vulgar fractions and `™`) so its output matches Python's unidecode there.
-- **bpsync** is not functional: it needs the `beatport` metadata source,
-  which isn't ported (PORTING 5.19), so the command reports that.
+- **bpsync** builds its Beatport client when the command runs, not while
+  the plugin loads: without a `beatport_token.json` it asks for the OAuth
+  token then (beets' `BPSyncPlugin.__init__` does it at load, so the plugin
+  fails to load and `beet bpsync` is an unknown command). A Beatport lookup
+  error (network, bad response) is logged at debug and skipped, where beets
+  ends with a traceback; an item with an `mb_trackid` the release doesn't
+  list is skipped too (beets raises `KeyError`).
 - **chroma**: fingerprint POST bodies are sent plain rather than
   gzip-compressed. Reason: not done yet (no gzip in the request session).
 - **convert**: a temporary transcode the library still uses (imported with
@@ -251,9 +256,6 @@ things that aren't ported yet are at the end and in
 These aren't differences by design, just gaps (see [PORTING.md](../PORTING.md)
 for the detail):
 
-- **PORTING 5.19 metadata sources**: `discogs`, `spotify`, `deezer`,
-  `beatport` as extra candidate sources, and `bpsync` (PORTING 5.21d, which
-  needs beatport).
 - **beets' developer-only `bench` plugin** (`bench_aunique`) isn't ported.
 - **Python `pluginpath` plugins** (beets' Python plugin API) are out of
   scope; the bundled plugins are ported natively.
