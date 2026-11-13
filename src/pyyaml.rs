@@ -198,10 +198,20 @@ enum Ev<'a> {
         plain_implicit: bool,
         quoted_implicit: bool,
     },
-    SeqStart,
+    /// `flow`: a `[...]` sequence (confuse's short lists); `anchor` names
+    /// a shared value (`&id001`).
+    SeqStart {
+        flow: bool,
+        anchor: Option<&'a str>,
+    },
     SeqEnd,
-    MapStart,
+    /// `flow`: a `{...}` mapping (confuse never uses it).
+    MapStart {
+        flow: bool,
+    },
     MapEnd,
+    /// A `*id001` reference to an anchored value.
+    Alias(&'a str),
 }
 
 struct Emitter {
@@ -209,6 +219,14 @@ struct Emitter {
     /// Boxed: libyaml's write handler holds a pointer to it.
     #[allow(clippy::box_collection)]
     out: Box<Vec<u8>>,
+    /// confuse's Dumper settings: indent 4, width 1000, `yes`/`no`
+    /// booleans, empty nulls, flow lists shorter than 4, block mappings,
+    /// insertion order.
+    confuse: bool,
+    /// `sort_keys=True` (PyYAML's default; confuse's dump keeps order).
+    sort_keys: bool,
+    /// Whether the tagged `&id001` value has been written.
+    wrote_separators_anchor: bool,
 }
 
 impl Emitter {
@@ -216,6 +234,9 @@ impl Emitter {
         let mut e = Emitter {
             sys: Box::new(MaybeUninit::uninit()),
             out: Box::default(),
+            confuse: false,
+            sort_keys: true,
+            wrote_separators_anchor: false,
         };
         unsafe {
             let p = e.sys.as_mut_ptr();
@@ -230,6 +251,7 @@ impl Emitter {
     fn emit(&mut self, ev: Ev) {
         let mut event = MaybeUninit::<unsafe_sys::yaml_event_t>::uninit();
         let event = event.as_mut_ptr();
+        let mut anchor_buf = String::new();
         unsafe {
             let em = self.sys.as_mut_ptr();
             let ok = match ev {
@@ -264,22 +286,41 @@ impl Emitter {
                         unsafe_sys::YAML_ANY_SCALAR_STYLE,
                     )
                 }
-                Ev::SeqStart => unsafe_sys::yaml_sequence_start_event_initialize(
+                Ev::SeqStart { flow, anchor } => unsafe_sys::yaml_sequence_start_event_initialize(
                     event,
-                    ptr::null(),
+                    match anchor {
+                        Some(a) => {
+                            anchor_buf.clear();
+                            anchor_buf.push_str(a);
+                            anchor_buf.push('\0');
+                            anchor_buf.as_ptr()
+                        }
+                        None => ptr::null(),
+                    },
                     c"tag:yaml.org,2002:seq".as_ptr().cast(),
                     true,
-                    unsafe_sys::YAML_BLOCK_SEQUENCE_STYLE,
+                    if flow {
+                        unsafe_sys::YAML_FLOW_SEQUENCE_STYLE
+                    } else {
+                        unsafe_sys::YAML_BLOCK_SEQUENCE_STYLE
+                    },
                 ),
                 Ev::SeqEnd => unsafe_sys::yaml_sequence_end_event_initialize(event),
-                Ev::MapStart => unsafe_sys::yaml_mapping_start_event_initialize(
+                Ev::MapStart { flow } => unsafe_sys::yaml_mapping_start_event_initialize(
                     event,
                     ptr::null(),
                     c"tag:yaml.org,2002:map".as_ptr().cast(),
                     true,
-                    unsafe_sys::YAML_BLOCK_MAPPING_STYLE,
+                    if flow {
+                        unsafe_sys::YAML_FLOW_MAPPING_STYLE
+                    } else {
+                        unsafe_sys::YAML_BLOCK_MAPPING_STYLE
+                    },
                 ),
                 Ev::MapEnd => unsafe_sys::yaml_mapping_end_event_initialize(event),
+                Ev::Alias(anchor) => {
+                    unsafe_sys::yaml_alias_event_initialize(event, format!("{anchor}\0").as_ptr())
+                }
             };
             assert!(!ok.fail, "yaml event");
             assert!(!unsafe_sys::yaml_emitter_emit(em, event).fail, "yaml emit");
@@ -314,17 +355,21 @@ impl Emitter {
             PyVal::Timestamp(s) => scalar(self, "timestamp", &s.replace(' ', "T")),
             PyVal::Bytes(b) => scalar(self, "binary", &base64(b)),
             PyVal::List(items) => {
-                self.emit(Ev::SeqStart);
+                self.emit(Ev::SeqStart {
+                    flow: false,
+                    anchor: None,
+                });
                 for i in items {
                     self.value(i);
                 }
                 self.emit(Ev::SeqEnd);
             }
             PyVal::Map(pairs) => {
-                // `sort_keys=True`.
                 let mut pairs: Vec<&(PyVal, PyVal)> = pairs.iter().collect();
-                pairs.sort_by_key(|a| a.0.py_str());
-                self.emit(Ev::MapStart);
+                if self.sort_keys {
+                    pairs.sort_by_key(|a| a.0.py_str());
+                }
+                self.emit(Ev::MapStart { flow: false });
                 for (k, v) in pairs {
                     self.value(k);
                     self.value(v);
@@ -382,6 +427,133 @@ pub fn dump_all(docs: &[PyVal]) -> String {
     }
     e.emit(Ev::StreamEnd);
     e.finish()
+}
+
+/// confuse's `config.dump`: PyYAML's `yaml.dump` with confuse's Dumper
+/// (`default_flow_style=None`, `indent=4`, `width=1000`), keys in insertion
+/// order, booleans as `yes`/`no`, `None` as nothing, lists shorter than
+/// four items inline and mappings always in block style.
+pub fn dump_confuse(value: &serde_yaml::Value) -> String {
+    let mut e = Emitter::new();
+    e.confuse = true;
+    e.sort_keys = false;
+    unsafe {
+        let p = e.sys.as_mut_ptr();
+        unsafe_sys::yaml_emitter_set_indent(p, 4);
+        unsafe_sys::yaml_emitter_set_width(p, 1000);
+    }
+    // beets' export plugin reuses one tuple for the json and jsonlines
+    // separators, so PyYAML writes it once with an anchor and then as an
+    // alias.
+    let alias = export_separators_alias(value);
+    e.emit(Ev::StreamStart);
+    e.emit(Ev::DocStart);
+    let mut path: Vec<String> = vec![];
+    e.confuse_value_at(value, &mut path, &alias);
+    e.emit(Ev::DocEnd);
+    e.emit(Ev::StreamEnd);
+    e.finish()
+}
+
+/// The two `export.*.formatting.separators` paths, when the values are the
+/// same list (beets' shared tuple).
+fn export_separators_alias(value: &serde_yaml::Value) -> Option<serde_yaml::Value> {
+    let get = |format: &str| {
+        value
+            .get("export")?
+            .get(format)?
+            .get("formatting")?
+            .get("separators")
+            .cloned()
+    };
+    let a = get("json")?;
+    let b = get("jsonlines")?;
+    (a == b && a.is_sequence()).then_some(a)
+}
+
+/// Whether `path` is one of the export separator lists.
+fn is_export_separators(path: &[String]) -> bool {
+    matches!(
+        path,
+        [a, b, c, d] if a == "export"
+            && (b == "json" || b == "jsonlines")
+            && c == "formatting"
+            && d == "separators"
+    )
+}
+
+impl Emitter {
+    /// confuse's Dumper + PyYAML's `SafeRepresenter` for a config value.
+    fn confuse_value_at(
+        &mut self,
+        v: &serde_yaml::Value,
+        path: &mut Vec<String>,
+        alias: &Option<serde_yaml::Value>,
+    ) {
+        use serde_yaml::Value as Y;
+        let scalar = |e: &mut Self, tag: &'static str, s: &str| {
+            let plain_implicit = resolve_plain(s) == tag;
+            e.emit(Ev::Scalar {
+                tag,
+                value: s,
+                plain_implicit,
+                quoted_implicit: tag == "str" || plain_implicit,
+            });
+        };
+        match v {
+            Y::Null => scalar(self, "null", ""),
+            Y::Bool(b) => scalar(self, "bool", if *b { "yes" } else { "no" }),
+            Y::Number(n) => {
+                if let Some(i) = n.as_i64() {
+                    scalar(self, "int", &i.to_string())
+                } else if let Some(u) = n.as_u64() {
+                    scalar(self, "int", &u.to_string())
+                } else {
+                    let f = n.as_f64().unwrap_or(0.0);
+                    scalar(self, "float", &represent_float(f))
+                }
+            }
+            Y::String(s) => scalar(self, "str", s),
+            Y::Sequence(items) => {
+                if self.wrote_separators_anchor {
+                    // The second of beets' shared tuples.
+                    self.emit(Ev::Alias("id001"));
+                    return;
+                }
+                let anchor = if alias.is_some() && is_export_separators(path) {
+                    self.wrote_separators_anchor = true;
+                    Some("id001")
+                } else {
+                    None
+                };
+                self.emit(Ev::SeqStart {
+                    flow: items.len() < 4,
+                    anchor,
+                });
+                for (i, item) in items.iter().enumerate() {
+                    path.push(i.to_string());
+                    self.confuse_value_at(item, path, alias);
+                    path.pop();
+                }
+                self.emit(Ev::SeqEnd);
+            }
+            Y::Mapping(m) => {
+                self.emit(Ev::MapStart { flow: false });
+                for (k, val) in m {
+                    if let Some(s) = k.as_str() {
+                        path.push(s.to_string());
+                    }
+                    self.confuse_value_at(k, path, alias);
+                    self.confuse_value_at(val, path, alias);
+                    if k.as_str().is_some() {
+                        path.pop();
+                    }
+                }
+                self.emit(Ev::MapEnd);
+            }
+            Y::Tagged(t) => self.confuse_value_at(&t.value, path, alias),
+        }
+    }
 }
 
 // --------------------------------------------------------------- loading

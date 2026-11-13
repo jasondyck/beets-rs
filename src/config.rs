@@ -4,84 +4,96 @@ use anyhow::Result;
 use serde_yaml::{Mapping, Value as Y};
 use std::path::{Path, PathBuf};
 
-pub const DEFAULT_CONFIG: &str = r#"
-directory: ~/Music
+pub const DEFAULT_CONFIG: &str = r#"# --------------- Main ---------------
+
 library: library.db
-statefile: state.json
+directory: ~/Music
+statefile: state.pickle
 create_backup_before_migrations: yes
+tempfile_prefix: '.'
+
+# --------------- Plugins ---------------
+
+plugins: [musicbrainz]
+
+pluginpath: []
+
+raise_on_error: no
+
+# --------------- Import ---------------
 
 clutter: ["Thumbs.DB", ".DS_Store"]
 ignore: [".*", "*~", "System Volume Information", "lost+found"]
 ignore_hidden: yes
 
 import:
+    # common options
     write: yes
     copy: yes
     move: no
+    timid: no
+    quiet: no
+    log:
+    # other options
+    default_action: apply
+    languages: []
+    quiet_fallback: skip
+    none_rec_action: ask
+    # rare options
     link: no
     hardlink: no
     reflink: no
     delete: no
-    quiet: no
-    quiet_fallback: skip
-    none_rec_action: ask
-    default_action: apply
-    timid: no
-    log:
-    detail: no
+    resume: ask
+    incremental: no
+    incremental_skip_later: no
     from_scratch: no
-    flat: no
-    pretend: no
-    set_fields: {}
     autotag: yes
     singletons: no
+    detail: no
+    flat: no
     group_albums: no
+    pretend: false
+    search_ids: []
     duplicate_keys:
         album: albumartist album
         item: artist title
     duplicate_action: ask
     duplicate_verbose_prompt: no
     bell: no
-    languages: []
+    set_fields: {}
     ignored_alias_types: []
     singleton_album_disambig: yes
-    incremental: no
-    incremental_skip_later: no
-    resume: ask
+    fix_ext_inplace: no
+    remux_mp3_in_wav: yes
 
-paths:
-    default: $albumartist/$album%aunique{}/$track $title
-    singleton: Non-Album/$artist/$title
-    comp: Compilations/$album%aunique{}/$track $title
-
-threaded: yes
+# --------------- Paths ---------------
 
 path_sep_replace: _
 empty_component_replace:
 drive_sep_replace: _
+asciify_paths: false
 art_filename: cover
+max_filename_length: 0
 replace:
+    # Replace bad characters with _
+    # prohibited in many filesystem paths
     '[<>:\?\*\|]': _
+    # double quotation mark "
     '\"': _
+    # path separators: \ or /
     '[\\/]': _
+    # starting and closing periods
     '^\.': _
     '\.$': _
+    # control characters
     '[\x00-\x1f]': _
+    # dash at the start of a filename (causes command line ambiguity)
     '^-': _
+    # Replace bad characters with nothing
+    # starting and closing whitespace
     '\s+$': ''
     '^\s+': ''
-
-asciify_paths: no
-max_filename_length: 0
-per_disc_numbering: no
-original_date: no
-va_name: Various Artists
-format_item: $artist - $album - $title
-format_album: $albumartist - $album
-time_format: '%Y-%m-%d %H:%M:%S'
-sort_item: artist+ album+ disc+ track+
-sort_album: albumartist+ album+
-sort_case_insensitive: yes
 
 aunique:
     keys: albumartist album
@@ -98,9 +110,71 @@ tunique:
     disambiguators: disc track artist
     bracket: '[]'
 
+# --------------- Tagging ---------------
+
+per_disc_numbering: no
+original_date: no
+artist_credit: no
+id3v23: no
+va_name: "Various Artists"
+paths:
+    default: $albumartist/$album%aunique{}/$track $title
+    singleton: Non-Album/$artist/$title
+    comp: Compilations/$album%aunique{}/$track $title
+
+# --------------- Performance ---------------
+
+threaded: yes
+timeout: 5.0
+
+# --------------- UI ---------------
+
+verbose: 0
+terminal_encoding:
+
+ui:
+    terminal_width: 80
+    length_diff_thresh: 10.0
+    color: yes
+    colors:
+        text_success: ['bold', 'green']
+        text_warning: ['bold', 'yellow']
+        text_error: ['bold', 'red']
+        text_highlight: ['bold', 'red']
+        text_highlight_minor: ['white']
+        action_default: ['bold', 'cyan']
+        action: ['bold', 'cyan']
+        # New Colors
+        text_faint: ['faint']
+        import_path: ['bold', 'blue']
+        import_path_items: ['bold', 'blue']
+        changed: ['yellow']
+        text_diff_added: ['bold', 'green']
+        text_diff_removed: ['bold', 'red']
+        action_description: ['white']
+    import:
+        indentation:
+            match_header: 2
+            match_details: 2
+            match_tracklist: 5
+        layout: column
+
+# --------------- Search ---------------
+
+format_item: $artist - $album - $title
+format_album: $albumartist - $album
+time_format: '%Y-%m-%d %H:%M:%S'
+format_raw_length: no
+
+sort_album: albumartist+ album+
+sort_item: artist+ album+ disc+ track+
+sort_case_insensitive: yes
+
+# --------------- Autotagger ---------------
+
 overwrite_null:
-    album: []
-    track: []
+  album: []
+  track: []
 
 match:
     strong_rec_thresh: 0.04
@@ -143,36 +217,11 @@ match:
     track_length_max: 30
     album_disambig_fields: data_source media year country label catalognum albumdisambig
     singleton_disambig_fields: data_source index track_alt album
+"#;
 
-ui:
-    terminal_width: 80
-    length_diff_thresh: 10.0
-    color: yes
-    colors:
-        text_success: ['bold', 'green']
-        text_warning: ['bold', 'yellow']
-        text_error: ['bold', 'red']
-        text_highlight: ['bold', 'red']
-        text_highlight_minor: ['white']
-        action_default: ['bold', 'cyan']
-        action: ['bold', 'cyan']
-        text_faint: ['faint']
-        import_path: ['bold', 'blue']
-        import_path_items: ['bold', 'blue']
-        changed: ['yellow']
-        text_diff_added: ['bold', 'green']
-        text_diff_removed: ['bold', 'red']
-        action_description: ['white']
-    import:
-        indentation:
-            match_header: 2
-            match_details: 2
-            match_tracklist: 5
-        layout: column
-
-plugins: [musicbrainz]
-
-fetchart:
+/// The bundled plugins' defaults, added as beets' plugins do when they
+/// load (`config.add`). `beet config -d` shows them for the enabled plugins.
+pub const PLUGIN_DEFAULTS: &str = r#"fetchart:
     auto: yes
     fetch_for_asis: no
     minwidth: 0
@@ -307,6 +356,8 @@ replaygain:
     targetlevel: 89
     r128: [Opus]
     r128_targetlevel: 84
+    command: ''
+    noclip: yes
 
 chroma:
     search_limit: 5
@@ -485,9 +536,12 @@ impl std::error::Error for ConfigError {}
 pub struct Config {
     /// The effective configuration: defaults, then every source over them.
     root: Y,
-    /// Every source but the built-in defaults (what `beet config` shows
-    /// without `-d`).
-    user: Y,
+    /// Command-line overrides (beets' `config.set_args` source), highest
+    /// priority.
+    cli: Y,
+    /// The files read, highest priority first (each `-c` file, the
+    /// includes, the user's config.yaml).
+    layers: Vec<Y>,
     /// Directory holding config.yaml; relative `library` paths resolve against it.
     pub config_dir: PathBuf,
     /// Files configuration was read from, highest priority first (beets'
@@ -535,6 +589,7 @@ const PLUGIN_SECTIONS: &[&str] = &[
     "export",
     "playlist",
     "parentwork",
+    "musicbrainz",
 ];
 
 /// Plugins whose defaults are top-level keys (beets' `config.add`).
@@ -544,18 +599,23 @@ const PLUGIN_TOP_KEYS: &[(&str, &[&str])] =
 /// `DEFAULT_CONFIG` parsed, with the defaults computed at run time
 /// (replaygain's `threads`: `os.cpu_count()`).
 fn default_tree() -> Y {
-    let text = DEFAULT_CONFIG.replace(
+    // The core defaults (beets' `config_default.yaml`) plus the bundled
+    // plugins' sections, which beets' plugins add when they load.
+    let core: Y =
+        serde_yaml::from_str(&yaml11_bools(DEFAULT_CONFIG)).expect("default config parses");
+    let plugins: Y = serde_yaml::from_str(&yaml11_bools(&PLUGIN_DEFAULTS.replace(
         "threads: CPU_COUNT",
         &format!("threads: {}", crate::plugins::replaygain::cpu_count()),
-    );
-    serde_yaml::from_str(&text).expect("default config parses")
+    )))
+    .expect("plugin defaults parse");
+    merge(core, plugins)
 }
 
 /// confuse's `ConfigReadError`: "PATH could not be read: REASON".
 fn read_yaml(file: &Path) -> Result<Y> {
     let text = std::fs::read_to_string(file)
         .map_err(|e| anyhow::anyhow!("{} could not be read: {e}", file.display()))?;
-    let y: Y = serde_yaml::from_str(&text)
+    let y: Y = serde_yaml::from_str(&yaml11_bools(&text))
         .map_err(|e| anyhow::anyhow!("{} could not be read: {e}", file.display()))?;
     Ok(if y.is_null() {
         Y::Mapping(Mapping::new())
@@ -632,23 +692,167 @@ fn merge(base: Y, over: Y) -> Y {
     }
 }
 
-/// Deep-merge `over` onto `base`, keeping `base`'s key order and adding
-/// new keys after it (for showing the configuration in file order).
-fn merge_in_order(base: Y, over: Y) -> Y {
-    match (base, over) {
-        (Y::Mapping(mut base), Y::Mapping(over)) => {
-            for (k, v) in over {
-                match base.get_mut(&k) {
-                    Some(b) => *b = merge_in_order(std::mem::take(b), v),
-                    None => {
-                        base.insert(k, v);
-                    }
-                }
+/// The core defaults (beets' `config_default.yaml`), without the plugins'
+/// sections.
+fn core_tree() -> Y {
+    serde_yaml::from_str(&yaml11_bools(DEFAULT_CONFIG)).expect("default config parses")
+}
+
+/// confuse's `RootView.flatten` over `sources`, highest priority first:
+/// keys in first-seen order, values from the first source that has them,
+/// mappings merged key by key.
+fn flatten_sources(sources: &[&Y]) -> Y {
+    let maps: Vec<&Mapping> = sources.iter().filter_map(|s| s.as_mapping()).collect();
+    flatten_maps(&maps)
+}
+
+/// YAML 1.1 booleans: serde_yaml reads unquoted `yes`/`no`/`on`/`off`/
+/// `true`/`false` as strings, but beets' loader (and PyYAML) read them as
+/// booleans (`peak: 'true'` stays a string).
+fn yaml11_bools(text: &str) -> String {
+    fn bool_of(v: &str) -> Option<&'static str> {
+        match v {
+            "yes" | "Yes" | "YES" | "true" | "True" | "TRUE" | "on" | "On" | "ON" => Some("true"),
+            "no" | "No" | "NO" | "false" | "False" | "FALSE" | "off" | "Off" | "OFF" => {
+                Some("false")
             }
-            Y::Mapping(base)
+            _ => None,
         }
-        (_, over) => over,
     }
+    let mut out = String::with_capacity(text.len());
+    for line in text.split_inclusive('\n') {
+        let (body, nl) = match line.strip_suffix('\n') {
+            Some(b) => (b, "\n"),
+            None => (line, ""),
+        };
+        let trimmed = body.trim_start();
+        let indent = body.len() - trimmed.len();
+        // Where the value starts: after a list marker or a key's colon.
+        let value_start = if trimmed.starts_with("# ") || trimmed == "#" {
+            None
+        } else if let Some(rest) = trimmed.strip_prefix("- ") {
+            Some(indent + 2 + rest.len() - rest.trim_start().len())
+        } else if let Some(i) = trimmed.find(':') {
+            let rest = &trimmed[i + 1..];
+            Some(indent + i + 1 + rest.len() - rest.trim_start().len())
+        } else {
+            None
+        };
+        let Some(vs) = value_start else {
+            out.push_str(body);
+            out.push_str(nl);
+            continue;
+        };
+        let rest = &body[vs..];
+        let mut val = rest;
+        if let Some(i) = val.find(" #") {
+            val = &val[..i];
+        }
+        let val = val.trim_end();
+        match bool_of(val) {
+            Some(b) => {
+                out.push_str(&body[..vs]);
+                out.push_str(b);
+                out.push_str(&body[vs + val.len()..]);
+                out.push_str(nl);
+            }
+            None => {
+                out.push_str(body);
+                out.push_str(nl);
+            }
+        }
+    }
+    out
+}
+
+fn flatten_maps(maps: &[&Mapping]) -> Y {
+    let mut keys: Vec<Y> = vec![];
+    for m in maps {
+        for k in m.keys() {
+            if !keys.contains(k) {
+                keys.push(k.clone());
+            }
+        }
+    }
+    let mut out = Mapping::new();
+    for k in keys {
+        let vals: Vec<&Y> = maps.iter().filter_map(|m| m.get(&k)).collect();
+        let value = if vals.iter().all(|v| v.is_mapping()) {
+            let sub: Vec<&Mapping> = vals.iter().filter_map(|v| v.as_mapping()).collect();
+            flatten_maps(&sub)
+        } else {
+            // confuse falls back to the highest priority value when the
+            // sources disagree on the value's type.
+            vals[0].clone()
+        };
+        out.insert(k, value);
+    }
+    Y::Mapping(out)
+}
+
+/// Replace the dotted key `key` with "REDACTED" (beets' `set_redaction`).
+fn set_redacted(out: &mut Y, key: &str) {
+    let mut cur = out;
+    let parts: Vec<&str> = key.split('.').collect();
+    for (i, part) in parts.iter().enumerate() {
+        let Some(v) = cur
+            .as_mapping_mut()
+            .and_then(|m| m.get_mut(Y::String(part.to_string())))
+        else {
+            return;
+        };
+        if i == parts.len() - 1 {
+            *v = Y::String("REDACTED".into());
+            return;
+        }
+        cur = v;
+    }
+}
+
+/// confuse's `restore_yaml_comments`: put the top-level comments (and blank
+/// lines) of beets' default config before the same keys in the dump.
+fn restore_comments(data: &str) -> String {
+    use std::collections::HashMap;
+    let mut comment_map: HashMap<String, String> = HashMap::new();
+    let lines: Vec<&str> = DEFAULT_CONFIG.lines().collect();
+    let mut i = 0;
+    while i < lines.len() {
+        let line = lines[i];
+        if !(line.is_empty() || line.starts_with('#')) {
+            i += 1;
+            continue;
+        }
+        let mut comment = String::new();
+        let mut j = i;
+        while j < lines.len() {
+            let l = lines[j];
+            if l.is_empty() {
+                comment.push('\n');
+            } else if l.starts_with('#') {
+                comment.push_str(l);
+                comment.push('\n');
+            } else {
+                break;
+            }
+            j += 1;
+        }
+        if j >= lines.len() {
+            break;
+        }
+        let key = lines[j].split(':').next().unwrap_or("").trim().to_string();
+        comment_map.insert(key, comment);
+        i = j;
+    }
+    let mut out = String::new();
+    for line in data.lines() {
+        let key = line.split(':').next().unwrap_or("").trim();
+        if let Some(c) = comment_map.get(key) {
+            out.push_str(c);
+        }
+        out.push_str(line);
+        out.push('\n');
+    }
+    out
 }
 
 impl Config {
@@ -667,7 +871,8 @@ impl Config {
         let defaults: Y = default_tree();
         let mut cfg = Config {
             root: defaults,
-            user: Y::Mapping(Mapping::new()),
+            cli: Y::Mapping(Mapping::new()),
+            layers: vec![],
             config_dir: dir.to_path_buf(),
             sources: vec![],
         };
@@ -705,7 +910,7 @@ impl Config {
             root.remove("replace");
         }
         self.root = merge(std::mem::take(&mut self.root), y.clone());
-        self.user = merge_in_order(std::mem::take(&mut self.user), y);
+        self.layers.insert(0, y);
         self.sources.insert(0, from);
     }
 
@@ -721,7 +926,8 @@ impl Config {
     pub fn defaults() -> Config {
         Config {
             root: default_tree(),
-            user: Y::Mapping(Mapping::new()),
+            cli: Y::Mapping(Mapping::new()),
+            layers: vec![],
             config_dir: default_config_dir(),
             sources: vec![],
         }
@@ -738,68 +944,65 @@ impl Config {
         out
     }
 
-    /// beets' `config.dump(full, redact)`: the configuration as YAML, with
-    /// the defaults only if `full` (else just what the sources and the
-    /// command line set, plus the enabled plugins' defaults), and the
-    /// enabled plugins' sensitive values as "REDACTED" if `redact`.
+    /// beets' `config.dump(full, redact)`: the configuration as confuse
+    /// dumps it: the sources' keys in priority order (command line, then
+    /// the files, then the defaults if `full`), each value the highest
+    /// priority source's, the enabled plugins' sensitive values as
+    /// "REDACTED", and the default config's comments before matching keys.
     pub fn dump(&self, full: bool, redact: bool) -> String {
-        let plugins = self.list("plugins");
-        let disabled = self.list("disabled_plugins");
-        let enabled = |p: &str| plugins.iter().any(|x| x == p) && !disabled.iter().any(|x| x == p);
-        let mut out = if full {
-            self.root.clone()
-        } else {
-            let defaults: Y = default_tree();
-            let mut base = Mapping::new();
-            for p in PLUGIN_SECTIONS.iter().filter(|p| enabled(p)) {
-                if let Some(v) = defaults.get(*p) {
-                    base.insert(Y::String(p.to_string()), v.clone());
-                }
-            }
-            for (p, keys) in PLUGIN_TOP_KEYS.iter().filter(|(p, _)| enabled(p)) {
-                let _ = p;
-                for k in *keys {
-                    if let Some(v) = defaults.get(*k) {
-                        base.insert(Y::String(k.to_string()), v.clone());
-                    }
-                }
-            }
-            // The user's keys first, then the plugin defaults they leave
-            // out; the user's values win.
-            let order = merge_in_order(self.user.clone(), Y::Mapping(base));
-            merge_in_order(order, self.user.clone())
-        };
+        let mut sources: Vec<&Y> = vec![&self.cli];
+        sources.extend(self.layers.iter());
+        let core = core_tree();
+        if full {
+            sources.push(&core);
+        }
+        let plugins = self.plugin_defaults();
+        sources.push(&plugins);
+        let mut out = flatten_sources(&sources);
         if redact {
+            let plugins = self.list("plugins");
+            let disabled = self.list("disabled_plugins");
+            let enabled =
+                |p: &str| plugins.iter().any(|x| x == p) && !disabled.iter().any(|x| x == p);
             for (plugin, key) in REDACTED_KEYS {
                 if !enabled(plugin) {
                     continue;
                 }
-                let mut cur = &mut out;
-                let parts: Vec<&str> = key.split('.').collect();
-                for (i, part) in parts.iter().enumerate() {
-                    let Some(v) = cur
-                        .as_mapping_mut()
-                        .and_then(|m| m.get_mut(Y::String(part.to_string())))
-                    else {
-                        break;
-                    };
-                    if i == parts.len() - 1 {
-                        *v = Y::String("REDACTED".into());
-                        break;
-                    }
-                    cur = v;
-                }
+                set_redacted(&mut out, key);
             }
         }
         if out.as_mapping().is_none_or(|m| m.is_empty()) {
             return String::new();
         }
-        serde_yaml::to_string(&out).unwrap_or_default()
+        let body = crate::pyyaml::dump_confuse(&out);
+        restore_comments(&body)
+    }
+
+    /// The sources beets' plugins add when they load (`config.add`): the
+    /// `disabled_plugins` list, then each enabled plugin's sections in
+    /// `plugins` order.
+    fn plugin_defaults(&self) -> Y {
+        let mut out = Mapping::new();
+        out.insert(Y::String("disabled_plugins".into()), Y::Sequence(vec![]));
+        let defaults = default_tree();
+        for name in crate::plugins::names(self) {
+            let keys: Vec<&str> = match PLUGIN_TOP_KEYS.iter().find(|(p, _)| *p == name) {
+                Some((_, keys)) => keys.to_vec(),
+                None if PLUGIN_SECTIONS.contains(&name.as_str()) => vec![name.as_str()],
+                None => continue,
+            };
+            for k in keys {
+                if let Some(v) = defaults.get(k) {
+                    out.insert(Y::String(k.to_string()), v.clone());
+                }
+            }
+        }
+        Y::Mapping(out)
     }
 
     /// Override a dotted key from the command line.
     pub fn set(&mut self, key: &str, value: Y) {
-        set_in(&mut self.user, key, value.clone());
+        set_in(&mut self.cli, key, value.clone());
         set_in(&mut self.root, key, value);
     }
 
@@ -894,13 +1097,36 @@ impl Config {
     }
 
     /// The import state file (`statefile`), relative to the config dir.
+    /// beets' default name is `state.pickle`; an older beets-rs wrote its
+    /// JSON state as `state.json`, so that file is moved into place when the
+    /// default is used and `state.pickle` doesn't exist yet.
     pub fn state_path(&self) -> PathBuf {
-        let s = expand_tilde(&self.str("statefile"));
-        if s.is_absolute() {
+        let raw = self.str("statefile");
+        let s = expand_tilde(&raw);
+        let path = if s.is_absolute() {
             s
         } else {
             self.config_dir.join(s)
+        };
+        if raw == "state.pickle"
+            && !path.exists()
+            && let old = self.config_dir.join("state.json")
+            && old.exists()
+        {
+            match std::fs::rename(&old, &path) {
+                Ok(()) => crate::logging::debug!(
+                    "renamed {} to {} (beets' state file name)",
+                    old.display(),
+                    path.display()
+                ),
+                Err(e) => crate::logging::debug!(
+                    "could not rename {} to {}: {e}",
+                    old.display(),
+                    path.display()
+                ),
+            }
         }
+        path
     }
 }
 
@@ -1036,12 +1262,56 @@ mod tests {
     }
 
     #[test]
+    fn old_state_json_moves_to_beets_state_pickle() {
+        let d = tempfile::tempdir().unwrap();
+        let dir = d.path();
+        let mut old = crate::state::ImportState::default();
+        old.history.insert(PathBuf::from("/music/a"));
+        old.save(&dir.join("state.json")).unwrap();
+        let cfg = Config::load_in(dir, &[]).unwrap();
+        let p = cfg.state_path();
+        assert_eq!(p, dir.join("state.pickle"));
+        assert!(!dir.join("state.json").exists(), "the old file is moved");
+        assert_eq!(
+            crate::state::ImportState::load(&p).history,
+            [PathBuf::from("/music/a")].into_iter().collect(),
+            "its history is kept"
+        );
+        // An explicit statefile setting is left alone.
+        let d2 = tempfile::tempdir().unwrap();
+        let dir2 = d2.path();
+        std::fs::write(dir2.join("state.json"), b"{}").unwrap();
+        let mut cfg = Config::load_in(dir2, &[]).unwrap();
+        cfg.set("statefile", Y::String("state.json".into()));
+        assert_eq!(cfg.state_path(), dir2.join("state.json"));
+        assert!(dir2.join("state.json").exists());
+    }
+
+    #[test]
     fn dump_shows_sources_or_everything_and_redacts() {
         let d = tempfile::tempdir().unwrap();
         let dir = d.path();
         let c = Config::load_in(dir, &[]).unwrap();
-        assert_eq!(c.dump(false, true), "", "nothing set: empty");
-        assert!(c.dump(true, true).contains("strong_rec_thresh"));
+        let empty = c.dump(false, true);
+        assert!(
+            empty.contains("disabled_plugins: []") && empty.contains("musicbrainz:"),
+            "nothing set: the default plugins' sections only"
+        );
+        assert!(!empty.contains("match:"));
+        let full = c.dump(true, true);
+        assert!(full.starts_with("# --------------- Main ---------------\n\nlibrary:"));
+        assert!(
+            full.contains(
+                "\n\n# --------------- Plugins ---------------\n\nplugins: [musicbrainz]"
+            )
+        );
+        assert!(
+            full.contains("clutter: [Thumbs.DB, .DS_Store]"),
+            "short lists are inline"
+        );
+        assert!(full.contains("\n- lost+found\n"), "longer lists are blocks");
+        assert!(full.contains("statefile: state.pickle"));
+        assert!(full.contains("strong_rec_thresh: 0.04"));
 
         write(
             &dir.join("config.yaml"),

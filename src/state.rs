@@ -17,32 +17,46 @@ pub struct ImportState {
     /// directories finished so far. Removed when the path completes.
     #[serde(default)]
     pub progress: BTreeMap<PathBuf, BTreeSet<PathBuf>>,
+    /// The file was unreadable (or not JSON, e.g. a real beets pickle): keep
+    /// it until there is something to save, as beets waits for its exit
+    /// write. Not part of the file.
+    #[serde(skip)]
+    preserve: bool,
 }
 
 impl ImportState {
     /// Load the state file; a missing file is empty state, and an unreadable
-    /// one is reported and treated as empty rather than blocking imports.
+    /// one (a corrupt file, or a real beets pickle) is logged at debug level
+    /// and treated as empty rather than blocking imports, as beets does.
     pub fn load(path: &Path) -> ImportState {
         let text = match std::fs::read_to_string(path) {
             Ok(t) => t,
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => return ImportState::default(),
             Err(e) => {
-                eprintln!("warning: reading {}: {e}", path.display());
-                return ImportState::default();
+                crate::logging::debug!("state file could not be read: {e}");
+                return ImportState {
+                    preserve: true,
+                    ..ImportState::default()
+                };
             }
         };
         serde_json::from_str(&text).unwrap_or_else(|e| {
-            eprintln!(
-                "warning: ignoring corrupt state file {}: {e}",
-                path.display()
-            );
-            ImportState::default()
+            crate::logging::debug!("state file could not be read: {e}");
+            ImportState {
+                preserve: true,
+                ..ImportState::default()
+            }
         })
     }
 
     /// Write atomically (temp file + rename) so a crash mid-save can't
     /// leave a truncated state file behind.
     pub fn save(&self, path: &Path) -> Result<()> {
+        // Don't overwrite a state file we couldn't read (perhaps a real
+        // beets pickle) before there is anything to record.
+        if self.preserve && self.history.is_empty() && self.progress.is_empty() {
+            return Ok(());
+        }
         if let Some(dir) = path.parent() {
             std::fs::create_dir_all(dir).with_context(|| format!("creating {}", dir.display()))?;
         }
@@ -74,6 +88,24 @@ mod tests {
         assert_eq!(back.history, s.history);
         assert_eq!(back.progress, s.progress);
         std::fs::write(&p, b"{not json").unwrap();
-        assert!(ImportState::load(&p).progress.is_empty());
+        let empty = ImportState::load(&p);
+        assert!(empty.progress.is_empty());
+        // The unreadable file is left alone until there is state to save.
+        empty.save(&p).unwrap();
+        assert_eq!(std::fs::read(&p).unwrap(), b"{not json");
+        let mut s = ImportState::default();
+        s.history.insert("/music/b".into());
+        s.save(&p).unwrap();
+        assert_eq!(
+            ImportState::load(&p).history,
+            [PathBuf::from("/music/b")].into_iter().collect()
+        );
+        // A real beets pickle (binary) is empty state too, and untouched.
+        let pickle = b"\x80\x04\x95\x10\x00\x00\x00\x00\x00\x00\x00}\x94.";
+        std::fs::write(&p, pickle).unwrap();
+        let empty = ImportState::load(&p);
+        assert!(empty.history.is_empty());
+        empty.save(&p).unwrap();
+        assert_eq!(std::fs::read(&p).unwrap(), pickle);
     }
 }
