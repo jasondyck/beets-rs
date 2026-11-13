@@ -164,7 +164,7 @@ fn warnings_for_missing_source_and_no_attribute() {
 
 #[test]
 fn reimport_prevents_suggestions() {
-    let (_d, cfg, lib, _libdir) = env("{importsource: {suggest_removal: yes}}");
+    let (d, cfg, lib, _libdir) = env("{importsource: {suggest_removal: yes}}");
     let mut item = Item::new_item();
     item.set_path("/tmp/x.mp3");
     item.set_str("title", "T");
@@ -176,12 +176,11 @@ fn reimport_prevents_suggestions() {
         ..Default::default()
     };
     crate::events::send("import_task_choice", &[("task", crate::events::Arg::Task(&task))]);
-    let (_, src) = source_item(&lib, Path::new("/tmp/scratch/importsource-test"), "x.mp3");
+    let (_, src) = source_item(&lib, &d.path().join("source"), "x.mp3");
     let mut item2 = item.clone();
     item2.set("source_path", Value::Str(src.to_string_lossy().into_owned()));
     crate::ui::script::set(vec![("d", None)]);
     crate::events::send("item_removed", &[("item", crate::events::Arg::Item(&item2))]);
     assert!(src.exists());
     assert_eq!(crate::ui::script::prompts().len(), 0);
-    let _ = std::fs::remove_dir_all("/tmp/scratch/importsource-test");
 }

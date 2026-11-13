@@ -1,6 +1,6 @@
 """Writes cases.json: PyYAML's safe_dump_all/safe_load_all results that
 src/pyyaml.rs is tested against. Run with the reference venv's Python:
-    ~/.cache/beets-reference/venv/bin/python -I tests/fixtures/pyyaml/gen.py
+    $HOME/.cache/beets-reference/venv/bin/python -I tests/fixtures/pyyaml/gen.py
 """
 import datetime
 import json

@@ -1,7 +1,7 @@
 # diffbeets: beets-rs against reference beets
 
 ```sh
-~/.cache/beets-reference/venv/bin/python tools/diffbeets/diffbeets.py
+$HOME/.cache/beets-reference/venv/bin/python tools/diffbeets/diffbeets.py
 ```
 
 The suite must pass with networking removed. Every fake service (the import
@@ -10,7 +10,7 @@ listens on `127.0.0.1:0`, so no case may reach a real host:
 
 ```sh
 unshare -rn sh -c 'ip link set lo up; exec \
-    ~/.cache/beets-reference/venv/bin/python tools/diffbeets/diffbeets.py --no-build'
+    $HOME/.cache/beets-reference/venv/bin/python tools/diffbeets/diffbeets.py --no-build'
 ```
 
 (`unshare -rn` starts a new network namespace whose loopback is down; `ip link
@@ -33,7 +33,7 @@ dir (under `$TMPDIR`, or `--workdir DIR`):
    `ref/` and `rs/`, differing only in `directory:` (`ref/lib`, `rs/lib`);
 3. imports every directory as-is (`import -A -q`, copying) and applies the
    same `modify` commands with each tool: reference beets via
-   `~/.cache/beets-reference/beet` with `BEETSDIR=<tmp>/ref`, beets-rs with
+   `$HOME/.cache/beets-reference/beet` with `BEETSDIR=<tmp>/ref`, beets-rs with
    `BEETSRSDIR=<tmp>/rs`;
 4. runs every case with both, from inside the library directory, and compares
    stdout, stderr and exit status, with each tool's own temp root replaced by

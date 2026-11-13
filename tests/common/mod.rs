@@ -9,9 +9,16 @@ use tempfile::TempDir;
 /// The binary cargo built for this test run.
 pub const BEET: &str = env!("CARGO_BIN_EXE_beet");
 
-/// The reference beets wrapper (the maintainer-approved); tests that use it skip
-/// when it isn't there.
-pub const REFERENCE: &str = "~/.cache/beets-reference/beet";
+/// The upstream beets 2.14.1 reference install used for comparisons (its
+/// wrapper script): `$BEETS_REFERENCE`, else
+/// `$HOME/.cache/beets-reference/beet`. Tests that use it skip when it
+/// isn't there.
+pub fn reference() -> PathBuf {
+    if let Some(path) = std::env::var_os("BEETS_REFERENCE") {
+        return PathBuf::from(path);
+    }
+    PathBuf::from(std::env::var_os("HOME").unwrap_or_default()).join(".cache/beets-reference/beet")
+}
 
 /// The config shared by the tests (and the reference comparisons).
 pub fn config_text(root: &Path, plugins: &str) -> String {
@@ -239,7 +246,7 @@ pub fn touch_newer(path: &Path) {
 }
 
 pub fn reference_available() -> bool {
-    Path::new(REFERENCE).exists() && ffmpeg_available()
+    reference().exists() && ffmpeg_available()
 }
 
 /// Run the reference beets in its own temp config dir.
@@ -286,7 +293,7 @@ impl RefEnv {
     }
 
     pub fn run(&self, args: &[&str]) -> Out {
-        let out = Command::new(REFERENCE)
+        let out = Command::new(reference())
             .args(args)
             .current_dir(&self.root)
             .env("BEETSDIR", &self.root)

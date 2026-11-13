@@ -9,12 +9,12 @@ templates and `mv -p` destinations through both `beet`s and diffs the output.
 Only the standard library is used; this script never imports beets-rs code and
 only reads the two programs' output. Run it with any Python 3.9+, e.g.
 
-    ~/.cache/beets-reference/venv/bin/python tools/diffbeets/diffbeets.py
+    $HOME/.cache/beets-reference/venv/bin/python tools/diffbeets/diffbeets.py
 
 Options: see --help. Exit status is 1 when there is an unexpected difference
 (or an expected one that no longer differs, so the list stays current).
 
-Reference beets always runs through ~/.cache/beets-reference/beet with
+Reference beets always runs through $HOME/.cache/beets-reference/beet with
 BEETSDIR=<work>/ref; beets-rs with BEETSRSDIR=<work>/rs. Nothing outside the
 work directory is read or written by either tool.
 """
@@ -33,7 +33,9 @@ import textwrap
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(os.path.dirname(HERE))
-REF_BEET = os.path.expanduser("~/.cache/beets-reference/beet")
+REF_BEET = os.environ.get("BEETS_REFERENCE") or os.path.expanduser(
+    "~/.cache/beets-reference/beet"
+)
 RS_BEET = os.path.join(REPO, "target", "release", "beet")
 
 sys.dont_write_bytecode = True  # no __pycache__ in the repo

@@ -14,7 +14,7 @@ tests/fixtures/mb/expected/<release id>.<config>.json:
 
 Run with the reference venv and a throwaway BEETSDIR:
 
-    BEETSDIR=$(mktemp -d) ~/.cache/beets-reference/venv/bin/python \\
+    BEETSDIR=$(mktemp -d) $HOME/.cache/beets-reference/venv/bin/python \\
         tools/diffbeets/mbexpected.py
 """
 

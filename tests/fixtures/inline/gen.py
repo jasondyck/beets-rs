@@ -1,7 +1,7 @@
 """Writes cases.json: what CPython gives for inline-style expressions and
 function bodies (with the variables below), which src/inline is tested
 against. Run with the reference venv's Python:
-    ~/.cache/beets-reference/venv/bin/python -I tests/fixtures/inline/gen.py
+    $HOME/.cache/beets-reference/venv/bin/python -I tests/fixtures/inline/gen.py
 """
 import json
 import os

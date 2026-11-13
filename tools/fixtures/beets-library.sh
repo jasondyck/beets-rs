@@ -1,7 +1,7 @@
 #!/bin/sh
 # Regenerate tests/fixtures/beets-2.14-library.sql: a small synthetic beets
 # library (generated audio, imported with -A by the reference beets at
-# ~/.cache/beets-reference, in a temp BEETSDIR), dumped as SQL. Usage:
+# $HOME/.cache/beets-reference, in a temp BEETSDIR), dumped as SQL. Usage:
 #   tools/fixtures/beets-library.sh WORKDIR
 # WORKDIR must be a fresh, empty directory.
 set -eu
