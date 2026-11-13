@@ -142,7 +142,7 @@ pub fn safe_substitute(s: &str, vars: &[(&str, &str)]) -> String {
 /// `replace_ext`: the path with its extension replaced by `ext`.
 fn replace_ext(path: &Path, ext: &str) -> PathBuf {
     let s = path.to_string_lossy();
-    let name_start = s.rfind('/').map(|i| i + 1).unwrap_or(0);
+    let name_start = s.rfind('/').map_or(0, |i| i + 1);
     let name = &s[name_start..];
     let lead = name.len() - name.trim_start_matches('.').len();
     let stem = match name[lead..].rfind('.') {
@@ -199,8 +199,7 @@ fn format_command(cfg: &Config, fmt: &str) -> std::result::Result<FormatCommand,
     let fmt = ALIASES
         .iter()
         .find(|(a, _)| *a == fmt)
-        .map(|(_, f)| *f)
-        .unwrap_or(fmt);
+        .map_or(fmt, |(_, f)| *f);
     let key = format!("convert.formats.{fmt}");
     let (mut command, mut ext) = match cfg.get(&key) {
         None | Some(Y::Null) => return Err(CommandError::Config(format!("{key} not found"))),
@@ -1046,8 +1045,8 @@ impl<'a> Converter<'a> {
 }
 
 /// `beet convert`.
-pub fn command(cfg: &Config, lib: &Library, opts: CmdOpts) -> Result<()> {
-    let s = Settings::with_opts(cfg, Some(&opts))?;
+pub fn command(cfg: &Config, lib: &Library, opts: &CmdOpts) -> Result<()> {
+    let s = Settings::with_opts(cfg, Some(opts))?;
     let log = PluginLog::new("convert");
     log.set_base_level(INFO);
     let pretend = s.pretend;
@@ -1467,7 +1466,7 @@ pub fn run_convert(
     crate::plugins::convert::command(
         cfg,
         lib,
-        crate::plugins::convert::CmdOpts {
+        &crate::plugins::convert::CmdOpts {
             pretend: a.pretend,
             threads: a.threads,
             refresh: a.refresh,

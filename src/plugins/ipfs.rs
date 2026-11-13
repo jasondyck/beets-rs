@@ -224,7 +224,7 @@ pub fn ipfs_import(cfg: &Config, _lib: &Library, args: &[String]) -> Result<()> 
     let Some(hash) = args.first() else {
         bail!("no hash given");
     };
-    let name = args.get(1).map(String::as_str).unwrap_or(hash);
+    let name = args.get(1).map_or(hash.as_str(), String::as_str);
     let remotes = remote_libs_path(&cfg.library_path());
     if !remotes.exists()
         && let Err(e) = std::fs::create_dir_all(&remotes)

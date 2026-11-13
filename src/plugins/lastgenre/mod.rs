@@ -192,7 +192,7 @@ fn expand(
             }
             '1'..='9' => {
                 let mut j = i + 2;
-                if chars.get(j).is_some_and(|c| c.is_ascii_digit()) {
+                if chars.get(j).is_some_and(char::is_ascii_digit) {
                     j += 1;
                 }
                 let n: usize = chars[i + 1..j].iter().collect::<String>().parse().unwrap();
@@ -411,7 +411,7 @@ fn config_int(cfg: &Config, key: &str) -> Result<i64> {
             Some(i) => Ok(i),
             None => Ok(n.as_f64().unwrap_or(0.0) as i64),
         },
-        Some(Y::Bool(b)) => Ok(*b as i64),
+        Some(Y::Bool(b)) => Ok(i64::from(*b)),
         _ => Err(ConfigError(format!("{full}: must be a number")).into()),
     }
 }
@@ -1162,7 +1162,7 @@ pub struct CmdOpts {
 }
 
 /// The `lastgenre` command: the options override the settings.
-pub fn command(cfg: &Config, lib: &Library, opts: CmdOpts) -> Result<()> {
+pub fn command(cfg: &Config, lib: &Library, opts: &CmdOpts) -> Result<()> {
     let mut cfg = cfg.clone();
     cfg.set("lastgenre.pretend", Y::Bool(opts.pretend));
     if let Some(f) = opts.force {
@@ -1178,7 +1178,7 @@ pub fn command(cfg: &Config, lib: &Library, opts: CmdOpts) -> Result<()> {
     // The plugin was set up (and said so) when it loaded; the options only
     // change how it runs.
     let plugin = crate::logging::capture(|| LastGenre::new(&cfg)).0?;
-    run_command(&plugin, lib, cfg.bool("import.write"), &opts)
+    run_command(&plugin, lib, cfg.bool("import.write"), opts)
 }
 
 fn run_command(p: &LastGenre, lib: &Library, write: bool, opts: &CmdOpts) -> Result<()> {
@@ -1300,7 +1300,7 @@ pub fn run_lastgenre(
     crate::plugins::lastgenre::command(
         cfg,
         lib,
-        crate::plugins::lastgenre::CmdOpts {
+        &crate::plugins::lastgenre::CmdOpts {
             pretend: a.pretend,
             force: flag(a.force, a.no_force),
             keep_existing: flag(a.keep_existing, a.no_keep_existing),

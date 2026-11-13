@@ -79,8 +79,7 @@ impl Iterator for StdinStrokes {
                 // `input()` strips the trailing newline only.
                 let s = line
                     .strip_suffix('\n')
-                    .map(|l| l.strip_suffix('\r').unwrap_or(l))
-                    .unwrap_or(&line);
+                    .map_or(line.as_str(), |l| l.strip_suffix('\r').unwrap_or(l));
                 Some((s.to_string(), t.elapsed().as_secs_f64()))
             }
         }

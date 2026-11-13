@@ -61,7 +61,7 @@ fn fake_api() -> (crate::plugins::requests::testserver::Server, Beatport) {
     let tracks = tracks_response();
     let server = serve(move |seen: &Seen| {
         let path = seen.target.split('?').next().unwrap_or("");
-        let query = seen.target.split_once('?').map(|(_, q)| q).unwrap_or("");
+        let query = seen.target.split_once('?').map_or("", |(_, q)| q);
         match path {
             "/catalog/3/releases" => {
                 let id = query
@@ -129,7 +129,7 @@ impl Env {
         }
     }
 
-    fn item(&self, pairs: &[(&str, &str)]) -> Item {
+    fn item(pairs: &[(&str, &str)]) -> Item {
         let mut it = Item::new_item();
         it.set_path(format!("/nonexistent/{}.mp3", pairs.len()));
         for (k, v) in pairs {
@@ -139,13 +139,13 @@ impl Env {
     }
 
     fn add(&self, pairs: &[(&str, &str)]) -> Item {
-        let mut it = self.item(pairs);
+        let mut it = Self::item(pairs);
         self.lib.add(&mut it).unwrap();
         it
     }
 
     fn add_album(&self, items: &[&[(&str, &str)]]) -> Vec<Item> {
-        let mut items: Vec<Item> = items.iter().map(|p| self.item(p)).collect();
+        let mut items: Vec<Item> = items.iter().map(|p| Self::item(p)).collect();
         self.lib.add_album(&mut items).unwrap();
         items
     }
@@ -354,7 +354,7 @@ fn changed_items_are_moved_in_the_library() {
     std::fs::create_dir_all(&music).unwrap();
     let old = format!("{music}/old.mp3");
     std::fs::write(&old, b"").unwrap();
-    let mut it = env.item(&beatport_track(&[
+    let mut it = Env::item(&beatport_track(&[
         ("artist", "Supersillyus"),
         ("title", "Old Title"),
         ("mb_trackid", "7817567"),
@@ -408,7 +408,7 @@ fn command_builds_the_beatport_source_from_the_config() {
     use serde_json::json;
 
     static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
-    let _guard = LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let _guard = LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
 
     let release = release_response();
     let tracks = tracks_response();
@@ -449,7 +449,7 @@ fn command_builds_the_beatport_source_from_the_config() {
         command(
             &env.cfg,
             &env.lib,
-            CmdOpts {
+            &CmdOpts {
                 nowrite: true,
                 ..Default::default()
             },

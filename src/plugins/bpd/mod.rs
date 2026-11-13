@@ -378,7 +378,7 @@ impl<'a> State<'a> {
         }
     }
 
-    fn item_id(&self, item: &Item) -> i64 {
+    fn item_id(item: &Item) -> i64 {
         item.id.unwrap_or(0)
     }
 
@@ -386,7 +386,7 @@ impl<'a> State<'a> {
     fn id_to_index(&self, track_id: &str) -> Result<usize, BpdError> {
         let track_id = cast_int(track_id)?;
         for (index, track) in self.playlist.iter().enumerate() {
-            if self.item_id(track) == track_id {
+            if Self::item_id(track) == track_id {
                 return Ok(index);
             }
         }
@@ -703,7 +703,7 @@ impl<'a> State<'a> {
                 let mut lines = vec![];
                 for (idx, track) in self.playlist.iter().enumerate() {
                     lines.push(format!("cpos: {idx}"));
-                    lines.push(format!("Id: {}", self.item_id(track)));
+                    lines.push(format!("Id: {}", Self::item_id(track)));
                 }
                 Ok(Outcome::Lines(lines))
             }
@@ -780,11 +780,11 @@ impl<'a> State<'a> {
                 Ok(Outcome::Lines(vec![]))
             }
             "lsinfo" => {
-                let path = cmd.args.first().map(String::as_str).unwrap_or("/");
+                let path = cmd.args.first().map_or("/", String::as_str);
                 Ok(Outcome::Lines(self.lsinfo(path)?))
             }
             "listall" | "listallinfo" => {
-                let path = cmd.args.first().map(String::as_str).unwrap_or("/");
+                let path = cmd.args.first().map_or("/", String::as_str);
                 Ok(Outcome::Lines(self.listall(path, name == "listallinfo")?))
             }
             "add" | "addid" => {
@@ -793,7 +793,7 @@ impl<'a> State<'a> {
                 let mut lines = vec![];
                 for item in items {
                     if name == "addid" {
-                        lines.push(format!("Id: {}", self.item_id(&item)));
+                        lines.push(format!("Id: {}", Self::item_id(&item)));
                     }
                     self.playlist.push(item);
                 }
@@ -953,10 +953,10 @@ impl<'a> State<'a> {
 
     fn status(&mut self) -> Vec<String> {
         let mut lines = vec![
-            format!("repeat: {}", self.repeat as i32),
-            format!("random: {}", self.random as i32),
-            format!("consume: {}", self.consume as i32),
-            format!("single: {}", self.single as i32),
+            format!("repeat: {}", i32::from(self.repeat)),
+            format!("random: {}", i32::from(self.random)),
+            format!("consume: {}", i32::from(self.consume)),
+            format!("single: {}", i32::from(self.single)),
             format!("playlist: {}", self.playlist_version),
             format!("playlistlength: {}", self.playlist.len()),
             format!("mixrampdb: {}", py_float(self.mixrampdb)),
@@ -981,12 +981,12 @@ impl<'a> State<'a> {
         if self.current_index != -1
             && let Some(item) = self.playlist.get(self.current_index as usize)
         {
-            let current_id = self.item_id(item);
+            let current_id = Self::item_id(item);
             lines.push(format!("song: {}", self.current_index));
             lines.push(format!("songid: {current_id}"));
             if let Some(next) = self.playlist.get(self.current_index as usize + 1) {
                 lines.push(format!("nextsong: {}", self.current_index + 1));
-                lines.push(format!("nextsongid: {}", self.item_id(next)));
+                lines.push(format!("nextsongid: {}", Self::item_id(next)));
             }
             // The player's audio properties (the null player reports 0 and
             // falls back on the item's length).
@@ -1029,9 +1029,9 @@ impl<'a> State<'a> {
             format!("file: {}", vfs::item_path(self.lib, item)),
             format!("Time: {}", item.float("length") as i64),
             format!("duration: {:.3}", item.float("length")),
-            format!("Id: {}", self.item_id(item)),
+            format!("Id: {}", Self::item_id(item)),
         ];
-        if let Ok(pos) = self.id_to_index(&self.item_id(item).to_string()) {
+        if let Ok(pos) = self.id_to_index(&Self::item_id(item).to_string()) {
             lines.push(format!("Pos: {pos}"));
         }
         for (tagtype, field) in TAGTYPE_MAP {
@@ -1230,7 +1230,6 @@ impl<'a> State<'a> {
 
     /// `_metadata_query`: the query for tag/value pairs.
     fn metadata_query(
-        &self,
         kv: &[String],
         substring: bool,
         allow_any: bool,
@@ -1279,7 +1278,7 @@ impl<'a> State<'a> {
     }
 
     fn search(&self, kv: &[String], substring: bool) -> Result<Vec<String>, BpdError> {
-        let query = self.metadata_query(kv, substring, substring)?;
+        let query = Self::metadata_query(kv, substring, substring)?;
         let items = self
             .lib
             .items(&query)
@@ -1311,7 +1310,7 @@ impl<'a> State<'a> {
                 "Incorrect number of filter arguments",
             ));
         }
-        let query = self.metadata_query(&kv, false, false)?;
+        let query = Self::metadata_query(&kv, false, false)?;
         let (clause, params) = query
             .pred
             .clause()
@@ -1873,7 +1872,7 @@ impl<'a> Server<'a> {
                             break;
                         }
                         let command = Command::parse(&line);
-                        if let Some(reply) = self.control_command(&command) {
+                        if let Some(reply) = Self::control_command(&command) {
                             let _ = writeln!(self.controls[i].writer, "{reply}");
                             let _ = self.controls[i].writer.flush();
                         }
@@ -1891,7 +1890,7 @@ impl<'a> Server<'a> {
         }
     }
 
-    fn control_command(&mut self, command: &Command) -> Option<String> {
+    fn control_command(command: &Command) -> Option<String> {
         match command.name.as_str() {
             "play_finished" => {
                 if !command.args.is_empty() {

@@ -89,7 +89,7 @@ fn text(s: &str) -> String {
     s.to_string()
 }
 
-pub fn command(_cfg: &Config, lib: &Library, opts: CmdOpts) -> Result<()> {
+pub fn command(_cfg: &Config, lib: &Library, opts: &CmdOpts) -> Result<()> {
     let path = crate::config::expand_tilde(&opts.output);
     if let Some(parent) = path.parent().filter(|p| !p.as_os_str().is_empty()) {
         std::fs::create_dir_all(parent)
@@ -302,7 +302,7 @@ pub fn run_fish(
     crate::plugins::fish::command(
         cfg,
         lib,
-        crate::plugins::fish::CmdOpts {
+        &crate::plugins::fish::CmdOpts {
             no_fields: a.no_fields,
             extra_values: a.extra_values,
             output: a.output,

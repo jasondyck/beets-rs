@@ -213,7 +213,7 @@ impl BadFiles {
     }
 
     /// `handle_import_action`.
-    fn handle(&self, action: &str, failure: &str) -> BeforeChoice {
+    fn handle(action: &str, failure: &str) -> BeforeChoice {
         let name = match action {
             "abort" => "Aborting",
             "skip" => "Skipping",
@@ -254,10 +254,10 @@ impl BadFiles {
             }
         }
         if found_error && error_action != "ask" {
-            return Ok(self.handle(&error_action, "error"));
+            return Ok(Self::handle(&error_action, "error"));
         }
         if found_warning && warning_action != "ask" {
-            return Ok(self.handle(&warning_action, "warning"));
+            return Ok(Self::handle(&warning_action, "warning"));
         }
         if quiet {
             return Ok(BeforeChoice::Continue);

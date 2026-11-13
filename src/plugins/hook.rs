@@ -222,7 +222,7 @@ impl Hooks {
         };
         let value = accessors
             .iter()
-            .try_fold(value, |v, attr| self.attr(v, attr, ev))?;
+            .try_fold(value, |v, a| Self::attr(&v, a, ev))?;
         let s = match conv {
             Some("r") | Some("a") => self.repr(&value, ev),
             None | Some("s") => self.str(&value, ev),
@@ -232,7 +232,7 @@ impl Hooks {
     }
 
     /// `getattr(value, attr)` / `value[attr]`.
-    fn attr<'a>(&self, v: Value<'a>, attr: &str, ev: &Event<'a>) -> Result<Value<'a>> {
+    fn attr<'a>(v: &Value<'a>, attr: &str, ev: &Event<'a>) -> Result<Value<'a>> {
         match v {
             Value::Arg(Arg::Item(r) | Arg::Album(r) | Arg::Model(r)) => {
                 let album = match (r.kind, ev.lib()) {

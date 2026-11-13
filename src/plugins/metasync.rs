@@ -444,8 +444,7 @@ fn mktime_local(d: chrono::NaiveDateTime) -> f64 {
     chrono::Local
         .from_local_datetime(&d)
         .earliest()
-        .map(|t| t.timestamp() as f64)
-        .unwrap_or(0.0)
+        .map_or(0.0, |t| t.timestamp() as f64)
 }
 
 pub struct CmdOpts {

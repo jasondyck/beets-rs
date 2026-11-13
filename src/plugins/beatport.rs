@@ -122,8 +122,7 @@ fn json_id(v: &J) -> String {
     match v {
         J::Number(n) => n
             .as_i64()
-            .map(|i| i.to_string())
-            .unwrap_or_else(|| n.to_string()),
+            .map_or_else(|| n.to_string(), |i| i.to_string()),
         J::String(s) => s.clone(),
         other => other.to_string(),
     }
@@ -565,7 +564,7 @@ impl Beatport {
     }
 
     /// `_get_artist`: the joined artist names and the first id.
-    fn get_artists(&self, artists: Option<&Vec<(String, String)>>) -> (String, Option<String>) {
+    fn get_artists(artists: Option<&Vec<(String, String)>>) -> (String, Option<String>) {
         let triples: Vec<(&str, &str, Option<&str>)> = artists
             .map(|a| {
                 a.iter()
@@ -579,7 +578,7 @@ impl Beatport {
     /// `_get_album_info`.
     pub fn album_info(&self, release: &BeatportRelease) -> AlbumInfo {
         let va = release.object.artists.as_ref().is_some_and(|a| a.len() > 3);
-        let (mut artist, artist_id) = self.get_artists(release.object.artists.as_ref());
+        let (mut artist, artist_id) = Self::get_artists(release.object.artists.as_ref());
         if va {
             artist = "Various Artists".to_string();
         }
@@ -610,9 +609,9 @@ impl Beatport {
             media: "Digital".to_string(),
             data_source: self.data_source().to_string(),
             data_url: release.url.clone().unwrap_or_default(),
-            year: date.map(|d| chrono::Datelike::year(&d) as i64).unwrap_or(0),
-            month: date.map(|d| chrono::Datelike::month(&d) as i64).unwrap_or(0),
-            day: date.map(|d| chrono::Datelike::day(&d) as i64).unwrap_or(0),
+            year: date.map_or(0, |d| i64::from(chrono::Datelike::year(&d))),
+            month: date.map_or(0, |d| i64::from(chrono::Datelike::month(&d))),
+            day: date.map_or(0, |d| i64::from(chrono::Datelike::day(&d))),
             nulls,
             extra,
             ..Default::default()
@@ -629,7 +628,7 @@ impl Beatport {
         {
             title.push_str(&format!(" ({mix})"));
         }
-        let (artist, artist_id) = self.get_artists(track.object.artists.as_ref());
+        let (artist, artist_id) = Self::get_artists(track.object.artists.as_ref());
         let mut extra = vec![("initial_key".to_string(), V::Str(track.initial_key.clone()))];
         if let Some(bpm) = track.bpm {
             extra.push(("bpm".to_string(), V::Int(bpm)));

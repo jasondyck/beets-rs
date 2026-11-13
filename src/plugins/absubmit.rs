@@ -172,9 +172,9 @@ impl ABSubmit {
             // Add the hash of the extractor to the output.
             let metadata = analysis
                 .as_object_mut()
-                .map(|o| o.entry("metadata").or_insert(J::Object(Default::default())))
+                .map(|o| o.entry("metadata").or_insert(J::Object(serde_json::Map::default())))
                 .and_then(|m| m.as_object_mut())
-                .map(|o| o.entry("version").or_insert(J::Object(Default::default())))
+                .map(|o| o.entry("version").or_insert(J::Object(serde_json::Map::default())))
                 .and_then(|v| v.as_object_mut());
             match metadata {
                 Some(m) => {
@@ -282,8 +282,7 @@ fn temp_json_path() -> PathBuf {
     let n = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let nanos = SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .map(|d| d.subsec_nanos())
-        .unwrap_or(0);
+        .map_or(0, |d| d.subsec_nanos());
     std::env::temp_dir().join(format!("{}{:08x}.json", std::process::id(), nanos ^ n as u32))
 }
 
@@ -363,8 +362,7 @@ pub fn sha1_hex(data: &[u8]) -> String {
 /// as Python sees it: a float in AcousticBrainz's output).
 fn probe_set(item: &Record) -> bool {
     item.get(PROBE_FIELD)
-        .map(|v| !v.raw().trim().is_empty() && v.raw().trim() != "0")
-        .unwrap_or(false)
+        .is_some_and(|v| !v.raw().trim().is_empty() && v.raw().trim() != "0")
 }
 
 

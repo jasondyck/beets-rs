@@ -346,8 +346,8 @@ impl Candidate {
                     return ImageAction::Bad;
                 }
             } else if let Some(p) = c.margin_percent.filter(|&p| p != 0.0) {
-                let margin_px = p * long_edge as f64;
-                if edge_diff as f64 > margin_px {
+                let margin_px = p * f64::from(long_edge);
+                if f64::from(edge_diff) > margin_px {
                     log.debug(&format!(
                         "image is not close enough to being square, \
                          ({long_edge} - {short_edge} > {})",
@@ -369,7 +369,7 @@ impl Candidate {
 
         let mut downsize = false;
         if c.max_filesize != 0 {
-            let filesize = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
+            let filesize = std::fs::metadata(&path).map_or(0, |m| m.len());
             if filesize > c.max_filesize {
                 log.debug(&format!(
                     "image needs resizing ({filesize}B > {}B)",

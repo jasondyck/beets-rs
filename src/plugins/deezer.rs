@@ -99,8 +99,7 @@ fn id_str(v: &J) -> Option<String> {
     match v {
         J::Number(n) => Some(
             n.as_i64()
-                .map(|i| i.to_string())
-                .unwrap_or_else(|| n.to_string()),
+                .map_or_else(|| n.to_string(), |i| i.to_string()),
         ),
         J::String(s) => Some(s.clone()),
         _ => None,
@@ -146,7 +145,7 @@ impl Deezer {
     /// `fetch_data`: a GET and its JSON body, None (logged) on an error
     /// response or an API error object.
     pub fn fetch_data(&self, url: &str) -> Option<J> {
-        let data = match self.session.get(url, Default::default()) {
+        let data = match self.session.get(url, crate::plugins::requests::Request::default()) {
             Ok(r) => match r.json() {
                 Ok(j) => j,
                 Err(e) => {
@@ -279,7 +278,7 @@ impl Deezer {
         }
         // `while "next" in tracks_obj`: follow the pagination.
         while let Some(next) = tracks_obj.get("next").and_then(|n| n.as_str()) {
-            let page = match self.session.get(next, Default::default()) {
+            let page = match self.session.get(next, crate::plugins::requests::Request::default()) {
                 Ok(r) => r.json().unwrap_or(J::Null),
                 Err(_) => J::Null,
             };
@@ -303,8 +302,7 @@ impl Deezer {
             track.medium_total = medium_totals
                 .iter()
                 .find(|(m, _)| *m == track.medium)
-                .map(|(_, n)| *n)
-                .unwrap_or(0);
+                .map_or(0, |(_, n)| *n);
         }
         let album_artist_id = album_data
             .get("artist")
@@ -411,7 +409,7 @@ impl Deezer {
             &format!("{}{query_type}", self.conf.urls.search),
             &[("q", query), ("limit", limit.to_string())],
         );
-        let data = match self.session.get(&url, Default::default()) {
+        let data = match self.session.get(&url, crate::plugins::requests::Request::default()) {
             Ok(r) => match r.json() {
                 Ok(j) => j,
                 Err(e) => {

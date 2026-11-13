@@ -86,8 +86,7 @@ impl Artist {
             id: match data.get("id") {
                 Some(J::Number(n)) => n
                     .as_i64()
-                    .map(|i| i.to_string())
-                    .unwrap_or_else(|| n.to_string()),
+                    .map_or_else(|| n.to_string(), |i| i.to_string()),
                 Some(J::String(s)) => s.clone(),
                 _ => String::new(),
             },
@@ -334,7 +333,7 @@ fn get_track_length(duration: &str) -> Option<f64> {
         // `time.strptime` refuses out-of-range values.
         return None;
     }
-    Some((m * 60 + s) as f64)
+    Some(f64::from(m * 60 + s))
 }
 
 /// `parse_release_date`: the year/month/day a release was issued on (the
@@ -744,7 +743,7 @@ impl Discogs {
     }
 
     /// `_subtrack_position`: the physical position of a flat audio subtrack.
-    fn subtrack_position(&self, track: &J) -> Option<String> {
+    fn subtrack_position(track: &J) -> Option<String> {
         if track_type(track) != "track" {
             return None;
         }
@@ -855,12 +854,12 @@ impl Discogs {
         let mut out = vec![];
         let mut i = 0;
         while i < raw.len() {
-            let position = self.subtrack_position(&raw[i]);
+            let position = Self::subtrack_position(&raw[i]);
             if position.is_some() {
                 // Consecutive subtracks of one physical track.
                 let mut group = vec![];
                 let mut j = i;
-                while j < raw.len() && self.subtrack_position(&raw[j]) == position {
+                while j < raw.len() && Self::subtrack_position(&raw[j]) == position {
                     group.push(raw[j].clone());
                     j += 1;
                 }
@@ -1280,8 +1279,7 @@ fn json_id(v: &J) -> String {
     match v {
         J::Number(n) => n
             .as_i64()
-            .map(|i| i.to_string())
-            .unwrap_or_else(|| n.to_string()),
+            .map_or_else(|| n.to_string(), |i| i.to_string()),
         J::String(s) => s.clone(),
         J::Null => "None".to_string(),
         other => other.to_string(),

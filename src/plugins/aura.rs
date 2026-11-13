@@ -140,7 +140,7 @@ impl App<'_> {
         let _ = path;
         let parts: Vec<&str> = tail.split('/').collect();
         Ok(match parts.as_slice() {
-            ["server"] => doc.server_info(),
+            ["server"] => Doc::server_info(),
             ["tracks"] => doc.all_tracks()?,
             ["tracks", id] => doc.single_track(parse_id(id)),
             ["tracks", id, "audio"] => doc.audio_file(parse_id(id)),
@@ -184,18 +184,18 @@ impl Doc<'_, '_> {
     }
 
     /// `make_response(document, status)` for a JSON:API document.
-    fn json_response(&self, body: &Json, status: u16) -> Response {
+    fn json_response(body: &Json, status: u16) -> Response {
         Response::new(status, JSONAPI_MIMETYPE, body.to_flask_json().into_bytes())
     }
 
     /// The JSON:API error document beets' `AURADocument.error` makes.
-    fn error(&self, status: &str, title: &str, detail: &str) -> Response {
+    fn error(status: &str, title: &str, detail: &str) -> Response {
         let code = status
             .split_whitespace()
             .next()
             .and_then(|c| c.parse().ok())
             .unwrap_or(500);
-        self.json_response(
+        Self::json_response(
             &Json::Obj(vec![(
                 "errors".into(),
                 Json::List(vec![Json::Obj(vec![
@@ -208,7 +208,7 @@ impl Doc<'_, '_> {
         )
     }
 
-    fn server_info(&self) -> Response {
+    fn server_info() -> Response {
         let mut attributes = vec![];
         for (k, v) in SERVER_INFO {
             attributes.push(((*k).to_string(), Json::Str((*v).into())));
@@ -226,7 +226,7 @@ impl Doc<'_, '_> {
                     .collect(),
             ),
         ));
-        self.json_response(
+        Self::json_response(
             &Json::Obj(vec![(
                 "data".into(),
                 Json::Obj(vec![
@@ -252,8 +252,7 @@ impl Doc<'_, '_> {
             let field = map
                 .iter()
                 .find(|(a, _)| *a == attr)
-                .map(|(_, b)| *b)
-                .unwrap_or(attr.as_str());
+                .map_or(attr.as_str(), |(_, b)| *b);
             ands.push(Query::match_field(kind, field, v)?.pred);
         }
         let mut q = Query::match_field(kind, "id", "")?;
@@ -284,8 +283,7 @@ impl Doc<'_, '_> {
             let field = map
                 .iter()
                 .find(|(a, _)| *a == attr)
-                .map(|(_, b)| *b)
-                .unwrap_or(attr);
+                .map_or(attr, |(_, b)| *b);
             sorts.push(crate::query::slow_sort(field, ascending));
         }
         let _ = kind;
@@ -300,8 +298,7 @@ impl Doc<'_, '_> {
         let get = |name: &str, default: usize| -> usize {
             self.arg(name)
                 .and_then(|v| v.parse::<i64>().ok())
-                .map(|v| v.max(0) as usize)
-                .unwrap_or(default)
+                .map_or(default, |v| v.max(0) as usize)
         };
         let page = get("page", 0);
         let limit = get("limit", self.app.page_limit());
@@ -358,7 +355,7 @@ impl Doc<'_, '_> {
         if let Some(include) = self.arg("include") {
             doc.push(("included".into(), Json::List(self.get_included(&data, include))));
         }
-        Ok(self.json_response(&Json::Obj(doc), 200))
+        Ok(Self::json_response(&Json::Obj(doc), 200))
     }
 
     fn resource_object(&self, kind: Kind, rec: &Record) -> Json {
@@ -445,7 +442,7 @@ impl Doc<'_, '_> {
                 Json::List(self.get_included(std::slice::from_ref(object), include)),
             ));
         }
-        self.json_response(&Json::Obj(doc), 200)
+        Self::json_response(&Json::Obj(doc), 200)
     }
 
     // ---------------------------------------------------------- endpoints
@@ -489,7 +486,7 @@ impl Doc<'_, '_> {
                 Json::List(self.get_included(&data, include)),
             ));
         }
-        Ok(self.json_response(&Json::Obj(doc), 200))
+        Ok(Self::json_response(&Json::Obj(doc), 200))
     }
 
     fn single_track(&self, id: Option<i64>) -> Response {
@@ -498,7 +495,7 @@ impl Doc<'_, '_> {
         };
         match self.lib().get_item(id) {
             Ok(Some(item)) => self.single_resource_document(&track_resource(self.lib(), &item)),
-            _ => self.error(
+            _ => Self::error(
                 "404 Not Found",
                 "No track with the requested id.",
                 &format!("There is no track with an id of {id} in the library."),
@@ -512,7 +509,7 @@ impl Doc<'_, '_> {
         };
         match self.lib().get_album(id) {
             Ok(Some(album)) => self.single_resource_document(&album_resource(self.lib(), &album)),
-            _ => self.error(
+            _ => Self::error(
                 "404 Not Found",
                 "No album with the requested id.",
                 &format!("There is no album with an id of {id} in the library."),
@@ -523,7 +520,7 @@ impl Doc<'_, '_> {
     fn single_artist(&self, artist_id: &str) -> Response {
         match artist_resource(self.lib(), artist_id) {
             Some(resource) => self.single_resource_document(&resource),
-            None => self.error(
+            None => Self::error(
                 "404 Not Found",
                 "No artist with the requested id.",
                 &format!("There is no artist with an id of {artist_id} in the library."),
@@ -534,7 +531,7 @@ impl Doc<'_, '_> {
     fn single_image(&self, image_id: &str) -> Response {
         match image_resource(self.lib(), image_id) {
             Some(resource) => self.single_resource_document(&resource),
-            None => self.error(
+            None => Self::error(
                 "404 Not Found",
                 "No image with the requested id.",
                 &format!("There is no image with an id of {image_id} in the library."),
@@ -548,7 +545,7 @@ impl Doc<'_, '_> {
             return web::abort(404, None);
         };
         let Some(track) = self.lib().get_item(id).ok().flatten() else {
-            return self.error(
+            return Self::error(
                 "404 Not Found",
                 "No track with the requested id.",
                 &format!("There is no track with an id of {id} in the library."),
@@ -556,7 +553,7 @@ impl Doc<'_, '_> {
         };
         let path = track.path();
         if !path.is_file() {
-            return self.error(
+            return Self::error(
                 "404 Not Found",
                 "No audio file for the requested track.",
                 &format!(
@@ -570,7 +567,7 @@ impl Doc<'_, '_> {
                 .extension()
                 .map(|e| e.to_string_lossy().into_owned())
                 .unwrap_or_default();
-            return self.error(
+            return Self::error(
                 "500 Internal Server Error",
                 "Requested audio file has an unknown mimetype.",
                 &format!(
@@ -580,7 +577,7 @@ impl Doc<'_, '_> {
             );
         }
         if !accepts(self.req.header("Accept"), mime) {
-            return self.error(
+            return Self::error(
                 "406 Not Acceptable",
                 "Unsupported MIME type or bitrate parameter in Accept header.",
                 &format!(
@@ -605,7 +602,7 @@ impl Doc<'_, '_> {
     /// `/aura/images/<id>/file`: the image's file.
     fn image_file(&self, image_id: &str) -> Response {
         let Some(path) = image_path(self.lib(), image_id) else {
-            return self.error(
+            return Self::error(
                 "404 Not Found",
                 "No image with the requested id.",
                 &format!("There is no image with an id of {image_id} in the library"),
@@ -691,7 +688,7 @@ fn accepts(header: Option<&str>, mime: &str) -> bool {
 fn attribute_value(kind: Kind, rec: &Record, field: &str) -> Option<Json> {
     match field {
         "filesize" => {
-            let size = std::fs::metadata(rec.path()).map(|m| m.len()).unwrap_or(0);
+            let size = std::fs::metadata(rec.path()).map_or(0, |m| m.len());
             (size != 0).then_some(Json::Int(size as i64))
         }
         _ => {
@@ -758,7 +755,7 @@ fn path_field(rec: &Record, name: &str) -> Option<PathBuf> {
 fn albumtotal(lib: &Library, album: &Record) -> i64 {
     let items = lib.album_items(album.id.unwrap_or(0)).unwrap_or_default();
     if album.int("disctotal") == 1 || !crate::formatted::env().per_disc_numbering {
-        return items.first().map(|i| i.int("tracktotal")).unwrap_or(0);
+        return items.first().map_or(0, |i| i.int("tracktotal"));
     }
     let mut counted = vec![];
     let mut total = 0;

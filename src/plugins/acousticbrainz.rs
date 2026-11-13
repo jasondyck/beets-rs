@@ -206,7 +206,7 @@ impl AcousticPlugin {
                 "This plugin is deprecated since AcousticBrainz has shut down. \
                  See the base_url configuration option.",
             );
-            return J::Object(Default::default());
+            return J::Object(serde_json::Map::default());
         }
         let mut data = serde_json::Map::new();
         for url in generate_urls(&self.base_url, mbid) {
@@ -215,12 +215,12 @@ impl AcousticPlugin {
                 Ok(r) => r,
                 Err(e) => {
                     self.log.info(&format!("request error: {e}"));
-                    return J::Object(Default::default());
+                    return J::Object(serde_json::Map::default());
                 }
             };
             if resp.status == 404 {
                 self.log.info(&format!("recording ID {mbid} not found"));
-                return J::Object(Default::default());
+                return J::Object(serde_json::Map::default());
             }
             match resp.json() {
                 Ok(J::Object(m)) => data.extend(m),
@@ -228,7 +228,7 @@ impl AcousticPlugin {
                 Err(_) => {
                     self.log
                         .debug(&format!("Invalid Response: {}", resp.text(true)));
-                    return J::Object(Default::default());
+                    return J::Object(serde_json::Map::default());
                 }
             }
         }

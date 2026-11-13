@@ -48,7 +48,7 @@ impl EditCfg {
 /// The value beets holds for a field (`obj[key]`), as Python sees it.
 fn raw_value(obj: &Record, key: &str) -> PyVal {
     if key == "id" {
-        return obj.id.map_or(PyVal::None, |i| PyVal::Int(i as i128));
+        return obj.id.map_or(PyVal::None, |i| PyVal::Int(i128::from(i)));
     }
     let Some(ty) = obj.field_type(key) else {
         return match obj.flex.get(key) {
@@ -66,7 +66,7 @@ fn raw_value(obj: &Record, key: &str) -> PyVal {
         (FieldType::List(_), _) => PyVal::List(obj.list(key).into_iter().map(PyVal::Str).collect()),
         // Read from the database, a boolean is the integer SQLite stores
         // (so beets edits it as text: 'True').
-        (FieldType::Bool, v) => PyVal::Int((v.as_f64().unwrap_or(0.0) != 0.0) as i128),
+        (FieldType::Bool, v) => PyVal::Int(i128::from(v.as_f64().unwrap_or(0.0) != 0.0)),
         (FieldType::Int | FieldType::Padded(_) | FieldType::Bitrate | FieldType::SampleRate, v) => {
             PyVal::Int(v.as_f64().unwrap_or(0.0) as i128)
         }
@@ -157,7 +157,7 @@ pub fn apply_doc(obj: &mut Record, data: &Doc) {
                 PyVal::Bool(b) if obj.field_type(key) == Some(FieldType::Bool) => {
                     obj.set(key, Value::Bool(*b));
                 }
-                PyVal::Bool(b) => obj.set(key, Value::Int(*b as i64)),
+                PyVal::Bool(b) => obj.set(key, Value::Int(i64::from(*b))),
                 PyVal::Float(f) => obj.set(key, Value::Float(*f)),
                 PyVal::List(l) => {
                     let l: Vec<String> = l.iter().map(PyVal::py_str).collect();
@@ -244,9 +244,8 @@ fn temp_yaml(content: &str) -> Result<PathBuf> {
     let dir = std::env::temp_dir();
     let mut seed = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_nanos())
-        .unwrap_or(0) as u64
-        ^ (std::process::id() as u64) << 32;
+        .map_or(0, |d| d.as_nanos()) as u64
+        ^ u64::from(std::process::id()) << 32;
     for _ in 0..100 {
         let mut name = String::from("tmp");
         for _ in 0..8 {
@@ -340,7 +339,7 @@ impl Editor {
                 .find(|d| id_of(d).py_eq(&new_id) && doc_get(d, "id").is_some());
             let obj_idx = objs
                 .iter()
-                .position(|o| o.id.is_some_and(|i| PyVal::Int(i as i128).py_eq(&new_id)));
+                .position(|o| o.id.is_some_and(|i| PyVal::Int(i128::from(i)).py_eq(&new_id)));
             let (Some(old), Some(idx)) = (old, obj_idx) else {
                 self.log.warning("ignoring object whose id changed");
                 continue;
@@ -565,7 +564,7 @@ impl Editor {
             let Some((new_all, new_str)) = self.edit_yaml(&cur_str)? else {
                 return Ok(false);
             };
-            let expected = header.is_some() as usize + task.items.len();
+            let expected = usize::from(header.is_some()) + task.items.len();
             if new_all.len() != expected {
                 println!(
                     "Number of documents changed from {expected} to {}.",

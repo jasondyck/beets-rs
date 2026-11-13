@@ -240,10 +240,10 @@ fn three_items() -> Vec<Item> {
 fn doc(id: Option<i64>, title: &str, track: i64) -> Doc {
     let mut d = vec![];
     if let Some(id) = id {
-        d.push(("id".to_string(), PyVal::Int(id as i128)));
+        d.push(("id".to_string(), PyVal::Int(i128::from(id))));
     }
     d.push(("title".to_string(), PyVal::Str(title.to_string())));
-    d.push(("track".to_string(), PyVal::Int(track as i128)));
+    d.push(("track".to_string(), PyVal::Int(i128::from(track))));
     d
 }
 

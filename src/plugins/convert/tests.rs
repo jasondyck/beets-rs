@@ -130,7 +130,7 @@ impl Env {
         // (beets' tests use `path:`, which needs the global library context.)
         opts.query = vec![format!("id:{}", item.id.unwrap())];
         crate::ui::script::set(answer.map(|a| (a, None)).into_iter().collect());
-        let (r, lines) = crate::logging::capture(|| command(&self.cfg, &self.lib, opts));
+        let (r, lines) = crate::logging::capture(|| command(&self.cfg, &self.lib, &opts));
         r.unwrap();
         lines
     }
@@ -249,7 +249,7 @@ fn test_copy_album_art_missing_source() {
         command(
             &e.cfg,
             &e.lib,
-            CmdOpts {
+            &CmdOpts {
                 album: true,
                 yes: true,
                 ..Default::default()
@@ -287,7 +287,7 @@ fn test_copy_album_art_resized() {
         yes: true,
         ..Default::default()
     };
-    let lines = crate::logging::capture(|| command(&e.cfg, &e.lib, opts)).1;
+    let lines = crate::logging::capture(|| command(&e.cfg, &e.lib, &opts)).1;
     let dest = e.dest().join("cover.jpg");
     assert!(
         lines.contains(&format!(
@@ -393,7 +393,7 @@ fn test_empty_query() {
         query: vec!["An impossible query".into()],
         ..Default::default()
     };
-    let lines = crate::logging::capture(|| command(&e.cfg, &e.lib, opts)).1;
+    let lines = crate::logging::capture(|| command(&e.cfg, &e.lib, &opts)).1;
     assert_eq!(lines, vec!["convert: Empty query result."]);
 }
 
@@ -611,7 +611,7 @@ fn command_errors() {
     let r = command(
         &e.cfg,
         &e.lib,
-        CmdOpts {
+        &CmdOpts {
             yes: true,
             format: Some("xyz".into()),
             ..Default::default()
@@ -626,7 +626,7 @@ fn command_errors() {
     let r = command(
         &e.cfg,
         &e.lib,
-        CmdOpts {
+        &CmdOpts {
             yes: true,
             format: Some("foo".into()),
             ..Default::default()
@@ -637,7 +637,7 @@ fn command_errors() {
         "convert: format foo needs the \"command\" field"
     );
     e.cfg.set("convert.dest", Y::Null);
-    let r = command(&e.cfg, &e.lib, yes());
+    let r = command(&e.cfg, &e.lib, &yes());
     assert_eq!(r.unwrap_err().to_string(), "no convert destination set");
     // An encoder that can't be run.
     e.cfg
@@ -646,7 +646,7 @@ fn command_errors() {
         "convert.formats.mp3",
         y("no-such-encoder-xyz $source $dest"),
     );
-    let r = command(&e.cfg, &e.lib, yes());
+    let r = command(&e.cfg, &e.lib, &yes());
     let msg = r.unwrap_err().to_string();
     assert!(
         msg.starts_with("convert: couldn't invoke 'no-such-encoder-xyz ")
@@ -657,6 +657,7 @@ fn command_errors() {
 
 #[test]
 fn link_and_hardlink_untranscoded() {
+    use std::os::unix::fs::MetadataExt;
     if !ffmpeg_ok() {
         return;
     }
@@ -685,7 +686,6 @@ fn link_and_hardlink_untranscoded() {
             ..Default::default()
         },
     );
-    use std::os::unix::fs::MetadataExt;
     assert!(!std::fs::symlink_metadata(&out).unwrap().is_symlink());
     assert_eq!(
         std::fs::metadata(&out).unwrap().ino(),
@@ -736,12 +736,12 @@ fn threads_zero_converts_nothing_and_many_threads_convert_all() {
         threads: Some(0),
         ..Default::default()
     };
-    command(&e.cfg, &e.lib, all.clone()).unwrap();
+    command(&e.cfg, &e.lib, &all.clone()).unwrap();
     assert!(!e.dest().exists());
     command(
         &e.cfg,
         &e.lib,
-        CmdOpts {
+        &CmdOpts {
             threads: Some(3),
             ..all
         },
@@ -822,8 +822,7 @@ fn import_env() -> (Env, PathBuf) {
 
 fn tmp_files(e: &Env) -> usize {
     std::fs::read_dir(e.dir.path().join("tmp"))
-        .map(|d| d.count())
-        .unwrap_or(0)
+        .map_or(0, Iterator::count)
 }
 
 #[test]

@@ -49,13 +49,13 @@ fn env() -> Option<Env> {
 }
 
 impl Env {
-    fn run(&self, opts: CmdOpts) -> String {
+    fn run(&self, opts: &CmdOpts) -> String {
         let mut out = vec![];
-        run(&self.cfg, &self.lib, &opts, &mut out).unwrap();
+        run(&self.cfg, &self.lib, opts, &mut out).unwrap();
         String::from_utf8(out).unwrap()
     }
 
-    fn keys_opts(&self, format: &str) -> CmdOpts {
+    fn keys_opts(format: &str) -> CmdOpts {
         CmdOpts {
             format: Some(format.into()),
             included_keys: vec!["title,album".into()],
@@ -73,7 +73,7 @@ fn items(lib: &Library) -> Vec<Item> {
 #[test]
 fn json_output() {
     let Some(env) = env() else { return };
-    let out = env.run(env.keys_opts("json"));
+    let out = env.run(&Env::keys_opts("json"));
     let v: serde_json::Value = serde_json::from_str(&out).unwrap();
     let first = &v[0];
     assert_eq!(first["title"], "Alpha");
@@ -87,7 +87,7 @@ fn json_output() {
 #[test]
 fn jsonlines_output() {
     let Some(env) = env() else { return };
-    let out = env.run(env.keys_opts("jsonlines"));
+    let out = env.run(&Env::keys_opts("jsonlines"));
     assert_eq!(out.lines().count(), 2);
     let v: serde_json::Value = serde_json::from_str(out.lines().next().unwrap()).unwrap();
     assert_eq!(v["title"], "Alpha");
@@ -97,7 +97,7 @@ fn jsonlines_output() {
 #[test]
 fn csv_output() {
     let Some(env) = env() else { return };
-    let out = env.run(env.keys_opts("csv"));
+    let out = env.run(&Env::keys_opts("csv"));
     let lines: Vec<&str> = out.split("\r\n").collect();
     let head: Vec<&str> = lines[0].split(',').collect();
     let vals: Vec<&str> = lines[1].split(',').collect();
@@ -115,7 +115,7 @@ fn csv_output() {
 #[test]
 fn xml_output() {
     let Some(env) = env() else { return };
-    let out = env.run(env.keys_opts("xml"));
+    let out = env.run(&Env::keys_opts("xml"));
     assert!(out.starts_with("<library><tracks><track>"));
     assert!(out.contains("<album>xalbum</album>"));
     assert!(out.contains("<title>Beta</title>"));
@@ -132,7 +132,7 @@ fn library_fields() {
         query: vec!["xartist".into()],
         ..Default::default()
     };
-    let out = env.run(opts);
+    let out = env.run(&opts);
     let v: serde_json::Value = serde_json::from_str(&out).unwrap();
     assert_eq!(v[0]["title"], "Alpha");
     assert_eq!(v[0]["album"], "xalbum");
@@ -151,7 +151,7 @@ fn albums_and_limits() {
         query: vec!["xalbum".into()],
         ..Default::default()
     };
-    let out = env.run(opts);
+    let out = env.run(&opts);
     let v: serde_json::Value = serde_json::from_str(&out).unwrap();
     assert_eq!(v.as_array().unwrap().len(), 1);
     assert_eq!(v[0]["album"], "xalbum");
@@ -162,16 +162,16 @@ fn output_file_and_append() {
     let Some(env) = env() else { return };
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("out.json");
-    let mut opts = env.keys_opts("json");
+    let mut opts = Env::keys_opts("json");
     opts.output = Some(path.display().to_string());
-    command(&env.cfg, &env.lib, opts.clone()).unwrap();
+    command(&env.cfg, &env.lib, &opts.clone()).unwrap();
     let first = std::fs::read_to_string(&path).unwrap();
     assert!(first.starts_with('['));
     opts.append = true;
     opts.format = Some("jsonlines".into());
-    command(&env.cfg, &env.lib, opts.clone()).unwrap();
+    command(&env.cfg, &env.lib, &opts.clone()).unwrap();
     let all = std::fs::read_to_string(&path).unwrap();
-    assert_eq!(all, format!("{first}{}", env.run(opts)));
+    assert_eq!(all, format!("{first}{}", env.run(&opts)));
 }
 
 #[test]
@@ -198,7 +198,7 @@ fn json_formatting_options() {
     );
     env.cfg
         .set("export.json.formatting.sort_keys", Y::Bool(false));
-    let out = env.run(env.keys_opts("json"));
+    let out = env.run(&Env::keys_opts("json"));
     // With sort_keys off, the tag fields keep the `-i` order.
     assert_eq!(
         out,
@@ -216,9 +216,9 @@ fn json_formatting_options() {
     .unwrap();
     env.cfg
         .set("export.json.formatting.ensure_ascii", Y::Bool(true));
-    let mut opts = env.keys_opts("json");
+    let mut opts = Env::keys_opts("json");
     opts.library = true;
-    let out = env.run(opts);
+    let out = env.run(&opts);
     assert!(out.contains(r#""title":"T\u00ebst""#), "{out}");
 }
 
@@ -233,6 +233,6 @@ fn unreadable_files_are_reported() {
         query: vec![bad.display().to_string()],
         ..Default::default()
     };
-    let out = env.run(opts);
+    let out = env.run(&opts);
     assert_eq!(out, "[]\n");
 }
