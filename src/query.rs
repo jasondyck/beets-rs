@@ -41,6 +41,12 @@ pub struct Context {
     pub playlist_relative_to: Option<PathBuf>,
     /// Whether the playlist plugin is enabled (its `playlist:` query).
     pub playlist: bool,
+    /// The fuzzy plugin's `~` prefix and threshold.
+    pub fuzzy: Option<(String, f64)>,
+    /// The bareasc plugin's `#` prefix.
+    pub bareasc: Option<String>,
+    /// The limit plugin's `<` prefix.
+    pub limit: Option<String>,
 }
 
 impl Default for Context {
@@ -55,6 +61,9 @@ impl Default for Context {
             playlist_dir: PathBuf::from("."),
             playlist_relative_to: None,
             playlist: false,
+            fuzzy: None,
+            bareasc: None,
+            limit: None,
         }
     }
 }
@@ -81,7 +90,19 @@ pub fn configure(cfg: &Config) {
         playlist_relative_to: relative_to,
         playlist: plugins.iter().any(|p| p == "playlist")
             && !disabled.iter().any(|p| p == "playlist"),
+        fuzzy: enabled(&plugins, &disabled, "fuzzy").then(|| {
+            (
+                cfg.str("fuzzy.prefix"),
+                cfg.str("fuzzy.threshold").parse().unwrap_or(0.7),
+            )
+        }),
+        bareasc: enabled(&plugins, &disabled, "bareasc").then(|| cfg.str("bareasc.prefix")),
+        limit: enabled(&plugins, &disabled, "limit").then(|| "<".to_string()),
     });
+}
+
+fn enabled(plugins: &[String], disabled: &[String], name: &str) -> bool {
+    plugins.iter().any(|p| p == name) && !disabled.iter().any(|p| p == name)
 }
 
 pub fn set_context(c: Context) {
@@ -543,6 +564,17 @@ enum Test {
     /// beets' `InQuery` (the playlist plugin's `PlaylistQuery`): one of
     /// these paths.
     In(Vec<Vec<u8>>),
+    /// The fuzzy plugin's `SequenceMatcher` match.
+    Fuzzy(String),
+    /// The bareasc plugin's unidecoded substring match.
+    Bare(String),
+}
+
+/// The limit plugin's stateful `<N` query (beets' inner `HeadQuery` class).
+#[derive(Clone, Debug)]
+pub struct HeadQuery {
+    n: usize,
+    seen: std::rc::Rc<std::cell::Cell<usize>>,
 }
 
 #[derive(Clone, Debug)]
@@ -565,6 +597,8 @@ pub enum Pred {
     Not(Box<Pred>),
     And(Vec<Pred>),
     Or(Vec<Pred>),
+    /// The limit plugin's `<N` (`HeadQuery`).
+    Head(HeadQuery),
 }
 
 /// The SQL functions queries use; registered per connection.
@@ -618,7 +652,7 @@ impl Pred {
             Pred::Field(q) => out.push(q.field.clone()),
             Pred::Not(p) => p.field_names(out),
             Pred::And(ps) | Pred::Or(ps) => ps.iter().for_each(|p| p.field_names(out)),
-            Pred::True | Pred::False => {}
+            Pred::True | Pred::False | Pred::Head(_) => {}
         }
     }
 
@@ -635,6 +669,7 @@ impl Pred {
         match self {
             Pred::True => Some(("1".into(), vec![])),
             Pred::False => Some(("0".into(), vec![])),
+            Pred::Head(_) => None,
             Pred::Field(q) => q.clause(),
             Pred::Not(p) => p.clause().map(|(c, v)| (format!("not ({c})"), v)),
             Pred::And(ps) | Pred::Or(ps) => {
@@ -663,6 +698,11 @@ impl Pred {
             Pred::Not(p) => !p.matches(obj),
             Pred::And(ps) => ps.iter().all(|p| p.matches(obj)),
             Pred::Or(ps) => ps.iter().any(|p| p.matches(obj)),
+            Pred::Head(h) => {
+                let n = h.seen.get() + 1;
+                h.seen.set(n);
+                n <= h.n
+            }
         }
     }
 }
@@ -755,7 +795,7 @@ impl FieldQuery {
                     ],
                 )
             }
-            Test::In(_) => return None,
+            Test::In(_) | Test::Fuzzy(_) | Test::Bare(_) => return None,
             Test::IsNone => {
                 // A singleton's album_id is NULL (an album_id of 0, which
                 // beets-rs used to store, links nothing either).
@@ -796,6 +836,16 @@ impl FieldQuery {
                 PyVal::List(v) => v.iter().any(|s| p.py_eq(&PyVal::Str(s.clone()))),
                 v => p.py_eq(&v),
             },
+            Test::Fuzzy(p) => value
+                .unwrap_or(PyVal::None)
+                .strings()
+                .iter()
+                .any(|s| crate::plugins::fuzzy::matches(p, s)),
+            Test::Bare(p) => value
+                .unwrap_or(PyVal::None)
+                .strings()
+                .iter()
+                .any(|s| crate::plugins::bareasc::matches(p, s)),
             Test::In(paths) => match value {
                 Some(PyVal::Bytes(b)) => {
                     let p = crate::library::lexical_normpath(&PathBuf::from(
@@ -1203,6 +1253,43 @@ fn construct_query_part(kind: Kind, part: &str) -> Result<Pred, String> {
         return Ok(Pred::True);
     }
     let (key, term, negate) = parse_query_part(part);
+    let ctx = context();
+    let plugin = ctx
+        .fuzzy
+        .as_ref()
+        .and_then(|(p, _)| term.starts_with(p).then_some((p.as_str(), "fuzzy")))
+        .or_else(|| {
+            ctx.bareasc
+                .as_ref()
+                .and_then(|p| term.starts_with(p).then_some((p.as_str(), "bareasc")))
+        })
+        .or_else(|| {
+            ctx.limit
+                .as_ref()
+                .and_then(|p| term.starts_with(p).then_some((p.as_str(), "limit")))
+        });
+    if let Some((prefix, kind_)) = plugin {
+        let pattern = term[prefix.len()..].to_string();
+        let q = match kind_ {
+            "limit" => {
+                let n: usize = pattern
+                    .trim()
+                    .parse()
+                    .map_err(|_| bad_arg(&pattern, "a positive integer", None))?;
+                Pred::Head(HeadQuery {
+                    n,
+                    seen: Default::default(),
+                })
+            }
+            "fuzzy" => plugin_query(kind, key.as_deref(), &pattern, |p| {
+                Test::Fuzzy(p.to_string())
+            })?,
+            _ => plugin_query(kind, key.as_deref(), &pattern, |p| {
+                Test::Bare(p.to_string())
+            })?,
+        };
+        return Ok(if negate { Pred::Not(Box::new(q)) } else { q });
+    }
     let (class, pattern) = match PREFIXES.iter().find(|(p, _)| term.starts_with(p)) {
         Some((p, c)) => (*c, term[p.len()..].to_string()),
         None => (
@@ -1224,6 +1311,28 @@ fn construct_query_part(kind: Kind, part: &str) -> Result<Pred, String> {
         }
     };
     Ok(if negate { Pred::Not(Box::new(q)) } else { q })
+}
+
+/// A plugin query, for all search fields or one named field.
+fn plugin_query(
+    kind: Kind,
+    key: Option<&str>,
+    pattern: &str,
+    test: impl Fn(&str) -> Test,
+) -> Result<Pred, String> {
+    let one = |field: &str| {
+        Pred::Field(FieldQuery {
+            field: field.to_string(),
+            col: column(kind, field),
+            fast: false,
+            db_path: false,
+            test: test(pattern),
+        })
+    };
+    Ok(match key {
+        None => Pred::Or(search_fields(kind).iter().map(|f| one(f)).collect()),
+        Some(k) => one(&crate::model::replace_legacy_field(kind, &lower(k), false)),
+    })
 }
 
 /// beets' `LibModel.field_query`.
@@ -1587,7 +1696,7 @@ impl Query {
                 Pred::Field(f) => fields.contains(&f.field.as_str()),
                 Pred::Not(p) => walk(p, fields),
                 Pred::And(ps) | Pred::Or(ps) => ps.iter().any(|p| walk(p, fields)),
-                Pred::True | Pred::False => false,
+                Pred::True | Pred::False | Pred::Head(_) => false,
             }
         }
         walk(&self.pred, fields)

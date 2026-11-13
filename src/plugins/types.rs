@@ -70,6 +70,8 @@ fn declared(cfg: &Config, plugin: &str) -> Result<[Vec<(String, FieldType)>; 2]>
         // 5.18c part 2.
         "listenbrainz" => [own(crate::plugins::listenbrainz::ITEM_TYPES), vec![]],
         "lastimport" => [own(crate::plugins::lastimport::ITEM_TYPES), vec![]],
+        // 5.20b
+        "metasync" => [own(crate::plugins::metasync::ITEM_TYPES), vec![]],
         _ => [vec![], vec![]],
     })
 }
