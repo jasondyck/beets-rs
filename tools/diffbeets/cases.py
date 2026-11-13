@@ -1181,6 +1181,11 @@ IMPORT_CORPUS = {
               for n, t in enumerate(["First Duet", "Second Duet", "Third Duet"], 1)],
     # Spare files the rescan cases put into a directory at the prompt.
     "extra": [("delta.mp3", {**_FX, "title": "Delta", "track": "4"})],
+    # Two same-named albums under one import root: %aunique sees both in
+    # beets' threaded pipeline (both get a disambiguator); sequential sees
+    # only the first while placing it.
+    "twin": [("a/01.mp3", {**_FX, "title": "Alpha", "track": "1"}),
+             ("b/01.mp3", {**_FX, "title": "Beta", "track": "1"})],
     # fromfilename: no titles or track numbers in the tags, only in the
     # file names.
     "notitle": [(f"{n:02d} - Fixture Artist - {t}.mp3", {"album": "Fixture Album"})
@@ -1224,6 +1229,11 @@ IMPORT_CASES = [
      "match:\n    strong_rec_thresh: 0.2\n    max_rec:\n        missing_tracks: strong\n", []),
     ("s", "fx", ["-t", "-s", "-C"], "", ["1", "a", "u", "a"]),
     ("A", "fx", ["-A", "-C"], "", []),
+    # %aunique across two same-named albums imported in one run, sequential
+    # (the threaded case is scheduling-dependent in beets: see
+    # importer::tests::threaded_import_disambiguates_same_named_albums).
+    ("aunique-sequential", "twin", ["-A", "-q"],
+     "threaded: no\nimport:\n    duplicate_action: keep\n", []),
     ("t-abort", "fx", ["-t", "-C"], "", ["b"]),
     # "Rescan directory": a file added, one removed, the directory emptied.
     ("rescan-add", "fx", ["-t", "-C"], "",

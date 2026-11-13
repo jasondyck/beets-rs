@@ -513,6 +513,25 @@ pub struct Importer<'a> {
     lookups: HashMap<Vec<PathBuf>, Looked>,
     /// The import path being worked through, for "Rescan directory".
     current: Option<CurrentTop>,
+    /// Albums added to the library but not yet placed. With the threaded
+    /// pipeline beets adds tasks ahead of file placement, so `%aunique`
+    /// sees later albums of the same run; these are placed one album later
+    /// (or at the end of the run).
+    pending_albums: VecDeque<PendingAlbum>,
+}
+
+/// An album task between beets' `add` and `manipulate_files` stages.
+struct PendingAlbum {
+    album: Album,
+    items: Vec<Item>,
+    paths: Vec<PathBuf>,
+    replaced: Replaced,
+    tagged: bool,
+    n: usize,
+    source_dir: PathBuf,
+    /// The import root the source is under, for pruning after a move.
+    root: Option<PathBuf>,
+    op: FileOp,
 }
 
 /// An import path in progress: what a rescan needs to treat the albums it
@@ -739,6 +758,7 @@ impl<'a> Importer<'a> {
             prepared: None,
             lookups: HashMap::new(),
             current: None,
+            pending_albums: VecDeque::new(),
             merged: HashSet::new(),
             clutter: fileops::clutter(cfg),
             walk: WalkFilter::from_config(cfg),
@@ -864,6 +884,9 @@ impl<'a> Importer<'a> {
                     // Stop the lookahead first: it only reads, so nothing
                     // it was doing needs finishing.
                     drop(ahead);
+                    // Albums already added by the threaded pipeline still
+                    // have their files placed.
+                    self.flush_pending_albums()?;
                     // Progress so far stays recorded, so the import can resume;
                     // as beets, an abort stops silently.
                     return Ok(());
@@ -874,6 +897,7 @@ impl<'a> Importer<'a> {
                 self.state.save(&self.state_path)?;
             }
         }
+        self.flush_pending_albums()?;
         Ok(())
     }
 
@@ -1129,9 +1153,11 @@ impl<'a> Importer<'a> {
                 let mut item = item;
                 item.id = None;
                 if self.import_singleton_item(item)? == Outcome::Aborted {
+                    self.flush_pending_albums()?;
                     return Ok(());
                 }
             }
+            self.flush_pending_albums()?;
             return Ok(());
         }
         for album in self.lib.albums(&Query::parse(Kind::Album, query)?)? {
@@ -1168,9 +1194,11 @@ impl<'a> Importer<'a> {
                 self.import_album_items(items, &dir, std::slice::from_ref(&dir), false)?
             };
             if outcome == Outcome::Aborted {
+                self.flush_pending_albums()?;
                 return Ok(());
             }
         }
+        self.flush_pending_albums()?;
         Ok(())
     }
 
@@ -1919,20 +1947,41 @@ impl<'a> Importer<'a> {
         }
     }
 
-    /// Place files, write tags and store the album + items in the library.
+    /// Add the album + items to the library and run the plugins' import
+    /// stages; then place its files (or queue it: see `pending_albums`).
     fn finalize_album(
+        &mut self,
+        items: Vec<Item>,
+        matched: Option<&crate::mb::AlbumInfo>,
+        retag: bool,
+        source_dir: &Path,
+        graft: Option<i64>,
+    ) -> Result<()> {
+        let pending = self.add_album(items, matched, retag, source_dir, graft)?;
+        if !self.opts.threaded {
+            return self.place_album(pending);
+        }
+        self.pending_albums.push_back(pending);
+        // Beets' import stage can be one task ahead of the move stage.
+        while self.pending_albums.len() > 1 {
+            let pending = self.pending_albums.pop_front().unwrap();
+            self.place_album(pending)?;
+        }
+        Ok(())
+    }
+
+    /// beets' `add()`: the library transaction and the plugin import stages.
+    fn add_album(
         &mut self,
         mut items: Vec<Item>,
         matched: Option<&crate::mb::AlbumInfo>,
         retag: bool,
         source_dir: &Path,
         graft: Option<i64>,
-    ) -> Result<()> {
+    ) -> Result<PendingAlbum> {
         let tagged = matched.is_some() || retag;
         let n = items.len();
         let lib = self.lib;
-        let mut moved_in_library = false;
-        let mut copied = vec![];
         let added = lib.transaction(|lib| {
             let replaced = self.record_replaced(&items)?;
             self.remove_replaced(&replaced)?;
@@ -1970,10 +2019,39 @@ impl<'a> Importer<'a> {
             Ok((album, replaced))
         })?;
         let (mut album, replaced) = added;
-        let paths = [source_dir.to_path_buf()];
+        let paths = vec![source_dir.to_path_buf()];
         let op = self.opts.op;
         self.run_plugin_stages(Some(&mut album), &mut items, &paths, !tagged)?;
-        // beets' `manipulate_files`.
+        Ok(PendingAlbum {
+            album,
+            items,
+            paths,
+            replaced,
+            tagged,
+            n,
+            source_dir: source_dir.to_path_buf(),
+            root: self.roots.last().cloned(),
+            op,
+        })
+    }
+
+    /// beets' `manipulate_files` and the rest of `finalize`: place files,
+    /// write tags, run the file/imported hooks and update the stats.
+    fn place_album(&mut self, pending: PendingAlbum) -> Result<()> {
+        let PendingAlbum {
+            mut album,
+            mut items,
+            paths,
+            replaced,
+            tagged,
+            n,
+            source_dir,
+            root,
+            op,
+        } = pending;
+        let lib = self.lib;
+        let mut moved_in_library = false;
+        let mut copied = vec![];
         lib.transaction(|lib| {
             for (item, dups) in items.iter_mut().zip(&replaced.items) {
                 let op = self.file_op(item, !dups.is_empty());
@@ -2001,13 +2079,21 @@ impl<'a> Importer<'a> {
         plugins::each(self.plugins, |p| p.import_task_files(&ctx, &mut task));
         self.delete_originals(&copied);
         if op == FileOp::Move
-            && let Some(root) = self.roots.last()
+            && let Some(root) = &root
         {
-            prune_dirs(source_dir, root, &self.clutter);
+            prune_dirs(&source_dir, root, &self.clutter);
         }
         plugins::each(self.plugins, |p| p.album_imported(&ctx, &album));
         self.stats.albums += 1;
         self.stats.items += n;
+        Ok(())
+    }
+
+    /// Place the albums the threaded pipeline added ahead.
+    fn flush_pending_albums(&mut self) -> Result<()> {
+        while let Some(pending) = self.pending_albums.pop_front() {
+            self.place_album(pending)?;
+        }
         Ok(())
     }
 
@@ -3432,6 +3518,50 @@ mod tests {
     fn all_items(lib: &Library) -> Vec<Item> {
         lib.items(&crate::query::Query::parse::<&str>(crate::model::Kind::Item, &[]).unwrap())
             .unwrap()
+    }
+
+    /// Beets' threaded pipeline adds tasks ahead of placing files, so two
+    /// same-named albums imported in one run both see each other when
+    /// `%aunique` runs (`Album [1]`, `Album [2]`). Sequentially the first is
+    /// placed before the second exists (`Album`, `Album [2]`).
+    #[test]
+    fn threaded_import_disambiguates_same_named_albums() {
+        for (threaded, want) in [
+            (true, vec!["Album [1]", "Album [2]"]),
+            (false, vec!["Album", "Album [2]"]),
+        ] {
+            let (_d, mut cfg, lib, src) = setup(&[]);
+            cfg.set("import.duplicate_action", "keep".into());
+            cfg.set(
+                "paths",
+                serde_yaml::from_str("{default: '$albumartist/$album%aunique{}/$track $title'}")
+                    .unwrap(),
+            );
+            let (Some(a), Some(b)) = (album_dir(&src, "a", "Album"), album_dir(&src, "b", "Album"))
+            else {
+                return;
+            };
+            let mut o = opts(&cfg);
+            o.op = FileOp::Copy;
+            o.threaded = threaded;
+            let mut imp = Importer::new(&cfg, &lib, o, &[]).unwrap();
+            imp.run(&[a, b]).unwrap();
+            let mut dirs: Vec<String> = all_items(&lib)
+                .iter()
+                .map(|i| {
+                    i.path()
+                        .parent()
+                        .unwrap()
+                        .file_name()
+                        .unwrap()
+                        .to_string_lossy()
+                        .into_owned()
+                })
+                .collect();
+            dirs.sort();
+            dirs.dedup();
+            assert_eq!(dirs, want, "threaded: {threaded}");
+        }
     }
 
     #[test]
