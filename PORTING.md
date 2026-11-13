@@ -43,6 +43,7 @@ config`, plugins fetchart / lyrics / embedart, release preferences.
 - [ ] **2.10 `beet --help` command order** (found 2026-11-13): beets sorts the subcommand list by name (ui/__init__.py `subcommands.sort(key=lambda c: c.name)`, hidden ones left out) and prints it with optparse's layout; ours lists core commands in clap order, then plugin commands by registry `order`. Match beets' list and layout exactly; then a PluginCommand `order` is no longer needed (drop it, so parallel plugin work can't collide on it)
 - [ ] **2.11 option value errors in optparse wording** (found in 2.9): `ls -la` gives clap's "invalid value 'a' for '--limit'"; beets says "option -l: invalid integer value: 'a'" with usage, exit 2
 - [ ] **2.12 flaky diffbeets `migrate:ls ... artpath+` cases** (found in 2.9): 4 migrated-library `ls` cases sorted/formatted by `artpath` differ in some runs (`--only "migrate:"` reproduces it on master b69e31c), pass in others. Find the cause (unstable order of equal/empty artpath values? the migrated library's state?) and make the result deterministic in both tools' comparison
+- [ ] **2.13 disabled plugin commands** (found in 5.19): `beet <plugin-command>` with the plugin not enabled says "the X plugin is not enabled"; beets has no such command registered and says `unknown command`. Register plugin commands only for enabled plugins (keep `beet help` and 2.9's option check consistent)
 
 ## 3. Core: queries, templates, library
 
