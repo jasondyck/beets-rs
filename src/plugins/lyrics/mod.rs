@@ -637,7 +637,6 @@ inventory::submit! {
         fatal: false,
         commands: &[
             crate::plugin_registry::PluginCommand {
-                order: 140,
                 plugin: "lyrics",
                 build: build_lyrics,
                 run: run_lyrics,
@@ -682,7 +681,7 @@ pub struct LyricsArgs {
 pub fn build_lyrics() -> clap::Command {
     use clap::Args as _;
     LyricsArgs::augment_args(
-        clap::Command::new("lyrics").about("Fetch song lyrics (plugin: lyrics)"),
+        clap::Command::new("lyrics").about("fetch song lyrics"),
     )
 }
 

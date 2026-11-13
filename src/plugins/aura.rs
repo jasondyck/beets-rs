@@ -1029,7 +1029,6 @@ inventory::submit! {
         fatal: false,
         commands: &[
             crate::plugin_registry::PluginCommand {
-                order: 530,
                 plugin: "aura",
                 build: build_aura,
                 run: run_aura,
@@ -1056,7 +1055,7 @@ pub struct AuraArgs {
 pub fn build_aura() -> clap::Command {
     use clap::Args as _;
     AuraArgs::augment_args(
-        clap::Command::new("aura").about("Run an AURA server (plugin: aura)"),
+        clap::Command::new("aura").about("run an AURA server"),
     )
 }
 

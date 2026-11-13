@@ -340,7 +340,6 @@ inventory::submit! {
         fatal: false,
         commands: &[
             crate::plugin_registry::PluginCommand {
-                order: 220,
                 plugin: "badfiles",
                 build: build_bad,
                 run: run_bad,
@@ -370,7 +369,7 @@ pub struct BadArgs {
 pub fn build_bad() -> clap::Command {
     use clap::Args as _;
     BadArgs::augment_args(
-        clap::Command::new("bad").about("Check for corrupt or missing files (plugin: badfiles)"),
+        clap::Command::new("bad").about("check for corrupt or missing files"),
     )
 }
 

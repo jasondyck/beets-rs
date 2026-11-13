@@ -384,7 +384,6 @@ inventory::submit! {
         fatal: false,
         commands: &[
             crate::plugin_registry::PluginCommand {
-                order: 520,
                 plugin: "absubmit",
                 build: build_absubmit,
                 run: run_absubmit,
@@ -417,7 +416,7 @@ pub struct AbsubmitArgs {
 pub fn build_absubmit() -> clap::Command {
     use clap::Args as _;
     AbsubmitArgs::augment_args(clap::Command::new("absubmit").about(
-        "Calculate and submit AcousticBrainz analysis (plugin: absubmit)",
+        "calculate and submit AcousticBrainz analysis",
     ))
 }
 

@@ -361,7 +361,6 @@ inventory::submit! {
         fatal: false,
         commands: &[
             crate::plugin_registry::PluginCommand {
-                order: 280,
                 plugin: "zero",
                 build: build_zero,
                 run: run_zero,
@@ -387,7 +386,7 @@ pub struct ZeroArgs {
 
 pub fn build_zero() -> clap::Command {
     use clap::Args as _;
-    ZeroArgs::augment_args(clap::Command::new("zero").about("Set fields to null (plugin: zero)"))
+    ZeroArgs::augment_args(clap::Command::new("zero").about("set fields to null"))
 }
 
 pub fn run_zero(

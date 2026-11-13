@@ -1832,7 +1832,6 @@ inventory::submit! {
         make: Some(registry_make),
         fatal: false,
         commands: &[crate::plugin_registry::PluginCommand {
-            order: 100,
             plugin: "fetchart",
             build: build_command,
             run: run_command,
@@ -1865,7 +1864,7 @@ pub struct FetchartArgs {
 pub fn build_command() -> clap::Command {
     use clap::Args as _;
     FetchartArgs::augment_args(
-        clap::Command::new("fetchart").about("Download album art (plugin: fetchart)"),
+        clap::Command::new("fetchart").about("download album art"),
     )
 }
 

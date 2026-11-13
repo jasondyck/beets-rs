@@ -17,9 +17,6 @@ type Run = fn(&Config, &Library, &[Box<dyn Plugin>], &clap::ArgMatches) -> Resul
 
 /// One of a plugin's subcommands.
 pub struct PluginCommand {
-    /// Position among the plugin commands on `beet --help` (core commands
-    /// come first, `version`/`help`/`config` last).
-    pub order: u16,
     /// The plugin the command belongs to (the `plugins:` name, checked
     /// when the command runs).
     pub plugin: &'static str,
@@ -72,16 +69,16 @@ pub fn find(name: &str) -> Option<&'static PluginDef> {
         .find(|d| d.name == name)
 }
 
-/// Every plugin command, in `beet --help` order (`order`, then the
-/// command's name to make ties deterministic).
+/// Every plugin command, sorted by name as beets' `beet --help` lists them
+/// (the registry's link order is not deterministic).
 pub fn commands() -> Vec<&'static PluginCommand> {
-    let mut out: Vec<(u16, String, &'static PluginCommand)> = defs()
+    let mut out: Vec<(String, &'static PluginCommand)> = defs()
         .iter()
         .flat_map(|d| d.commands.iter())
-        .map(|c| (c.order, (c.build)().get_name().to_string(), c))
+        .map(|c| ((c.build)().get_name().to_string(), c))
         .collect();
-    out.sort_by(|a, b| (a.0, &a.1).cmp(&(b.0, &b.1)));
-    out.into_iter().map(|(_, _, c)| c).collect()
+    out.sort_by(|a, b| a.0.cmp(&b.0));
+    out.into_iter().map(|(_, c)| c).collect()
 }
 
 /// The command whose canonical name or alias is `name`.
@@ -132,23 +129,6 @@ mod tests {
                     def.name, def.order
                 );
             }
-        }
-    }
-
-    #[test]
-    fn command_orders_are_unique() {
-        let mut all: Vec<(u16, String)> = inventory::iter::<PluginDef>
-            .into_iter()
-            .flat_map(|d| d.commands.iter())
-            .map(|c| (c.order, (c.build)().get_name().to_string()))
-            .collect();
-        all.sort();
-        for pair in all.windows(2) {
-            assert_ne!(
-                pair[0].0, pair[1].0,
-                "commands {:?} and {:?} both have order {}; pick another",
-                pair[0].1, pair[1].1, pair[0].0
-            );
         }
     }
 

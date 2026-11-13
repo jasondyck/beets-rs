@@ -272,7 +272,6 @@ inventory::submit! {
         fatal: false,
         commands: &[
             crate::plugin_registry::PluginCommand {
-                order: 320,
                 plugin: "parentwork",
                 build: build_parentwork,
                 run: run_parentwork,
@@ -303,7 +302,7 @@ pub fn build_parentwork() -> clap::Command {
     use clap::Args as _;
     ParentworkArgs::augment_args(
         clap::Command::new("parentwork")
-            .about("Fetch parent works, composers and dates (plugin: parentwork)"),
+            .about("fetch parent works, composers and dates"),
     )
 }
 

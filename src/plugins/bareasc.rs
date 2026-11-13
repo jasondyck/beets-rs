@@ -128,7 +128,6 @@ inventory::submit! {
         make: Some(registry_make),
         fatal: false,
         commands: &[crate::plugin_registry::PluginCommand {
-            order: 470,
             plugin: "bareasc",
             build: build_bareasc,
             run: run_bareasc,
@@ -163,7 +162,7 @@ pub struct BareascArgs {
 pub fn build_bareasc() -> clap::Command {
     use clap::Args as _;
     BareascArgs::augment_args(clap::Command::new("bareasc").about(
-        "Unidecode version of the list command (plugin: bareasc)",
+        "unidecode version of beet list command",
     ))
 }
 

@@ -442,7 +442,6 @@ inventory::submit! {
         fatal: false,
         commands: &[
             crate::plugin_registry::PluginCommand {
-                order: 240,
                 plugin: "ftintitle",
                 build: build_ftintitle,
                 run: run_ftintitle,
@@ -473,7 +472,7 @@ pub fn build_ftintitle() -> clap::Command {
     use clap::Args as _;
     FtintitleArgs::augment_args(
         clap::Command::new("ftintitle")
-            .about("Move featured artists to the title field (plugin: ftintitle)"),
+            .about("move featured artists to the title field"),
     )
 }
 

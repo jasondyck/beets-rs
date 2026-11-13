@@ -164,7 +164,6 @@ inventory::submit! {
         fatal: false,
         commands: &[
             crate::plugin_registry::PluginCommand {
-                order: 580,
                 plugin: "mbsubmit",
                 build: build_mbsubmit,
                 run: run_mbsubmit,
@@ -191,7 +190,7 @@ pub struct MbsubmitArgs {
 pub fn build_mbsubmit() -> clap::Command {
     use clap::Args as _;
     MbsubmitArgs::augment_args(clap::Command::new("mbsubmit").about(
-        "Submit Tracks to MusicBrainz (plugin: mbsubmit)",
+        "Submit Tracks to MusicBrainz",
     ))
 }
 

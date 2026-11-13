@@ -397,7 +397,6 @@ inventory::submit! {
         make: Some(registry_make),
         fatal: false,
         commands: &[crate::plugin_registry::PluginCommand {
-            order: 360,
             plugin: "acousticbrainz",
             build: build_acousticbrainz,
             run: run_acousticbrainz,

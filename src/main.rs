@@ -45,6 +45,12 @@ use std::path::PathBuf;
     disable_help_subcommand = true
 )]
 pub struct Cli {
+    /// Format for printing items
+    #[arg(long = "format-item", value_name = "FORMAT_ITEM")]
+    pub format_item: Option<String>,
+    /// Format for printing albums
+    #[arg(long = "format-album", value_name = "FORMAT_ALBUM")]
+    pub format_album: Option<String>,
     /// Library database file to use
     #[arg(short = 'l', long = "library")]
     pub library: Option<PathBuf>,
@@ -81,7 +87,7 @@ pub fn comma_list(s: &str) -> Vec<String> {
 
 #[derive(Subcommand, Debug)]
 pub enum Cmd {
-    /// Import new music
+    /// import new music
     #[command(visible_alias = "imp", visible_alias = "im")]
     Import {
         /// Copy files into the library directory
@@ -169,7 +175,7 @@ pub enum Cmd {
         /// Paths to import (with -L: a library query)
         paths: Vec<PathBuf>,
     },
-    /// Query the library
+    /// query the library
     #[command(visible_alias = "ls")]
     List {
         /// Show matching albums instead of tracks
@@ -186,7 +192,7 @@ pub enum Cmd {
         limit: Option<usize>,
         query: Vec<String>,
     },
-    /// Change metadata fields: `beet modify QUERY field=value field!`
+    /// change metadata fields
     #[command(visible_alias = "mod")]
     Modify {
         /// Match albums instead of tracks
@@ -220,7 +226,7 @@ pub enum Cmd {
         #[arg(allow_hyphen_values = true)]
         args: Vec<String>,
     },
-    /// Remove matching items from the library
+    /// remove matching items from the library
     #[command(visible_alias = "rm")]
     Remove {
         #[arg(short = 'a', long)]
@@ -237,7 +243,7 @@ pub enum Cmd {
         #[arg(allow_hyphen_values = true)]
         query: Vec<String>,
     },
-    /// Move or copy items to their library paths (or another directory)
+    /// move or copy items
     #[command(visible_alias = "mv")]
     Move {
         #[arg(short = 'a', long)]
@@ -263,7 +269,7 @@ pub enum Cmd {
         #[arg(allow_hyphen_values = true)]
         query: Vec<String>,
     },
-    /// Re-read tags from files, dropping items whose files are gone
+    /// update the library
     #[command(visible_alias = "upd", visible_alias = "up")]
     Update {
         /// Match albums instead of tracks
@@ -293,7 +299,7 @@ pub enum Cmd {
         #[arg(allow_hyphen_values = true)]
         query: Vec<String>,
     },
-    /// Write tag information to files
+    /// write tag information to files
     Write {
         /// Show all changes but do nothing
         #[arg(short = 'p', long)]
@@ -307,7 +313,7 @@ pub enum Cmd {
         #[arg(allow_hyphen_values = true)]
         query: Vec<String>,
     },
-    /// Show library statistics
+    /// show statistics about the library or a query
     Stats {
         /// Exact size and time
         #[arg(short = 'e', long)]
@@ -318,10 +324,10 @@ pub enum Cmd {
         #[arg(allow_hyphen_values = true)]
         query: Vec<String>,
     },
-    /// List available fields
+    /// show fields available for queries and format strings
     Fields,
-    /// Copy a beets library database (opened read-only) into this library
-    #[command(name = "migrate-beets")]
+    /// copy a beets library database (opened read-only) into this library
+    #[command(name = "migrate-beets", hide = true)]
     MigrateBeets {
         /// Take beets' library directory from this beets config file
         #[arg(long = "beets-config", value_name = "PATH")]
@@ -335,15 +341,15 @@ pub enum Cmd {
         /// The beets library database (library.db)
         database: PathBuf,
     },
-    /// Output version information
+    /// output version information
     Version,
-    /// Give detailed help on a specific sub-command
+    /// give detailed help on a specific sub-command
     #[command(visible_alias = "?")]
     Help {
         /// The command to explain
         command: Option<String>,
     },
-    /// Show the effective configuration
+    /// show or edit the user configuration
     Config {
         /// Show files that configuration was loaded from
         #[arg(short = 'p', long)]
@@ -419,6 +425,195 @@ fn option_error(err: PreError) -> String {
 
 fn root_usage() -> String {
     "Usage: \n  beet COMMAND [ARGS...]\n  beet help COMMAND".to_string()
+}
+
+/// One row of `beet --help`'s command list.
+pub struct HelpCommand {
+    name: String,
+    aliases: Vec<String>,
+    help: String,
+}
+
+/// The command list beets prints: the core commands and the enabled
+/// plugins', hidden ones (and disabled plugin commands) left out.
+pub fn help_commands(enabled_plugins: &[String]) -> Vec<HelpCommand> {
+    use clap::CommandFactory;
+    let row = |cmd: &clap::Command| {
+        if cmd.is_hide_set() {
+            return None;
+        }
+        Some(HelpCommand {
+            name: cmd.get_name().to_string(),
+            aliases: cmd.get_visible_aliases().map(str::to_string).collect(),
+            help: cmd.get_about().map(|a| a.to_string()).unwrap_or_default(),
+        })
+    };
+    let mut out: Vec<HelpCommand> = Cli::command().get_subcommands().filter_map(row).collect();
+    for command in plugin_registry::commands() {
+        if !enabled_plugins.iter().any(|p| p == command.plugin) {
+            continue;
+        }
+        out.extend(row(&(command.build)()));
+    }
+    // beets sorts the list by name (`ui/__init__.py`'s format_help).
+    out.sort_by(|a, b| a.name.cmp(&b.name));
+    out
+}
+
+/// optparse's output width: `$COLUMNS`, or 80, less two columns.
+fn optparse_width() -> usize {
+    std::env::var("COLUMNS")
+        .ok()
+        .and_then(|w| w.trim().parse::<usize>().ok())
+        .map(|w| w.saturating_sub(2))
+        .unwrap_or(80 - 2)
+}
+
+/// optparse's `max_help_position`: the help starts at column 24 at most.
+fn max_help_position(width: usize) -> usize {
+    (width.saturating_sub(20)).clamp(4, 24)
+}
+
+/// `textwrap.wrap(text, width)` for optparse's help, whose arguments collapse
+/// whitespace; long words are broken as textwrap does by default (beets' help
+/// texts have no hyphens, so its hyphen breaking never comes up).
+fn wrap_help(text: &str, width: usize) -> Vec<String> {
+    let width = width.max(1);
+    let mut lines = vec![];
+    let mut line = String::new();
+    let push_word = |word: &str, line: &mut String, lines: &mut Vec<String>| {
+        let mut word = word;
+        if !line.is_empty() {
+            if line.chars().count() + 1 + word.chars().count() <= width {
+                line.push(' ');
+                line.push_str(word);
+                return;
+            }
+            lines.push(std::mem::take(line));
+        }
+        while word.chars().count() > width {
+            let split = word
+                .char_indices()
+                .nth(width)
+                .map(|(i, _)| i)
+                .unwrap_or(word.len());
+            lines.push(word[..split].to_string());
+            word = &word[split..];
+        }
+        line.push_str(word);
+    };
+    for word in text.split_whitespace() {
+        push_word(word, &mut line, &mut lines);
+    }
+    if !line.is_empty() {
+        lines.push(line);
+    }
+    lines
+}
+
+/// One optparse help table (`Commands:`/`Options:`): two-space indent, names
+/// padded to `help_position`, the help wrapped in the rest of the width.
+fn render_table(rows: &[(String, String)], width: usize, help_position: usize) -> String {
+    let indent = 2;
+    let name_width = help_position.saturating_sub(indent + 2);
+    let help_width = width.saturating_sub(help_position);
+    let mut out = String::new();
+    for (name, help) in rows {
+        let indent_first = if name.chars().count() > name_width {
+            out.push_str(&format!("{}{}\n", " ".repeat(indent), name));
+            help_position
+        } else {
+            out.push_str(&format!(
+                "{}{:<name_width$}  ",
+                " ".repeat(indent),
+                name,
+                name_width = name_width
+            ));
+            0
+        };
+        let lines = wrap_help(help, help_width);
+        out.push_str(&" ".repeat(indent_first));
+        out.push_str(lines.first().map(String::as_str).unwrap_or(""));
+        out.push('\n');
+        for line in lines.iter().skip(1) {
+            out.push_str(&" ".repeat(help_position));
+            out.push_str(line);
+            out.push('\n');
+        }
+    }
+    out
+}
+
+/// The root options as optparse shows them (`-h`, then the metavar-bearing
+/// long form), in beets' order.
+const ROOT_OPTIONS: &[(&str, &str)] = &[
+    ("--format-item=FORMAT_ITEM", "print with custom format"),
+    ("--format-album=FORMAT_ALBUM", "print with custom format"),
+    (
+        "-l LIBRARY, --library=LIBRARY",
+        "library database file to use",
+    ),
+    (
+        "-d DIRECTORY, --directory=DIRECTORY",
+        "destination music directory",
+    ),
+    (
+        "-v, --verbose",
+        "log more details (use twice for even more)",
+    ),
+    ("-c CONFIGS, --config=CONFIGS", "path to configuration file"),
+    (
+        "-p PLUGINS, --plugins=PLUGINS",
+        "a comma-separated list of plugins to load",
+    ),
+    (
+        "-P DISABLED_PLUGINS, --disable-plugins=DISABLED_PLUGINS",
+        "a comma-separated list of plugins to disable",
+    ),
+    ("-h, --help", "show this help message and exit"),
+];
+
+/// `beet --help`/`beet help`, byte for byte as beets' optparse prints it.
+pub fn root_help_text(enabled_plugins: &[String]) -> String {
+    root_help_text_at(enabled_plugins, optparse_width())
+}
+
+/// The same at a given optparse width (for tests).
+fn root_help_text_at(enabled_plugins: &[String], width: usize) -> String {
+    let rows: Vec<(String, String)> = ROOT_OPTIONS
+        .iter()
+        .map(|(name, help)| (name.to_string(), help.to_string()))
+        .collect();
+    let mut out = format!(
+        "{}\n\nOptions:\n{}",
+        root_usage(),
+        render_table(&rows, width, max_help_position(width))
+    );
+    let commands: Vec<(String, String)> = help_commands(enabled_plugins)
+        .into_iter()
+        .map(|c| {
+            let name = if c.aliases.is_empty() {
+                c.name
+            } else {
+                format!("{} ({})", c.name, c.aliases.join(", "))
+            };
+            (name, c.help)
+        })
+        .collect();
+    // The commands' help column is fitted to the longest command name (up
+    // to optparse's maximum), unlike the options' fixed column.
+    let max_pos = max_help_position(width);
+    let help_position = commands
+        .iter()
+        .map(|(name, _)| name.chars().count() + 4)
+        .filter(|p| *p <= max_pos)
+        .max()
+        .unwrap_or(0);
+    out.push_str(&format!(
+        "\nCommands:\n{}",
+        render_table(&commands, width, help_position)
+    ));
+    out
 }
 
 fn command_usage(name: &str) -> String {
@@ -634,8 +829,9 @@ fn enabled_plugins(raw: &[std::ffi::OsString], root_opts: &[OptInfo]) -> Vec<Str
 /// beets' optparse checks, before clap parses: unknown (and abbreviated
 /// long) options, with optparse's messages and exit code 2; `--` ends
 /// option parsing (and may precede the command). Returns the possibly
-/// rewritten arguments.
-fn precheck(raw: &[std::ffi::OsString]) -> Vec<std::ffi::OsString> {
+/// rewritten arguments; whether a root-level `-h`/`--help` was given (beets
+/// then runs the help command, whatever follows); and the plugins enabled.
+fn precheck(raw: &[std::ffi::OsString]) -> (Vec<std::ffi::OsString>, bool, Vec<String>) {
     // The full command line, including the registry's plugin commands
     // (which clap only learns at run time).
     let root = cli();
@@ -644,11 +840,17 @@ fn precheck(raw: &[std::ffi::OsString]) -> Vec<std::ffi::OsString> {
     let mut out: Vec<std::ffi::OsString> = vec![raw[0].clone()];
     let mut command: Option<String> = None;
     let mut sub_opts: Vec<OptInfo> = vec![];
+    let mut root_help = false;
     let mut i = 1;
     while i < raw.len() {
         let s = raw[i].to_string_lossy().into_owned();
         match &command {
             None => {
+                if root_help && (s == "--" || s == "-" || !s.starts_with('-')) {
+                    // As beets: the global options force the help command, so
+                    // nothing after them (not even a command) is parsed.
+                    break;
+                }
                 if s == "--" {
                     i += 1;
                     if i < raw.len() {
@@ -695,7 +897,13 @@ fn precheck(raw: &[std::ffi::OsString]) -> Vec<std::ffi::OsString> {
                     }
                     continue;
                 }
+                let before = out.len();
                 process_option(raw, &mut i, &root_opts, &mut out, None);
+                root_help |= out[before..].iter().any(|tok| {
+                    let tok = tok.to_string_lossy();
+                    tok == "--help"
+                        || (tok.starts_with('-') && !tok.starts_with("--") && tok.contains('h'))
+                });
             }
             Some(name) => {
                 if s == "--" {
@@ -711,7 +919,7 @@ fn precheck(raw: &[std::ffi::OsString]) -> Vec<std::ffi::OsString> {
             }
         }
     }
-    out
+    (out, root_help, enabled)
 }
 
 /// Whether a resolved command is a core command or an enabled plugin's.
@@ -825,7 +1033,12 @@ fn main() {
         libc::signal(libc::SIGPIPE, libc::SIG_DFL);
     }
     let raw: Vec<std::ffi::OsString> = std::env::args_os().collect();
-    let parsed = match parse_args(precheck(&raw)) {
+    let (args, root_help, enabled) = precheck(&raw);
+    if root_help {
+        print!("{}", root_help_text(&enabled));
+        return;
+    }
+    let parsed = match parse_args(args) {
         Ok(parsed) => parsed,
         Err(e) => match unknown_command(&e) {
             Some(name) => {
@@ -1000,5 +1213,106 @@ mod tests {
         let e = parse(&["mv", "--help"]).unwrap_err();
         assert_eq!(e.kind(), ErrorKind::DisplayHelp);
         assert!(e.to_string().contains("Usage: beet move"));
+    }
+
+    /// beets' own `beet --help`, captured from reference beets 2.14.1 (the
+    /// `--format-*` options, optparse's layout and the sorted command list;
+    /// `migrate-beets` is ours and stays out, like beets' hidden commands).
+    const REFERENCE_CORE_HELP: &str = "\
+Usage: 
+  beet COMMAND [ARGS...]
+  beet help COMMAND
+
+Options:
+  --format-item=FORMAT_ITEM
+                        print with custom format
+  --format-album=FORMAT_ALBUM
+                        print with custom format
+  -l LIBRARY, --library=LIBRARY
+                        library database file to use
+  -d DIRECTORY, --directory=DIRECTORY
+                        destination music directory
+  -v, --verbose         log more details (use twice for even more)
+  -c CONFIGS, --config=CONFIGS
+                        path to configuration file
+  -p PLUGINS, --plugins=PLUGINS
+                        a comma-separated list of plugins to load
+  -P DISABLED_PLUGINS, --disable-plugins=DISABLED_PLUGINS
+                        a comma-separated list of plugins to disable
+  -h, --help            show this help message and exit
+
+Commands:
+  config            show or edit the user configuration
+  fields            show fields available for queries and format strings
+  help (?)          give detailed help on a specific sub-command
+  import (imp, im)  import new music
+  list (ls)         query the library
+  modify (mod)      change metadata fields
+  move (mv)         move or copy items
+  remove (rm)       remove matching items from the library
+  stats             show statistics about the library or a query
+  update (upd, up)  update the library
+  version           output version information
+  write             write tag information to files
+";
+
+    #[test]
+    fn root_help_matches_beets() {
+        assert_eq!(root_help_text_at(&[], 78), REFERENCE_CORE_HELP);
+    }
+
+    #[test]
+    fn root_help_lists_enabled_plugin_commands_sorted() {
+        let help = root_help_text_at(&["fetchart".into(), "embedart".into()], 78);
+        let commands: Vec<&str> = help
+            .lines()
+            .skip_while(|l| *l != "Commands:")
+            .skip(1)
+            .filter(|l| l.starts_with("  ") && !l.starts_with("    "))
+            .map(|l| l.trim_start().split("  ").next().unwrap())
+            .collect();
+        let names: Vec<&str> = commands
+            .iter()
+            .map(|name| name.split(' ').next().unwrap())
+            .collect();
+        let mut sorted = names.clone();
+        sorted.sort();
+        assert_eq!(names, sorted);
+        assert!(names.contains(&"clearart"));
+        assert!(names.contains(&"extractart"));
+        assert!(names.contains(&"fetchart"));
+        // A plugin that isn't enabled has no command, as in beets.
+        assert!(!help.contains("lyrics"));
+        assert!(!help.contains("migrate-beets"));
+    }
+
+    #[test]
+    fn command_aliases_as_beets_shows_them() {
+        assert_eq!(
+            help_commands(&[])
+                .iter()
+                .find(|c| c.name == "import")
+                .unwrap()
+                .aliases,
+            ["imp", "im"]
+        );
+        assert_eq!(
+            help_commands(&[])
+                .iter()
+                .find(|c| c.name == "help")
+                .unwrap()
+                .aliases,
+            ["?"]
+        );
+    }
+
+    #[test]
+    fn root_help_columns_follow_optparse() {
+        // At a narrow width optparse puts long option strings on their own
+        // line, with the help indented to `max_help_position`.
+        let help = root_help_text_at(&[], 50);
+        assert!(help.contains("  --format-item=FORMAT_ITEM\n"));
+        assert!(help.contains("                    print with custom format\n"));
+        assert!(help.contains("  -v, --verbose         log more details"));
     }
 }

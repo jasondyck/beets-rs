@@ -208,7 +208,6 @@ lastimport:
         fatal: false,
         commands: &[
             crate::plugin_registry::PluginCommand {
-                order: 420,
                 plugin: "lastimport",
                 build: build_lastimport,
                 run: run_lastimport,
@@ -232,7 +231,7 @@ pub struct LastimportArgs {
 pub fn build_lastimport() -> clap::Command {
     use clap::Args as _;
     LastimportArgs::augment_args(
-        clap::Command::new("lastimport").about("import last.fm play-count (plugin: lastimport)"),
+        clap::Command::new("lastimport").about("import last.fm play-count"),
     )
 }
 

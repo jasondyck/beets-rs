@@ -431,7 +431,6 @@ inventory::submit! {
         fatal: false,
         commands: &[
             crate::plugin_registry::PluginCommand {
-                order: 410,
                 plugin: "listenbrainz",
                 build: build_lbimport,
                 run: run_lbimport,
@@ -461,7 +460,7 @@ pub struct LbimportArgs {
 pub fn build_lbimport() -> clap::Command {
     use clap::Args as _;
     LbimportArgs::augment_args(
-        clap::Command::new("lbimport").about("Import ListenBrainz history (plugin: listenbrainz)"),
+        clap::Command::new("lbimport").about("Import ListenBrainz history"),
     )
 }
 

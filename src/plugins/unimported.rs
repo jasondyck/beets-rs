@@ -117,7 +117,6 @@ inventory::submit! {
         make: Some(registry_make),
         fatal: false,
         commands: &[crate::plugin_registry::PluginCommand {
-            order: 225,
             plugin: "unimported",
             build: build_unimported,
             run: run_unimported,
@@ -137,7 +136,7 @@ pub struct UnimportedArgs {}
 pub fn build_unimported() -> clap::Command {
     use clap::Args as _;
     UnimportedArgs::augment_args(clap::Command::new("unimported").about(
-        "List all files in the library folder which are not listed in the beets library database (plugin: unimported)",
+        "list all files in the library folder which are not listed in the beets library database",
     ))
 }
 

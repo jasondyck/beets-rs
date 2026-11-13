@@ -1516,7 +1516,6 @@ inventory::submit! {
         fatal: false,
         commands: &[
             crate::plugin_registry::PluginCommand {
-                order: 200,
                 plugin: "web",
                 build: build_web,
                 run: run_web,
@@ -1543,7 +1542,7 @@ pub struct WebArgs {
 
 pub fn build_web() -> clap::Command {
     use clap::Args as _;
-    WebArgs::augment_args(clap::Command::new("web").about("Start a Web interface (plugin: web)"))
+    WebArgs::augment_args(clap::Command::new("web").about("start a Web interface"))
 }
 
 pub fn run_web(

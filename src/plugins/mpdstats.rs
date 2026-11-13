@@ -536,7 +536,6 @@ inventory::submit! {
         make: Some(registry_make),
         fatal: false,
         commands: &[crate::plugin_registry::PluginCommand {
-            order: 400,
             plugin: "mpdstats",
             build: build_mpdstats,
             run: run_mpdstats,

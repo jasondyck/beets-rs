@@ -390,7 +390,6 @@ inventory::submit! {
         fatal: false,
         commands: &[
             crate::plugin_registry::PluginCommand {
-                order: 160,
                 plugin: "info",
                 build: build_info,
                 run: run_info,
@@ -434,7 +433,7 @@ pub struct InfoArgs {
 
 pub fn build_info() -> clap::Command {
     use clap::Args as _;
-    InfoArgs::augment_args(clap::Command::new("info").about("Show file metadata (plugin: info)"))
+    InfoArgs::augment_args(clap::Command::new("info").about("show file metadata"))
 }
 
 pub fn run_info(

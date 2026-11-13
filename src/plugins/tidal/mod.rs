@@ -996,13 +996,11 @@ inventory::submit! {
         fatal: false,
         commands: &[
             crate::plugin_registry::PluginCommand {
-                order: 600,
                 plugin: "tidal",
                 build: build_tidal,
                 run: run_tidal,
             },
             crate::plugin_registry::PluginCommand {
-                order: 610,
                 plugin: "tidal",
                 build: build_tidalsync,
                 run: run_tidalsync,

@@ -454,7 +454,6 @@ inventory::submit! {
         fatal: false,
         commands: &[
             crate::plugin_registry::PluginCommand {
-                order: 590,
                 plugin: "play",
                 build: build_play,
                 run: run_play,
@@ -493,7 +492,7 @@ pub struct PlayArgs {
 pub fn build_play() -> clap::Command {
     use clap::Args as _;
     PlayArgs::augment_args(clap::Command::new("play").about(
-        "Send music to a player as a playlist (plugin: play)",
+        "send music to a player as a playlist",
     ))
 }
 

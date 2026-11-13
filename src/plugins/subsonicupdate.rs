@@ -239,7 +239,6 @@ inventory::submit! {
         fatal: false,
         commands: &[
             crate::plugin_registry::PluginCommand {
-                order: 450,
                 plugin: "subsonicupdate",
                 build: build_subsonicupdate,
                 run: run_subsonicupdate,
@@ -264,7 +263,7 @@ pub fn build_subsonicupdate() -> clap::Command {
     use clap::Args as _;
     SubsonicUpdateArgs::augment_args(
         clap::Command::new("subsonicupdate")
-            .about("Update the Subsonic library (plugin: subsonicupdate)"),
+            .about("Update the Subsonic library"),
     )
 }
 

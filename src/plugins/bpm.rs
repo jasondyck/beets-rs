@@ -164,7 +164,6 @@ inventory::submit! {
         fatal: false,
         commands: &[
             crate::plugin_registry::PluginCommand {
-                order: 560,
                 plugin: "bpm",
                 build: build_bpm,
                 run: run_bpm,
@@ -191,7 +190,7 @@ pub struct BpmArgs {
 pub fn build_bpm() -> clap::Command {
     use clap::Args as _;
     BpmArgs::augment_args(clap::Command::new("bpm").about(
-        "Determine bpm of a song by pressing a key to the rhythm (plugin: bpm)",
+        "determine bpm of a song by pressing a key to the rhythm",
     ))
 }
 

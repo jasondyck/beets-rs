@@ -752,7 +752,6 @@ inventory::submit! {
         fatal: false,
         commands: &[
             crate::plugin_registry::PluginCommand {
-                order: 180,
                 plugin: "duplicates",
                 build: build_duplicates,
                 run: run_duplicates,
@@ -822,7 +821,7 @@ pub fn build_duplicates() -> clap::Command {
     use clap::Args as _;
     DuplicatesArgs::augment_args(
         clap::Command::new("duplicates")
-            .about("List duplicate tracks or albums (plugin: duplicates)")
+            .about("List duplicate tracks or albums.")
             .visible_alias("dup"),
     )
 }

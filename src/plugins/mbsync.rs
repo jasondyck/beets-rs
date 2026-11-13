@@ -374,7 +374,6 @@ inventory::submit! {
         fatal: false,
         commands: &[
             crate::plugin_registry::PluginCommand {
-                order: 190,
                 plugin: "mbsync",
                 build: build_mbsync,
                 run: run_mbsync,
@@ -416,7 +415,7 @@ pub struct MbsyncArgs {
 pub fn build_mbsync() -> clap::Command {
     use clap::Args as _;
     MbsyncArgs::augment_args(
-        clap::Command::new("mbsync").about("Update metadata from musicbrainz (plugin: mbsync)"),
+        clap::Command::new("mbsync").about("update metadata from musicbrainz"),
     )
 }
 

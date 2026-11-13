@@ -1450,7 +1450,6 @@ inventory::submit! {
         fatal: false,
         commands: &[
             crate::plugin_registry::PluginCommand {
-                order: 170,
                 plugin: "replaygain",
                 build: build_replaygain,
                 run: run_replaygain,
@@ -1494,7 +1493,7 @@ pub struct ReplaygainArgs {
 pub fn build_replaygain() -> clap::Command {
     use clap::Args as _;
     ReplaygainArgs::augment_args(
-        clap::Command::new("replaygain").about("Analyze for ReplayGain (plugin: replaygain)"),
+        clap::Command::new("replaygain").about("analyze for ReplayGain"),
     )
 }
 

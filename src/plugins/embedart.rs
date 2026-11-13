@@ -769,19 +769,16 @@ inventory::submit! {
         fatal: false,
         commands: &[
             crate::plugin_registry::PluginCommand {
-                order: 110,
                 plugin: "embedart",
                 build: build_embedart,
                 run: run_embedart,
             },
             crate::plugin_registry::PluginCommand {
-                order: 120,
                 plugin: "embedart",
                 build: build_extractart,
                 run: run_extractart,
             },
             crate::plugin_registry::PluginCommand {
-                order: 130,
                 plugin: "embedart",
                 build: build_clearart,
                 run: run_clearart,
@@ -818,7 +815,7 @@ pub fn build_embedart() -> clap::Command {
     use clap::Args as _;
     EmbedartArgs::augment_args(
         clap::Command::new("embedart")
-            .about("Embed image files into file metadata (plugin: embedart)"),
+            .about("embed image files into file metadata"),
     )
 }
 
@@ -871,7 +868,7 @@ pub fn build_extractart() -> clap::Command {
     use clap::Args as _;
     ExtractartArgs::augment_args(
         clap::Command::new("extractart")
-            .about("Extract an image from file metadata (plugin: embedart)"),
+            .about("extract an image from file metadata"),
     )
 }
 
@@ -917,7 +914,7 @@ pub struct ClearartArgs {
 pub fn build_clearart() -> clap::Command {
     use clap::Args as _;
     ClearartArgs::augment_args(
-        clap::Command::new("clearart").about("Remove images from file metadata (plugin: embedart)"),
+        clap::Command::new("clearart").about("remove images from file metadata"),
     )
 }
 

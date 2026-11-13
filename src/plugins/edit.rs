@@ -729,7 +729,6 @@ inventory::submit! {
         fatal: false,
         commands: &[
             crate::plugin_registry::PluginCommand {
-                order: 260,
                 plugin: "edit",
                 build: build_edit,
                 run: run_edit,
@@ -762,7 +761,7 @@ pub struct EditArgs {
 pub fn build_edit() -> clap::Command {
     use clap::Args as _;
     EditArgs::augment_args(
-        clap::Command::new("edit").about("Interactively edit metadata (plugin: edit)"),
+        clap::Command::new("edit").about("interactively edit metadata"),
     )
 }
 

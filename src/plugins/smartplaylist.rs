@@ -532,7 +532,6 @@ inventory::submit! {
         fatal: false,
         commands: &[
             crate::plugin_registry::PluginCommand {
-                order: 210,
                 plugin: "smartplaylist",
                 build: build_splupdate,
                 run: run_splupdate,
@@ -585,7 +584,7 @@ pub struct SplupdateArgs {
 pub fn build_splupdate() -> clap::Command {
     use clap::Args as _;
     SplupdateArgs::augment_args(
-        clap::Command::new("splupdate").about("Update the smart playlists. Playlist names may be passed as arguments. (plugin: smartplaylist)"),
+        clap::Command::new("splupdate").about("update the smart playlists. Playlist names may be passed as arguments."),
     )
 }
 

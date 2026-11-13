@@ -321,7 +321,6 @@ inventory::submit! {
         make: Some(registry_make),
         fatal: false,
         commands: &[crate::plugin_registry::PluginCommand {
-            order: 370,
             plugin: "subsonicplaylist",
             build: build_subsonicplaylist,
             run: run_subsonicplaylist,
