@@ -317,6 +317,8 @@ inventory::submit! {
         config_keys: &["mbcollection"],
         // `musicbrainz.pass` is not redacted here: beets sets that flag only
         // when the collection API is first used, so `beet config` shows it.
+        item_types: &[],
+        album_types: &[],
         redacted: &[],
         make: Some(registry_make),
         fatal: false,

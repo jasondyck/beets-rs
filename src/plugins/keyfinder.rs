@@ -198,6 +198,8 @@ inventory::submit! {
     overwrite: no
 "#,
         config_keys: &["keyfinder"],
+        item_types: &[],
+        album_types: &[],
         redacted: &[],
         make: Some(registry_make),
         fatal: false,

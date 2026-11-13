@@ -354,6 +354,8 @@ inventory::submit! {
     release_types: [album]
 "#,
         config_keys: &["missing"],
+        item_types: &[],
+        album_types: crate::plugins::missing::ALBUM_TYPES,
         redacted: &[],
         make: Some(registry_make),
         fatal: false,

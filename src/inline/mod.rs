@@ -149,7 +149,7 @@ pub fn py_value<'a>(rec: &Record, key: &str) -> V<'a> {
         (FieldType::Int | FieldType::Padded(_) | FieldType::Bitrate | FieldType::SampleRate, v) => {
             V::Int(v.as_f64().unwrap_or(0.0) as i64)
         }
-        (FieldType::Float | FieldType::Duration | FieldType::Date | FieldType::NullFloat, v) => {
+        (FieldType::Float(_) | FieldType::Duration | FieldType::Date | FieldType::NullFloat, v) => {
             V::Float(v.as_f64().unwrap_or(0.0))
         }
         (_, v) => V::str(v.raw()),
@@ -416,6 +416,8 @@ item_fields: {}
 album_fields: {}
 "#,
         config_keys: &["pathfields", "item_fields", "album_fields"],
+        item_types: &[],
+        album_types: &[],
         redacted: &[],
         make: Some(registry_make),
         fatal: false,

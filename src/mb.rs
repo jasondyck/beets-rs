@@ -460,6 +460,10 @@ pub struct ParseOpts {
     /// mbpseudo's `album_custom_tags` / `track_custom_tags`.
     pub album_custom_tags: Vec<(String, String)>,
     pub track_custom_tags: Vec<(String, String)>,
+    /// The data source the parsed infos report: "MusicBrainz", or
+    /// "MusicBrainzPseudoRelease" while the mbpseudo plugin is enabled
+    /// (beets' `MusicBrainzPseudoReleasePlugin.data_source`).
+    pub data_source: String,
 }
 
 impl Default for ParseOpts {
@@ -477,6 +481,7 @@ impl Default for ParseOpts {
             custom_tags_only: false,
             album_custom_tags: vec![],
             track_custom_tags: vec![],
+            data_source: "MusicBrainz".into(),
         }
     }
 }
@@ -518,6 +523,11 @@ impl ParseOpts {
                 cfg.mapping("mbpseudo.track_custom_tags")
             } else {
                 vec![]
+            },
+            data_source: if crate::plugins::enabled(cfg, "mbpseudo") {
+                "MusicBrainzPseudoRelease".into()
+            } else {
+                "MusicBrainz".into()
             },
         }
     }
@@ -786,7 +796,7 @@ fn parse_recording_with(
         length: length.filter(|l| *l != 0.0).map(|ms| ms / 1000.0),
         isrc: isrcs.join(";"),
         trackdisambig,
-        data_source: "MusicBrainz".into(),
+        data_source: opts.data_source.clone(),
         nulls,
         ..Default::default()
     };
@@ -1092,7 +1102,7 @@ pub fn parse_release(j: &J, opts: &ParseOpts) -> AlbumInfo {
         language,
         genres: opts.genres_field.and_then(|f| parse_genres(j, f)),
         external_ids: parse_external_ids(j, &opts.external_ids),
-        data_source: "MusicBrainz".into(),
+        data_source: opts.data_source.clone(),
         nulls,
         omit: Default::default(),
         extra: vec![],
@@ -1966,6 +1976,8 @@ inventory::submit! {
     aliases_as_credits: no
 "#,
         config_keys: &["musicbrainz"],
+        item_types: &[],
+        album_types: &[],
         redacted: &[],
         make: None,
         fatal: false,

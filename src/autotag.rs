@@ -586,13 +586,24 @@ pub fn match_album(ctx: &Ctx, cur: &Current, items: &[Item], info: AlbumInfo) ->
         .filter(|t| !mapping.iter().any(|(_, mt)| mt == t))
         .collect();
     let distance = album_distance(ctx, cur, items, &info, &mapping, extra_items.len());
-    AlbumMatch {
+    let mut m = AlbumMatch {
         distance,
         info,
         mapping,
         extra_items,
         extra_tracks,
+    };
+    // beets sends `album_matched` from `AlbumMatch.__post_init__`, so a
+    // listener (mbpseudo) can adjust the match before it is offered.
+    if crate::events::listening("album_matched") {
+        let cell = std::cell::RefCell::new(m);
+        crate::events::send(
+            "album_matched",
+            &[("match", crate::events::Arg::Match(&cell))],
+        );
+        m = cell.into_inner();
     }
+    m
 }
 
 fn rec_from_str(s: &str) -> Recommendation {

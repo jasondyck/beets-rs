@@ -435,7 +435,7 @@ pub const ITEM_TYPES: &[(&str, FieldType)] = &[
     ("play_count", FieldType::Int),
     ("skip_count", FieldType::Int),
     ("last_played", FieldType::Date),
-    ("rating", FieldType::Float),
+    ("rating", FieldType::Float(1)),
 ];
 
 pub struct MPDStatsPlugin;
@@ -522,16 +522,18 @@ inventory::submit! {
         name: "mpdstats",
         order: 68,
         defaults: r#"mpd:
-    music_directory:
+    music_directory: MUSIC_DIRECTORY
     strip_path: ''
     rating: true
     rating_mix: 0.75
-    host: localhost
-    port: 6600
+    host: MPD_HOST
+    port: MPD_PORT
     password: ''
     played_ratio_threshold: 0.85
 "#,
         config_keys: &["mpd"],
+        item_types: crate::plugins::mpdstats::ITEM_TYPES,
+        album_types: &[],
         redacted: &["mpd.password"],
         make: Some(registry_make),
         fatal: false,

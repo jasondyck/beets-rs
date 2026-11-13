@@ -369,6 +369,8 @@ inventory::submit! {
         order: 15,
         defaults: r#""#,
         config_keys: &["mbsync"],
+        item_types: &[],
+        album_types: &[],
         redacted: &[],
         make: Some(registry_make),
         fatal: false,

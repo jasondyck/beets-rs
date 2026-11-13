@@ -241,6 +241,8 @@ inventory::submit! {
     suggest_removal: false
 "#,
         config_keys: &["importsource"],
+        item_types: &[],
+        album_types: &[],
         redacted: &[],
         make: Some(registry_make),
         fatal: false,

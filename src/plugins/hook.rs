@@ -335,6 +335,7 @@ impl Hooks {
                         .join(", ")
                 ),
                 Arg::Opaque(class) => format!("<{class} object at 0x7f0000000000>"),
+                Arg::Match(_) => "<beets.autotag.match.AlbumMatch object at 0x7f0000000000>".into(),
             },
         }
     }
@@ -482,6 +483,8 @@ inventory::submit! {
     hooks: []
 "#,
         config_keys: &["hook"],
+        item_types: &[],
+        album_types: &[],
         redacted: &[],
         make: Some(registry_make),
         fatal: false,

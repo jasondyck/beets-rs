@@ -538,6 +538,8 @@ inventory::submit! {
     after_choice: no
 "#,
         config_keys: &["titlecase"],
+        item_types: &[],
+        album_types: &[],
         redacted: &[],
         make: Some(registry_make),
         fatal: false,

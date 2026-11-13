@@ -1024,6 +1024,8 @@ inventory::submit! {
     page_limit: 500
 "#,
         config_keys: &["aura"],
+        item_types: &[],
+        album_types: &[],
         redacted: &[],
         make: Some(registry_make),
         fatal: false,

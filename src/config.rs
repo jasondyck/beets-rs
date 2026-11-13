@@ -249,11 +249,50 @@ pub struct Config {
     pub sources: Vec<PathBuf>,
 }
 
-/// Keys whose values `beet config` hides unless `--clear`, per plugin
-/// `DEFAULT_CONFIG` parsed, with the defaults the plugins' own files
-/// register (beets adds them when the plugins load).
+/// The defaults with every bundled plugin's settings: beets' "not yet
+/// loaded" view, used by [`Config::defaults`] (tests and plugin setup).
+/// [`Config::load`] instead adds only the enabled plugins' defaults, as
+/// beets' `config.add` at plugin load does.
 fn default_tree() -> Y {
-    merge(core_tree(), crate::plugin_registry::default_tree())
+    let ctx = crate::plugin_registry::DefaultsCtx::from_tree(&core_tree());
+    merge(core_tree(), crate::plugin_registry::default_tree(&ctx))
+}
+
+/// The defaults of an effective configuration: the core's, then the
+/// enabled plugins' in `plugins:` order (a shared section such as `mpd`
+/// gets each plugin's keys, as beets' `__init__` adds them).
+fn default_tree_for(names: &[String], tree: &Y) -> Y {
+    let mut out = core_tree();
+    let ctx = crate::plugin_registry::DefaultsCtx::from_tree(tree);
+    let plugins = crate::plugin_registry::defaults_for(names, &ctx);
+    crate::plugin_registry::merge_first(&mut out, &plugins);
+    out
+}
+
+/// A list setting from a raw YAML tree (`Config::list` without a `Config`).
+fn list_in(root: &Y, key: &str) -> Vec<String> {
+    let mut cur = root;
+    for part in key.split('.') {
+        let Some(v) = cur
+            .as_mapping()
+            .and_then(|m| m.get(Y::String(part.to_string())))
+        else {
+            return vec![];
+        };
+        cur = v;
+    }
+    match cur {
+        Y::Sequence(seq) => seq
+            .iter()
+            .filter_map(|v| match v {
+                Y::String(s) => Some(s.clone()),
+                Y::Number(n) => Some(n.to_string()),
+                _ => None,
+            })
+            .collect(),
+        Y::String(s) => s.split_whitespace().map(String::from).collect(),
+        _ => vec![],
+    }
 }
 
 /// confuse's `ConfigReadError`: "PATH could not be read: REASON".
@@ -337,28 +376,9 @@ pub(crate) fn merge(base: Y, over: Y) -> Y {
     }
 }
 
-/// Deep-merge `over` into `base` keeping `base`'s key order (new keys,
-/// and new keys of shared sections, come last).
-fn merge_append(base: Y, over: Y) -> Y {
-    match (base, over) {
-        (Y::Mapping(mut b), Y::Mapping(o)) => {
-            for (k, v) in o {
-                match b.get_mut(&k) {
-                    Some(cur) => *cur = merge_append(std::mem::replace(cur, Y::Null), v),
-                    None => {
-                        b.insert(k, v);
-                    }
-                }
-            }
-            Y::Mapping(b)
-        }
-        (_, over) => over,
-    }
-}
-
 /// The core defaults (beets' `config_default.yaml`), without the plugins'
 /// sections.
-fn core_tree() -> Y {
+pub(crate) fn core_tree() -> Y {
     serde_yaml::from_str(&yaml11_bools(DEFAULT_CONFIG)).expect("default config parses")
 }
 
@@ -560,7 +580,49 @@ impl Config {
         for o in overlays {
             cfg.layer(read_yaml(o)?, o.clone());
         }
+        // beets adds each enabled plugin's defaults when it loads; only
+        // those reach the configuration.
+        cfg.rebuild();
         Ok(cfg)
+    }
+
+    /// Rebuild the effective configuration from the core defaults, the
+    /// enabled plugins' defaults (in `plugins:` order) and the sources read
+    /// so far. Called after loading, when `plugins`/`disabled_plugins`
+    /// change, and once the command line has overridden `directory` (some
+    /// computed defaults, such as mpdstats' `music_directory`, use it).
+    pub fn reload_plugin_defaults(&mut self) {
+        self.rebuild();
+    }
+
+    fn rebuild(&mut self) {
+        let mut view = core_tree();
+        for layer in self.layers.iter().rev() {
+            view = merge(view, layer.clone());
+        }
+        view = merge(view, self.cli.clone());
+        let plugins = list_in(&view, "plugins");
+        let disabled = list_in(&view, "disabled_plugins");
+        let names: Vec<String> = plugins
+            .into_iter()
+            .filter(|p| !disabled.contains(p))
+            .collect();
+        let mut root = default_tree_for(&names, &view);
+        // As `Config::layer`: a user's `replace:` mapping overrides the
+        // default rules whole rather than merging into them.
+        let has_replace = self
+            .layers
+            .iter()
+            .chain(std::iter::once(&self.cli))
+            .any(|y| y.get("replace").is_some_and(Y::is_mapping));
+        if has_replace && let Y::Mapping(m) = &mut root {
+            m.remove("replace");
+        }
+        for layer in self.layers.iter().rev() {
+            root = merge(root, layer.clone());
+        }
+        root = merge(root, self.cli.clone());
+        self.root = root;
     }
 
     /// Put a source over everything read so far.
@@ -673,34 +735,27 @@ impl Config {
     fn plugin_defaults(&self) -> Y {
         let mut out = Mapping::new();
         out.insert(Y::String("disabled_plugins".into()), Y::Sequence(vec![]));
-        // Each plugin's own `config.add` source, in load (`plugins`)
-        // order: an earlier plugin's keys stay first (beets appends the
-        // sources, so a later plugin's keys join its section at the end;
-        // two plugins can share a section, e.g. mpdupdate and mpdstats).
-        for name in crate::plugins::names(self) {
+        // Each plugin's own `config.add`, in load (`plugins`) order, with
+        // beets' computed values (mpdstats' `music_directory`): an earlier
+        // plugin's keys stay first and a later plugin's keys join a shared
+        // section at the end (mpdupdate and mpdstats both add `mpd`).
+        let names = crate::plugins::names(self);
+        let mut view = core_tree();
+        for layer in self.layers.iter().rev() {
+            view = merge(view, layer.clone());
+        }
+        view = merge(view, self.cli.clone());
+        let ctx = crate::plugin_registry::DefaultsCtx::from_tree(&view);
+        let defaults = crate::plugin_registry::defaults_for(&names, &ctx);
+        for name in names {
             let Some(def) = crate::plugin_registry::find(&name) else {
                 continue;
             };
-            if def.defaults.trim().is_empty() {
-                continue;
-            }
-            let text = def.defaults.replace(
-                "CPU_COUNT",
-                &crate::plugins::replaygain::cpu_count().to_string(),
-            );
-            let Ok(y) = serde_yaml::from_str::<Y>(&yaml11_bools(&text)) else {
-                continue;
-            };
-            let mut mine = Mapping::new();
             for k in def.config_keys {
-                if let Some(v) = y.get(*k) {
-                    mine.insert(Y::String(k.to_string()), v.clone());
+                if let Some(v) = defaults.get(k) {
+                    out.insert(Y::String(k.to_string()), v.clone());
                 }
             }
-            out = merge_append(Y::Mapping(out), Y::Mapping(mine))
-                .as_mapping()
-                .unwrap()
-                .clone();
         }
         Y::Mapping(out)
     }
@@ -709,6 +764,10 @@ impl Config {
     pub fn set(&mut self, key: &str, value: Y) {
         set_in(&mut self.cli, key, value.clone());
         set_in(&mut self.root, key, value);
+        // The enabled plugins decide which defaults apply.
+        if matches!(key, "plugins" | "disabled_plugins") {
+            self.rebuild();
+        }
     }
 
     pub fn get(&self, key: &str) -> Option<&Y> {
@@ -1073,5 +1132,92 @@ mod tests {
         let full: Y = serde_yaml::from_str(&c.dump(true, true)).unwrap();
         assert_eq!(full["fetchart"]["fanarttv_key"], Y::from("REDACTED"));
         assert_eq!(full["match"]["strong_rec_thresh"], Y::from(0.04));
+    }
+
+    /// beets adds a plugin's defaults when it loads, so a shared section
+    /// (`mpd`) holds only the enabled plugins' keys, in `plugins:` order.
+    #[test]
+    fn plugin_defaults_are_only_for_enabled_plugins() {
+        let load = |plugins: &str| {
+            let dir = tempfile::tempdir().unwrap();
+            std::fs::write(
+                dir.path().join("config.yaml"),
+                format!("plugins: [{plugins}]\ndirectory: /srv/music\n"),
+            )
+            .unwrap();
+            Config::load_in(dir.path(), &[]).unwrap()
+        };
+        let keys = |cfg: &Config| {
+            cfg.get("mpd")
+                .and_then(|v| v.as_mapping())
+                .map(|m| {
+                    m.keys()
+                        .map(|k| k.as_str().unwrap().to_string())
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default()
+        };
+
+        let mpdupdate = load("mpdupdate");
+        assert_eq!(keys(&mpdupdate), ["host", "port", "password"]);
+        assert_eq!(mpdupdate.str("mpd.host"), "localhost");
+        assert_eq!(mpdupdate.get("mpd.music_directory"), None);
+
+        let mpdstats = load("mpdstats");
+        assert_eq!(
+            keys(&mpdstats),
+            [
+                "music_directory",
+                "strip_path",
+                "rating",
+                "rating_mix",
+                "host",
+                "port",
+                "password",
+                "played_ratio_threshold"
+            ]
+        );
+        // beets' computed default: the effective music directory.
+        assert_eq!(mpdstats.str("mpd.music_directory"), "/srv/music");
+        assert_eq!(mpdstats.str("mpd.host"), "localhost");
+
+        let both = load("mpdupdate, mpdstats");
+        assert_eq!(
+            keys(&both),
+            [
+                "host",
+                "port",
+                "password",
+                "music_directory",
+                "strip_path",
+                "rating",
+                "rating_mix",
+                "played_ratio_threshold"
+            ]
+        );
+        let rev = load("mpdstats, mpdupdate");
+        assert_eq!(
+            keys(&rev),
+            [
+                "music_directory",
+                "strip_path",
+                "rating",
+                "rating_mix",
+                "host",
+                "port",
+                "password",
+                "played_ratio_threshold"
+            ]
+        );
+        // The user's values still win over every plugin default.
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("config.yaml"),
+            "plugins: [mpdupdate, mpdstats]\ndirectory: /srv/music\nmpd:\n  host: elsewhere\n",
+        )
+        .unwrap();
+        let cfg = Config::load_in(dir.path(), &[]).unwrap();
+        assert_eq!(cfg.str("mpd.host"), "elsewhere");
+        assert_eq!(cfg.str("mpd.music_directory"), "/srv/music");
     }
 }

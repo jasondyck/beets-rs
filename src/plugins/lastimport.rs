@@ -203,6 +203,8 @@ lastimport:
     retry_limit: 3
 "#,
         config_keys: &["lastfm", "lastimport"],
+        item_types: crate::plugins::lastimport::ITEM_TYPES,
+        album_types: &[],
         redacted: &["lastfm.user", "lastfm.api_key"],
         make: Some(registry_make),
         fatal: false,

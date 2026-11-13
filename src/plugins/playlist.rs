@@ -332,6 +332,8 @@ inventory::submit! {
     forward_slash: no
 "#,
         config_keys: &["playlist"],
+        item_types: &[],
+        album_types: &[],
         redacted: &[],
         make: Some(registry_make),
         fatal: false,

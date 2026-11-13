@@ -991,6 +991,8 @@ inventory::submit! {
     tokenfile: tidal_token.json
 "#,
         config_keys: &["tidal"],
+        item_types: crate::plugins::tidal::ITEM_TYPES,
+        album_types: crate::plugins::tidal::ALBUM_TYPES,
         redacted: &["tidal.client_id"],
         make: Some(registry_make),
         fatal: false,

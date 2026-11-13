@@ -1511,6 +1511,8 @@ inventory::submit! {
     readonly: yes
 "#,
         config_keys: &["web"],
+        item_types: &[],
+        album_types: &[],
         redacted: &[],
         make: Some(registry_make),
         fatal: false,

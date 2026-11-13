@@ -100,3 +100,59 @@ fn the_musicbrainz_plugin_cannot_be_enabled_too() {
     cfg.set("plugins", serde_yaml::from_str("[mbpseudo]").unwrap());
     assert!(load(&cfg).is_ok());
 }
+
+#[test]
+fn the_data_source_is_the_pseudo_plugin_while_enabled() {
+    let mut cfg = crate::config::Config::defaults();
+    cfg.set("plugins", serde_yaml::from_str("[mbpseudo]").unwrap());
+    assert_eq!(ParseOpts::from_config(&cfg).data_source, "MusicBrainzPseudoRelease");
+    let plain = crate::config::Config::defaults();
+    assert_eq!(ParseOpts::from_config(&plain).data_source, "MusicBrainz");
+}
+
+#[test]
+fn album_matched_switches_the_data_source() {
+    let mut cfg = crate::config::Config::defaults();
+    cfg.set("plugins", serde_yaml::from_str("[mbpseudo]").unwrap());
+    load(&cfg).unwrap();
+    let ctx = crate::autotag::Ctx::new(&cfg);
+    let info = crate::mb::AlbumInfo {
+        album_id: "pseudo".into(),
+        album: "In Bloom".into(),
+        data_source: "MusicBrainzPseudoRelease".into(),
+        ..Default::default()
+    };
+    let m = crate::autotag::match_album(
+        &ctx,
+        &crate::autotag::Current::default(),
+        &[],
+        info,
+    );
+    assert_eq!(m.info.data_source, "MusicBrainz");
+    // The pseudo-release is still what the match proposes.
+    assert_eq!(m.info.album_id, "pseudo");
+    assert_eq!(m.info.album, "In Bloom");
+}
+
+#[test]
+fn album_matched_leaves_another_source_alone() {
+    let mut cfg = crate::config::Config::defaults();
+    cfg.set("plugins", serde_yaml::from_str("[mbpseudo]").unwrap());
+    load(&cfg).unwrap();
+    let cell = std::cell::RefCell::new(crate::autotag::AlbumMatch {
+        distance: crate::autotag::Distance::default(),
+        info: crate::mb::AlbumInfo {
+            data_source: "elsewhere".into(),
+            ..Default::default()
+        },
+        mapping: vec![],
+        extra_items: vec![],
+        extra_tracks: vec![],
+    });
+    crate::events::send(
+        "album_matched",
+        &[("match", crate::events::Arg::Match(&cell))],
+    );
+    assert_eq!(cell.borrow().info.data_source, "elsewhere");
+}
+

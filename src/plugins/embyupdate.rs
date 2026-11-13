@@ -330,6 +330,8 @@ inventory::submit! {
     apikey: null
 "#,
         config_keys: &["emby"],
+        item_types: &[],
+        album_types: &[],
         redacted: &["emby.username", "emby.password", "emby.userid", "emby.apikey"],
         make: Some(registry_make),
         fatal: false,

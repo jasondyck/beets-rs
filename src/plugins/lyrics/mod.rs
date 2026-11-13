@@ -632,6 +632,8 @@ inventory::submit! {
     sources: [lrclib, google, genius, lrcmux]
 "#,
         config_keys: &["lyrics"],
+        item_types: crate::plugins::lyrics::ITEM_TYPES,
+        album_types: &[],
         redacted: &["lyrics.translate.api_key", "lyrics.google_API_key", "lyrics.google_engine_ID", "lyrics.genius_api_key"],
         make: Some(registry_make),
         fatal: false,

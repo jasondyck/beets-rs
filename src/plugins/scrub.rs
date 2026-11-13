@@ -160,6 +160,8 @@ inventory::submit! {
     auto: yes
 "#,
         config_keys: &["scrub"],
+        item_types: &[],
+        album_types: &[],
         redacted: &[],
         make: Some(registry_make),
         fatal: false,

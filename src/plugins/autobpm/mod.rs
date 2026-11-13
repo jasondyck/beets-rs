@@ -178,6 +178,8 @@ inventory::submit! {
     beat_track_kwargs: {}
 "#,
         config_keys: &["autobpm"],
+        item_types: &[],
+        album_types: &[],
         redacted: &[],
         make: Some(registry_make),
         fatal: false,

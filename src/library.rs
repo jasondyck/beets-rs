@@ -206,11 +206,11 @@ fn from_sql(v: SqlValue, ty: FieldType, music_dir: Option<&Path>) -> Value {
         (FieldType::Str, SqlValue::Text(s)) => Value::Str(s),
         (FieldType::Bool, SqlValue::Integer(i)) => Value::Bool(i != 0),
         (
-            FieldType::Float | FieldType::NullFloat | FieldType::Duration | FieldType::Date,
+            FieldType::Float(_) | FieldType::NullFloat | FieldType::Duration | FieldType::Date,
             SqlValue::Real(f),
         ) => Value::Float(f),
         (
-            FieldType::Float | FieldType::NullFloat | FieldType::Duration | FieldType::Date,
+            FieldType::Float(_) | FieldType::NullFloat | FieldType::Duration | FieldType::Date,
             SqlValue::Integer(i),
         ) => Value::Float(i as f64),
         (FieldType::NullFloat, SqlValue::Text(s)) => {

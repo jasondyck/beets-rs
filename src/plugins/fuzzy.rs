@@ -114,6 +114,8 @@ inventory::submit! {
     threshold: 0.7
 "#,
         config_keys: &["fuzzy"],
+        item_types: &[],
+        album_types: &[],
         redacted: &[],
         make: Some(registry_make),
         fatal: false,

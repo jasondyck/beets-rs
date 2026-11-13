@@ -183,6 +183,8 @@ inventory::submit! {
     dir: '755'
 "#,
         config_keys: &["permissions"],
+        item_types: &[],
+        album_types: &[],
         redacted: &[],
         make: Some(registry_make),
         fatal: false,

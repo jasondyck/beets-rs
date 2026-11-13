@@ -202,3 +202,21 @@ fn a_base_url_needs_an_http_scheme() {
     let (cfg, _lib) = env("ftp://example.org");
     assert!(load(&cfg).is_err());
 }
+
+#[test]
+fn float_fields_format_with_six_digits() {
+    let (cfg, _lib) = env("http://127.0.0.1:9");
+    crate::plugins::types::configure(&cfg).unwrap();
+    let mut item = crate::model::Item::new_item();
+    item.set_parsed("average_loudness", "0.5").unwrap();
+    assert_eq!(
+        item.formatted("average_loudness").as_deref(),
+        Some("0.500000")
+    );
+    // The plugin's declared type, from its registry entry.
+    assert_eq!(
+        crate::model::flex_type(crate::model::Kind::Item, "average_loudness"),
+        Some(crate::model::FieldType::Float(6))
+    );
+}
+

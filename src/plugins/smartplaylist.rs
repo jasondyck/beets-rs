@@ -527,6 +527,8 @@ inventory::submit! {
     pretend: no
 "#,
         config_keys: &["smartplaylist"],
+        item_types: &[],
+        album_types: &[],
         redacted: &["smartplaylist.prefix"],
         make: Some(registry_make),
         fatal: false,

@@ -159,6 +159,8 @@ inventory::submit! {
     picard_path: picard
 "#,
         config_keys: &["mbsubmit"],
+        item_types: &[],
+        album_types: &[],
         redacted: &[],
         make: Some(registry_make),
         fatal: false,

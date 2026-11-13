@@ -105,15 +105,10 @@ pub fn settings(cfg: &Config) -> (String, u16, String) {
             cfg.str(&format!("mpd.{key}"))
         }
     };
-    let host = match get("host") {
-        h if !h.is_empty() => h,
-        _ => std::env::var("MPD_HOST").unwrap_or_else(|_| "localhost".into()),
-    };
-    let port = get("port")
-        .parse::<u16>()
-        .ok()
-        .or_else(|| std::env::var("MPD_PORT").ok().and_then(|p| p.parse().ok()))
-        .unwrap_or(6600);
+    // `mpd.host`/`port` already default to `$MPD_HOST`/`$MPD_PORT` (from the
+    // registry's computed defaults).
+    let host = get("host");
+    let port = get("port").parse::<u16>().unwrap_or(6600);
     let password = get("password");
     (host, port, password)
 }
@@ -236,11 +231,13 @@ inventory::submit! {
         name: "mpdupdate",
         order: 42,
         defaults: r#"mpd:
-    host: localhost
-    port: 6600
+    host: MPD_HOST
+    port: MPD_PORT
     password: ''
 "#,
         config_keys: &["mpd"],
+        item_types: &[],
+        album_types: &[],
         redacted: &["mpd.password"],
         make: Some(registry_make),
         fatal: false,

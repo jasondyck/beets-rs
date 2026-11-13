@@ -234,6 +234,8 @@ inventory::submit! {
     auto: yes
 "#,
         config_keys: &["subsonic"],
+        item_types: &[],
+        album_types: &[],
         redacted: &["subsonic.user", "subsonic.pass"],
         make: Some(registry_make),
         fatal: false,

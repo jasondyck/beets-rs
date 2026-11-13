@@ -356,6 +356,8 @@ inventory::submit! {
     omit_single_disc: no
 "#,
         config_keys: &["zero"],
+        item_types: &[],
+        album_types: &[],
         redacted: &[],
         make: Some(registry_make),
         fatal: false,

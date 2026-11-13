@@ -356,3 +356,29 @@ fn sort_by_int_field_present_in_some_items() {
     assert_eq!(env.list(Kind::Item, "myint+ id+", "$id"), "3\n4\n1\n2");
     assert_eq!(env.list(Kind::Item, "myint- id+", "$id"), "2\n1\n3\n4");
 }
+
+/// The plugins' `item_types`/`album_types` come from their registry
+/// entries (beets' classes), not a central list.
+#[test]
+fn plugin_types_come_from_the_registry() {
+    let cfg = |plugins: &str| {
+        let mut c = Config::defaults();
+        c.set("plugins", serde_yaml::from_str(plugins).unwrap());
+        c
+    };
+    let [items, albums] = flex_types(&cfg("[acousticbrainz]")).unwrap();
+    assert_eq!(items["average_loudness"], FieldType::Float(6));
+    assert!(albums.is_empty());
+    let [items, albums] = flex_types(&cfg("[missing]")).unwrap();
+    assert!(items.is_empty());
+    assert_eq!(albums["missing"], FieldType::Int);
+    let [items, _] = flex_types(&cfg("[mpdstats]")).unwrap();
+    assert_eq!(items["rating"], FieldType::Float(1));
+    assert_eq!(items["last_played"], FieldType::Date);
+    // `types:` is still the config-driven special case.
+    let mut c = cfg("[types]");
+    c.set("types", serde_yaml::from_str("{rating: float}").unwrap());
+    let [items, _] = flex_types(&c).unwrap();
+    assert_eq!(items["rating"], FieldType::Float(1));
+}
+

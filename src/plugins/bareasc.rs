@@ -124,6 +124,8 @@ inventory::submit! {
     prefix: '#'
 "#,
         config_keys: &["bareasc"],
+        item_types: &[],
+        album_types: &[],
         redacted: &[],
         make: Some(registry_make),
         fatal: false,

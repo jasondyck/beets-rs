@@ -764,6 +764,8 @@ inventory::submit! {
     clearart_on_import: no
 "#,
         config_keys: &["embedart"],
+        item_types: &[],
+        album_types: &[],
         redacted: &[],
         make: Some(registry_make),
         fatal: false,
