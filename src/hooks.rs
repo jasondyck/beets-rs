@@ -405,7 +405,7 @@ mod tests {
             .collect()
     }
 
-    /// Cases from beets' test_autotag.py (`test_correct_list_fields`).
+    /// Cases from beets' `test_autotag.py` (`test_correct_list_fields`).
     #[test]
     fn correct_list_fields_as_beets() {
         let check = |single: V, list_v: V, want_single: V, want_list: V| {

@@ -388,7 +388,7 @@ fn flatten_sources(sources: &[&Y]) -> Y {
     flatten_maps(&maps)
 }
 
-/// YAML 1.1 booleans: serde_yaml reads unquoted `yes`/`no`/`on`/`off`/
+/// YAML 1.1 booleans: `serde_yaml` reads unquoted `yes`/`no`/`on`/`off`/
 /// `true`/`false` as strings, but beets' loader (and PyYAML) read them as
 /// booleans (`peak: 'true'` stays a string).
 pub(crate) fn yaml11_bools(text: &str) -> String {

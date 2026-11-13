@@ -1,5 +1,5 @@
 //! Against CPython (tests/fixtures/inline/cases.json, made by gen.py there
-//! with the reference venv), and ports of beets' test/plugins/test_inline.py.
+//! with the reference venv), and ports of beets' `test/plugins/test_inline.py`.
 
 use super::*;
 use serde_json::Value as J;
