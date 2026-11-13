@@ -84,6 +84,7 @@ Done: fetchart (filesystem + CAA), lyrics (LRCLIB), embedart.
 - [ ] **5.18c Export/media-server plugins**: random, export, playlist, mbcollection, parentwork, mpdupdate, plexupdate, kodiupdate, subsonicupdate, listenbrainz, lastimport
 - [ ] **5.19 Metadata source plugins**: discogs, spotify, deezer, beatport (as extra candidate sources)
 - [ ] **5.20 Rarely used**: bpd, aura, play, keyfinder, autobpm, bpm, absubmit, mbsubmit, metasync, thumbnails, importfeeds, fish, loadext, fuzzy, bareasc, limit, titlecase
+- [ ] **5.21 Plugins missing from the plan** (found 2026-11-13 comparing with beetsplug/): acousticbrainz, bpsync, embyupdate, freedesktop (deprecated alias of thumbnails), importsource, ipfs, mbpseudo, mpdstats, sonosupdate, subsonicplaylist, tidal
 
 ## 6. Quality
 
