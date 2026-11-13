@@ -21,6 +21,7 @@ mod migrate;
 mod model;
 mod paths;
 mod pipeline;
+mod plugin_registry;
 mod plugins;
 mod props;
 mod pyyaml;
@@ -30,7 +31,7 @@ mod template;
 mod ui;
 
 use clap::error::{ContextKind, ContextValue, ErrorKind};
-use clap::{ArgAction, Parser, Subcommand};
+use clap::{ArgAction, FromArgMatches, Parser, Subcommand};
 use std::path::PathBuf;
 
 /// A Rust port of the beets music library manager.
@@ -331,532 +332,6 @@ pub enum Cmd {
         /// The beets library database (library.db)
         database: PathBuf,
     },
-    /// Download album art (plugin: fetchart)
-    Fetchart {
-        /// Re-download art when already present
-        #[arg(short = 'f', long)]
-        force: bool,
-        /// Quiet mode: do not output albums that already have artwork
-        #[arg(short = 'q', long)]
-        quiet: bool,
-        /// Limit query results
-        #[arg(short = 'l', long)]
-        limit: Option<usize>,
-        #[arg(allow_hyphen_values = true)]
-        query: Vec<String>,
-    },
-    /// Embed image files into file metadata (plugin: embedart)
-    Embedart {
-        /// The image file to embed
-        #[arg(short = 'f', long = "file", value_name = "PATH")]
-        file: Option<PathBuf>,
-        /// Skip confirmation
-        #[arg(short = 'y', long)]
-        yes: bool,
-        /// The URL of the image file to embed
-        #[arg(short = 'u', long, value_name = "URL")]
-        url: Option<String>,
-        /// Limit query results
-        #[arg(short = 'l', long)]
-        limit: Option<usize>,
-        #[arg(allow_hyphen_values = true)]
-        query: Vec<String>,
-    },
-    /// Extract an image from file metadata (plugin: embedart)
-    Extractart {
-        /// Image output file
-        #[arg(short = 'o', value_name = "OUTPATH")]
-        outpath: Option<PathBuf>,
-        /// Image filename to create for all matched albums
-        #[arg(short = 'n', value_name = "FILENAME")]
-        filename: Option<String>,
-        /// Associate the extracted images with the album
-        #[arg(short = 'a')]
-        associate: bool,
-        /// Limit query results
-        #[arg(short = 'l', long)]
-        limit: Option<usize>,
-        #[arg(allow_hyphen_values = true)]
-        query: Vec<String>,
-    },
-    /// Remove images from file metadata (plugin: embedart)
-    Clearart {
-        /// Skip confirmation
-        #[arg(short = 'y', long)]
-        yes: bool,
-        /// Limit query results
-        #[arg(short = 'l', long)]
-        limit: Option<usize>,
-        #[arg(allow_hyphen_values = true)]
-        query: Vec<String>,
-    },
-    /// Fetch song lyrics (plugin: lyrics)
-    Lyrics {
-        /// Print lyrics to console
-        #[arg(short = 'p', long)]
-        print: bool,
-        /// Write lyrics to given directory as ReST files
-        #[arg(short = 'r', long = "write-rest", value_name = "dir")]
-        rest_directory: Option<String>,
-        /// Always re-download lyrics
-        #[arg(short = 'f', long)]
-        force: bool,
-        /// Skip items that already have synced lyrics
-        #[arg(long, overrides_with = "no_keep_synced")]
-        keep_synced: bool,
-        /// Do not skip items that already have synced lyrics
-        #[arg(long, overrides_with = "keep_synced")]
-        no_keep_synced: bool,
-        /// Do not fetch missing lyrics
-        #[arg(short = 'l', long)]
-        local: bool,
-        /// Limit query results
-        #[arg(long)]
-        limit: Option<usize>,
-        #[arg(allow_hyphen_values = true)]
-        query: Vec<String>,
-    },
-    /// Fetch genres (plugin: lastgenre)
-    Lastgenre {
-        /// Show actions but do nothing
-        #[arg(short = 'p', long)]
-        pretend: bool,
-        /// Modify existing genres
-        #[arg(short = 'f', long, overrides_with = "no_force")]
-        force: bool,
-        /// Don't modify existing genres
-        #[arg(short = 'F', long, overrides_with = "force")]
-        no_force: bool,
-        /// Combine with existing genres when modifying
-        #[arg(short = 'k', long, overrides_with = "no_keep_existing")]
-        keep_existing: bool,
-        /// Don't combine with existing genres when modifying
-        #[arg(short = 'K', long, overrides_with = "keep_existing")]
-        no_keep_existing: bool,
-        /// Genre source: artist, album, or track
-        #[arg(short = 's', long, value_name = "SOURCE")]
-        source: Option<String>,
-        /// Match items instead of albums
-        #[arg(short = 'A', long, overrides_with = "albums")]
-        items: bool,
-        /// Match albums instead of items (default)
-        #[arg(short = 'a', long, overrides_with = "items")]
-        albums: bool,
-        #[arg(allow_hyphen_values = true)]
-        query: Vec<String>,
-    },
-    /// Show file metadata (plugin: info)
-    Info {
-        /// Match albums instead of tracks
-        #[arg(short = 'a', long)]
-        album: bool,
-        /// Show library fields instead of tags
-        #[arg(short = 'l', long)]
-        library: bool,
-        /// Summarize the tags of all files
-        #[arg(short = 's', long)]
-        summarize: bool,
-        /// Comma separated list of keys to show
-        #[arg(short = 'i', long = "include-keys", value_name = "INCLUDED_KEYS")]
-        included_keys: Vec<String>,
-        /// Show only the keys
-        #[arg(short = 'k', long = "keys-only")]
-        keys_only: bool,
-        /// Print with custom format
-        #[arg(short = 'f', long)]
-        format: Option<String>,
-        /// Limit query results
-        #[arg(long)]
-        limit: Option<usize>,
-        #[arg(allow_hyphen_values = true)]
-        args: Vec<String>,
-    },
-    /// Analyze for ReplayGain (plugin: replaygain)
-    Replaygain {
-        /// Match albums instead of tracks
-        #[arg(short = 'a', long)]
-        album: bool,
-        /// Change the number of threads, defaults to maximum available
-        /// processors
-        #[arg(short = 't', long)]
-        threads: Option<usize>,
-        /// Analyze all files, including those that already have ReplayGain
-        /// metadata
-        #[arg(short = 'f', long)]
-        force: bool,
-        /// Write new metadata to files' tags
-        #[arg(short = 'w', long, overrides_with = "nowrite")]
-        write: bool,
-        /// Don't write metadata (opposite of -w)
-        #[arg(short = 'W', long, overrides_with = "write")]
-        nowrite: bool,
-        /// Limit query results
-        #[arg(short = 'l', long)]
-        limit: Option<usize>,
-        #[arg(allow_hyphen_values = true)]
-        query: Vec<String>,
-    },
-    /// List duplicate tracks or albums (plugin: duplicates)
-    #[command(visible_alias = "dup")]
-    Duplicates {
-        /// Show duplicate counts
-        #[arg(short = 'c', long)]
-        count: bool,
-        /// Report duplicates based on arbitrary command
-        #[arg(short = 'C', long, value_name = "PROG", allow_hyphen_values = true)]
-        checksum: Option<String>,
-        /// Delete items from library and disk
-        #[arg(short = 'd', long)]
-        delete: bool,
-        /// Show all versions of duplicate tracks or albums
-        #[arg(short = 'F', long)]
-        full: bool,
-        /// Report duplicates only if all attributes are set
-        #[arg(short = 's', long)]
-        strict: bool,
-        /// Report duplicates based on keys (use multiple times)
-        #[arg(short = 'k', long = "key", value_name = "KEY")]
-        keys: Vec<String>,
-        /// Merge duplicate items
-        #[arg(short = 'M', long)]
-        merge: bool,
-        /// Move items to dest
-        #[arg(short = 'm', long = "move", value_name = "DEST")]
-        move_to: Option<String>,
-        /// Copy items to dest
-        #[arg(short = 'o', long = "copy", value_name = "DEST")]
-        copy_to: Option<String>,
-        /// Tag matched items with 'k=v' attribute
-        #[arg(short = 't', long)]
-        tag: Option<String>,
-        /// Remove items from library
-        #[arg(short = 'r', long)]
-        remove: bool,
-        /// Match albums instead of tracks
-        #[arg(short = 'a', long)]
-        album: bool,
-        /// Print paths for matched items or albums
-        #[arg(short = 'p', long)]
-        path: bool,
-        /// Print with custom format
-        #[arg(short = 'f', long)]
-        format: Option<String>,
-        /// Limit query results
-        #[arg(short = 'l', long)]
-        limit: Option<usize>,
-        #[arg(allow_hyphen_values = true)]
-        query: Vec<String>,
-    },
-    /// Update metadata from musicbrainz (plugin: mbsync)
-    Mbsync {
-        /// Show all changes but do nothing
-        #[arg(short = 'p', long)]
-        pretend: bool,
-        /// Move files in the library directory
-        #[arg(short = 'm', long = "move", overrides_with = "nomove")]
-        mv: bool,
-        /// Don't move files in library
-        #[arg(short = 'M', long = "nomove", overrides_with = "mv")]
-        nomove: bool,
-        /// Don't write updated metadata to files
-        #[arg(short = 'W', long = "nowrite")]
-        nowrite: bool,
-        /// Print with custom format
-        #[arg(short = 'f', long)]
-        format: Option<String>,
-        /// Limit query results
-        #[arg(short = 'l', long)]
-        limit: Option<usize>,
-        #[arg(allow_hyphen_values = true)]
-        query: Vec<String>,
-    },
-    /// Start a Web interface (plugin: web)
-    Web {
-        /// Debug mode
-        #[arg(short = 'd', long)]
-        debug: bool,
-        /// [HOST] [PORT]
-        #[arg(value_name = "HOST PORT")]
-        args: Vec<String>,
-    },
-    /// Update the smart playlists. Playlist names may be passed as arguments. (plugin: smartplaylist)
-    Splupdate {
-        /// Display query results but don't write playlist files.
-        #[arg(short = 'p', long)]
-        pretend: bool,
-        /// Print per-track log lines with custom format
-        #[arg(short = 'f', long)]
-        format: Option<String>,
-        /// Directory to write the generated playlist files to.
-        #[arg(short = 'd', long = "playlist-dir", value_name = "PATH")]
-        playlist_dir: Option<String>,
-        /// Regenerate the destination path as 'move' or 'convert' commands would do.
-        #[arg(long = "dest-regen")]
-        dest_regen: bool,
-        /// Generate playlist item paths relative to this path.
-        #[arg(long = "relative-to", value_name = "PATH")]
-        relative_to: Option<String>,
-        /// Prepend string to every path in the playlist file.
-        #[arg(long)]
-        prefix: Option<String>,
-        /// Force forward slash in paths within playlists.
-        #[arg(long = "forward-slash")]
-        forward_slash: bool,
-        /// URL-encode all paths.
-        #[arg(long)]
-        urlencode: bool,
-        /// Playlist item URI template, e.g. http://beets:8337/item/$id/file.
-        #[arg(long = "uri-format")]
-        uri_format: Option<String>,
-        /// Specify the playlist format: m3u|extm3u.
-        #[arg(long, value_parser = ["m3u", "extm3u"])]
-        output: Option<String>,
-        names: Vec<String>,
-    },
-    /// Check for corrupt or missing files (plugin: badfiles)
-    Bad {
-        /// View results for both the bad and uncorrupted files
-        #[arg(short = 'v', long)]
-        verbose: bool,
-        /// Limit query results
-        #[arg(short = 'l', long)]
-        limit: Option<usize>,
-        #[arg(allow_hyphen_values = true)]
-        query: Vec<String>,
-    },
-    /// List all files in the library folder which are not listed in the beets library database (plugin: unimported)
-    Unimported,
-    /// List missing tracks (plugin: missing)
-    #[command(visible_alias = "miss")]
-    Missing {
-        /// Count missing tracks per album
-        #[arg(short = 'c', long)]
-        count: bool,
-        /// Count total of missing tracks
-        #[arg(short = 't', long)]
-        total: bool,
-        /// Show missing album releases for artist instead of tracks;
-        /// Defaults to only releases of type 'album'
-        #[arg(short = 'a', long)]
-        album: bool,
-        /// Comma-separated list of release types for missing albums (valid:
-        /// nat, album, single, ep, broadcast, other, compilation, soundtrack,
-        /// spokenword, interview, audiobook, live, remix, dj-mix,
-        /// mixtape/street)
-        #[arg(long = "release-types", value_name = "RELEASE_TYPES")]
-        release_types: Vec<String>,
-        /// Print with custom format
-        #[arg(short = 'f', long)]
-        format: Option<String>,
-        /// Limit query results
-        #[arg(short = 'l', long)]
-        limit: Option<usize>,
-        #[arg(allow_hyphen_values = true)]
-        query: Vec<String>,
-    },
-    /// Move featured artists to the title field (plugin: ftintitle)
-    Ftintitle {
-        /// Drop featuring from artists and ignore title update
-        #[arg(short = 'd', long)]
-        drop: bool,
-        /// Limit query results
-        #[arg(short = 'l', long)]
-        limit: Option<usize>,
-        #[arg(allow_hyphen_values = true)]
-        query: Vec<String>,
-    },
-    /// Convert to external location (plugin: convert)
-    Convert {
-        /// Show actions but do nothing
-        #[arg(short = 'p', long)]
-        pretend: bool,
-        /// Change the number of threads, defaults to maximum available
-        /// processors
-        #[arg(short = 't', long)]
-        threads: Option<usize>,
-        /// Reconvert if original file is newer than converted file
-        #[arg(short = 'r', long)]
-        refresh: bool,
-        /// Keep only the converted and move the old files
-        #[arg(short = 'k', long = "keep-new")]
-        keep_new: bool,
-        /// Set the destination directory
-        #[arg(short = 'd', long)]
-        dest: Option<String>,
-        /// Set the target format of the tracks
-        #[arg(short = 'f', long)]
-        format: Option<String>,
-        /// Do not ask for confirmation
-        #[arg(short = 'y', long)]
-        yes: bool,
-        /// Symlink files that do not need transcoding.
-        #[arg(short = 'l', long)]
-        link: bool,
-        /// Hardlink files that do not need transcoding. Overrides --link.
-        #[arg(short = 'H', long)]
-        hardlink: bool,
-        /// Create an m3u8 playlist file containing the converted files. The
-        /// playlist file will be saved below the destination directory, thus
-        /// PLAYLIST could be a file name or a relative path. To ensure a
-        /// working playlist when transferred to a different computer, or
-        /// opened from an external drive, relative paths pointing to media
-        /// files will be used.
-        #[arg(short = 'm', long)]
-        playlist: Option<String>,
-        /// Force transcoding. Ignores no_convert, never_convert_lossy_files,
-        /// and max_bitrate
-        #[arg(short = 'F', long)]
-        force: bool,
-        /// Match albums instead of tracks
-        #[arg(short = 'a', long)]
-        album: bool,
-        /// Limit query results
-        #[arg(long)]
-        limit: Option<usize>,
-        #[arg(allow_hyphen_values = true)]
-        query: Vec<String>,
-    },
-    /// Interactively edit metadata (plugin: edit)
-    Edit {
-        /// Edit this field also
-        #[arg(short = 'f', long = "field", value_name = "FIELD")]
-        field: Vec<String>,
-        /// Edit all fields
-        #[arg(long)]
-        all: bool,
-        /// Match albums instead of tracks
-        #[arg(short = 'a', long)]
-        album: bool,
-        #[arg(allow_hyphen_values = true)]
-        query: Vec<String>,
-    },
-    /// Clean audio tags (plugin: scrub)
-    Scrub {
-        /// Leave tags empty
-        #[arg(short = 'W', long = "nowrite")]
-        nowrite: bool,
-        /// Limit query results
-        #[arg(short = 'l', long)]
-        limit: Option<usize>,
-        #[arg(allow_hyphen_values = true)]
-        query: Vec<String>,
-    },
-    /// Set fields to null (plugin: zero)
-    Zero {
-        /// Limit query results
-        #[arg(short = 'l', long)]
-        limit: Option<usize>,
-        #[arg(allow_hyphen_values = true)]
-        query: Vec<String>,
-    },
-    /// Submit Acoustid fingerprints (plugin: chroma)
-    Submit {
-        /// Limit query results
-        #[arg(short = 'l', long)]
-        limit: Option<usize>,
-        #[arg(allow_hyphen_values = true)]
-        query: Vec<String>,
-    },
-    /// Generate fingerprints for items without them (plugin: chroma)
-    Fingerprint {
-        /// Limit query results
-        #[arg(short = 'l', long)]
-        limit: Option<usize>,
-        #[arg(allow_hyphen_values = true)]
-        query: Vec<String>,
-    },
-    /// Search local database by chroma fingerprint (plugin: chroma)
-    Chromasearch {
-        /// Print paths for matched items or albums
-        #[arg(short = 'p', long)]
-        path: bool,
-        /// Print with custom format
-        #[arg(short = 'f', long)]
-        format: Option<String>,
-        /// Fingerprint to search for (from the output of fpcalc -plain)
-        #[arg(short = 's', long)]
-        search: Option<String>,
-        /// Number of items in result
-        #[arg(short = 'c', long, default_value_t = 5, allow_negative_numbers = true)]
-        count: i64,
-        /// Don't stop searching once we found an exact match
-        #[arg(long)]
-        full: bool,
-        /// Write computed fingerprints to files
-        #[arg(short = 'w', long)]
-        write: bool,
-        /// Limit query results
-        #[arg(short = 'l', long)]
-        limit: Option<usize>,
-        #[arg(allow_hyphen_values = true)]
-        query: Vec<String>,
-    },
-    /// Fetch parent works, composers and dates (plugin: parentwork)
-    Parentwork {
-        /// Re-fetch when parent work is already present
-        #[arg(short = 'f', long)]
-        force: bool,
-        /// Limit query results
-        #[arg(short = 'l', long)]
-        limit: Option<usize>,
-        #[arg(allow_hyphen_values = true)]
-        query: Vec<String>,
-    },
-    /// Export data from beets (plugin: export)
-    Export {
-        /// Export albums instead of tracks
-        #[arg(short = 'a', long)]
-        album: bool,
-        /// Show library fields instead of tags
-        #[arg(short = 'l', long)]
-        library: bool,
-        /// Append data to the file
-        #[arg(long)]
-        append: bool,
-        /// Comma separated list of keys to show
-        #[arg(short = 'i', long = "include-keys", value_name = "KEYS")]
-        included_keys: Vec<String>,
-        /// Path for the output file; without it, print the data
-        #[arg(short = 'o', long, value_name = "PATH")]
-        output: Option<String>,
-        /// The output format: json|jsonlines|csv|xml
-        #[arg(short = 'f', long, value_parser = ["json", "jsonlines", "csv", "xml"])]
-        format: Option<String>,
-        /// Limit query results
-        #[arg(long)]
-        limit: Option<usize>,
-        #[arg(allow_hyphen_values = true)]
-        query: Vec<String>,
-    },
-    /// Choose a random track or album (plugin: random)
-    Random {
-        /// Show matching albums instead of tracks
-        #[arg(short = 'a', long)]
-        album: bool,
-        /// Each field has the same chance
-        #[arg(short = 'e', long = "equal-chance")]
-        equal_chance: bool,
-        /// Field to use for equal chance sampling (default: albumartist)
-        #[arg(long, default_value = "albumartist")]
-        field: String,
-        /// Number of objects to choose
-        #[arg(short = 'n', long, default_value_t = 1)]
-        number: i64,
-        /// Total length in minutes of objects to choose
-        #[arg(short = 't', long)]
-        time: Option<f64>,
-        /// Print paths for matched items or albums
-        #[arg(short = 'p', long)]
-        path: bool,
-        /// Print with a custom format template
-        #[arg(short = 'f', long)]
-        format: Option<String>,
-        /// Limit query results
-        #[arg(short = 'l', long)]
-        limit: Option<usize>,
-        #[arg(allow_hyphen_values = true)]
-        query: Vec<String>,
-    },
     /// Output version information
     Version,
     /// Give detailed help on a specific sub-command
@@ -883,12 +358,75 @@ pub enum Cmd {
 }
 
 /// Parse the command line; unknown commands get beets' error message.
-pub fn parse_cli<I, T>(args: I) -> Result<Cli, clap::Error>
+/// The parsed command line: a core command (beets' own), or one of the
+/// registry's plugin commands, which clap only learns at run time.
+pub enum Parsed {
+    Cli(Cli),
+    Plugin {
+        command: &'static plugin_registry::PluginCommand,
+        globals: commands::Globals,
+        matches: clap::ArgMatches,
+    },
+}
+
+/// `beet`'s clap command: the core subcommands from `Cli`, the plugins'
+/// from the registry (between the core ones and `version`/`help`/`config`,
+/// as the old central enum ordered them), each built at run time.
+pub fn cli() -> clap::Command {
+    use clap::CommandFactory;
+    let base = Cli::command();
+    let mut cmd = clap::Command::new("beet")
+        .disable_version_flag(true)
+        .disable_help_subcommand(true);
+    if let Some(about) = base.get_about() {
+        cmd = cmd.about(about.clone());
+    }
+    if let Some(about) = base.get_long_about() {
+        cmd = cmd.long_about(about.clone());
+    }
+    for arg in base.get_arguments() {
+        cmd = cmd.arg(arg.clone());
+    }
+    // clap orders `--help`'s command list by each subcommand's
+    // `display_order`; the derived ones carry theirs, so renumber everything
+    // in insertion order.
+    let mut tail = vec![];
+    let mut order = 0;
+    for sub in base.get_subcommands() {
+        if matches!(sub.get_name(), "version" | "help" | "config") {
+            tail.push(sub.clone());
+        } else {
+            cmd = cmd.subcommand(sub.clone().display_order(order));
+            order += 1;
+        }
+    }
+    for command in plugin_registry::commands() {
+        cmd = cmd.subcommand((command.build)().display_order(order));
+        order += 1;
+    }
+    for sub in tail {
+        cmd = cmd.subcommand(sub.display_order(order));
+        order += 1;
+    }
+    cmd
+}
+
+pub fn parse_args<I, T>(args: I) -> Result<Parsed, clap::Error>
 where
     I: IntoIterator<Item = T>,
     T: Into<std::ffi::OsString> + Clone,
 {
-    Cli::try_parse_from(args)
+    let matches = cli().try_get_matches_from(args)?;
+    if let Some((name, sub)) = matches.subcommand()
+        && let Some(command) = plugin_registry::command(name)
+    {
+        return Ok(Parsed::Plugin {
+            command,
+            globals: commands::Globals::from_matches(&matches),
+            matches: sub.clone(),
+        });
+    }
+    Ok(Parsed::Cli(Cli::from_arg_matches(&matches)?))
 }
 
 /// The command name in a clap "unrecognized subcommand" error.
@@ -911,8 +449,8 @@ fn main() {
     unsafe {
         libc::signal(libc::SIGPIPE, libc::SIG_DFL);
     }
-    let cli = match parse_cli(std::env::args_os()) {
-        Ok(cli) => cli,
+    let parsed = match parse_args(std::env::args_os()) {
+        Ok(parsed) => parsed,
         Err(e) => match unknown_command(&e) {
             Some(name) => {
                 eprintln!("error: unknown command '{name}'");
@@ -921,7 +459,15 @@ fn main() {
             None => e.exit(),
         },
     };
-    if let Err(e) = commands::run(cli) {
+    let result = match parsed {
+        Parsed::Cli(cli) => commands::run(cli),
+        Parsed::Plugin {
+            command,
+            globals,
+            matches,
+        } => commands::run_plugin(command, globals, &matches),
+    };
+    if let Err(e) = result {
         // As beets: `invalid query: 'QUERY': EXPLANATION`.
         if let Some(q) = e.downcast_ref::<query::InvalidQueryError>() {
             eprintln!("invalid query: {q}");
@@ -939,7 +485,6 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use clap::CommandFactory;
 
     /// Run `f` with a deeper stack: clap's derive builds the whole command
     /// tree on the stack, more than a test thread's 2 MiB in debug builds.
@@ -957,12 +502,17 @@ mod tests {
             .chain(args.iter().copied())
             .map(String::from)
             .collect();
-        on_big_stack(move || parse_cli(args))
+        on_big_stack(move || {
+            parse_args(args).map(|p| match p {
+                Parsed::Cli(cli) => cli,
+                Parsed::Plugin { .. } => panic!("expected a core command"),
+            })
+        })
     }
 
     #[test]
     fn cli_definition_is_valid() {
-        on_big_stack(|| Cli::command().debug_assert());
+        on_big_stack(|| cli().debug_assert());
     }
 
     #[test]

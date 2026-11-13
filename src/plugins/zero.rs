@@ -339,4 +339,64 @@ pub fn command(
 }
 
 #[cfg(test)]
+#[path = "zero/tests.rs"]
 mod tests;
+
+// ---------------------------------------------------------------- registry
+
+inventory::submit! {
+    crate::plugin_registry::PluginDef {
+        name: "zero",
+        order: 24,
+        defaults: r#"zero:
+    auto: yes
+    fields: []
+    keep_fields: []
+    update_database: no
+    omit_single_disc: no
+"#,
+        config_keys: &["zero"],
+        redacted: &[],
+        make: Some(registry_make),
+        fatal: false,
+        commands: &[
+            crate::plugin_registry::PluginCommand {
+                order: 280,
+                plugin: "zero",
+                build: build_zero,
+                run: run_zero,
+            },
+        ],
+    }
+}
+
+fn registry_make(cfg: &crate::config::Config) -> anyhow::Result<Box<dyn crate::plugins::Plugin>> {
+    Ok(Box::new(Zero::new(cfg)?))
+}
+
+// ---------------------------------------------------------------- command
+
+#[derive(clap::Args)]
+pub struct ZeroArgs {
+    /// Limit query results
+    #[arg(short = 'l', long)]
+    limit: Option<usize>,
+    #[arg(allow_hyphen_values = true)]
+    query: Vec<String>,
+}
+
+pub fn build_zero() -> clap::Command {
+    use clap::Args as _;
+    ZeroArgs::augment_args(clap::Command::new("zero").about("Set fields to null (plugin: zero)"))
+}
+
+pub fn run_zero(
+    cfg: &crate::config::Config,
+    lib: &crate::library::Library,
+    plugins: &[Box<dyn crate::plugins::Plugin>],
+    m: &clap::ArgMatches,
+) -> anyhow::Result<()> {
+    use clap::FromArgMatches as _;
+    let a = ZeroArgs::from_arg_matches(m)?;
+    crate::plugins::zero::command(cfg, lib, plugins, a.limit, &a.query)
+}

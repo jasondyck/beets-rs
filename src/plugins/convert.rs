@@ -1320,4 +1320,159 @@ impl Plugin for ConvertPlugin {
 }
 
 #[cfg(test)]
+#[path = "convert/tests.rs"]
 mod tests;
+
+// ---------------------------------------------------------------- registry
+
+inventory::submit! {
+    crate::plugin_registry::PluginDef {
+        name: "convert",
+        order: 20,
+        defaults: r#"convert:
+    dest:
+    pretend: no
+    link: no
+    hardlink: no
+    threads: CPU_COUNT
+    format: mp3
+    id3v23: inherit
+    write_metadata: yes
+    formats:
+        aac:
+            command: ffmpeg -i $source -y -vn -acodec aac -aq 1 $dest
+            extension: m4a
+        alac:
+            command: ffmpeg -i $source -y -vn -acodec alac $dest
+            extension: m4a
+        flac: ffmpeg -i $source -y -vn -acodec flac $dest
+        mp3: ffmpeg -i $source -y -vn -aq 2 $dest
+        opus: ffmpeg -i $source -y -vn -acodec libopus -ab 96k $dest
+        ogg: ffmpeg -i $source -y -vn -acodec libvorbis -aq 3 $dest
+        wma: ffmpeg -i $source -y -vn -acodec wmav2 -vn $dest
+    max_bitrate:
+    auto: no
+    auto_keep: no
+    tmpdir:
+    quiet: no
+    embed: yes
+    paths: {}
+    no_convert: ''
+    never_convert_lossy_files: no
+    copy_album_art: no
+    album_art_maxwidth: 0
+    delete_originals: no
+    playlist:
+    force: no
+    refresh: no
+    keep_new: no
+"#,
+        config_keys: &["convert"],
+        redacted: &[],
+        make: Some(registry_make),
+        fatal: false,
+        commands: &[
+            crate::plugin_registry::PluginCommand {
+                order: 250,
+                plugin: "convert",
+                build: build_convert,
+                run: run_convert,
+            },
+        ],
+    }
+}
+
+fn registry_make(_cfg: &crate::config::Config) -> anyhow::Result<Box<dyn crate::plugins::Plugin>> {
+    Ok(Box::new(ConvertPlugin::new()))
+}
+
+// ---------------------------------------------------------------- command
+
+#[derive(clap::Args)]
+pub struct ConvertArgs {
+    /// Show actions but do nothing
+    #[arg(short = 'p', long)]
+    pretend: bool,
+    /// Change the number of threads, defaults to maximum available
+    /// processors
+    #[arg(short = 't', long)]
+    threads: Option<usize>,
+    /// Reconvert if original file is newer than converted file
+    #[arg(short = 'r', long)]
+    refresh: bool,
+    /// Keep only the converted and move the old files
+    #[arg(short = 'k', long = "keep-new")]
+    keep_new: bool,
+    /// Set the destination directory
+    #[arg(short = 'd', long)]
+    dest: Option<String>,
+    /// Set the target format of the tracks
+    #[arg(short = 'f', long)]
+    format: Option<String>,
+    /// Do not ask for confirmation
+    #[arg(short = 'y', long)]
+    yes: bool,
+    /// Symlink files that do not need transcoding.
+    #[arg(short = 'l', long)]
+    link: bool,
+    /// Hardlink files that do not need transcoding. Overrides --link.
+    #[arg(short = 'H', long)]
+    hardlink: bool,
+    /// Create an m3u8 playlist file containing the converted files. The
+    /// playlist file will be saved below the destination directory, thus
+    /// PLAYLIST could be a file name or a relative path. To ensure a
+    /// working playlist when transferred to a different computer, or
+    /// opened from an external drive, relative paths pointing to media
+    /// files will be used.
+    #[arg(short = 'm', long)]
+    playlist: Option<String>,
+    /// Force transcoding. Ignores no_convert, never_convert_lossy_files,
+    /// and max_bitrate
+    #[arg(short = 'F', long)]
+    force: bool,
+    /// Match albums instead of tracks
+    #[arg(short = 'a', long)]
+    album: bool,
+    /// Limit query results
+    #[arg(long)]
+    limit: Option<usize>,
+    #[arg(allow_hyphen_values = true)]
+    query: Vec<String>,
+}
+
+pub fn build_convert() -> clap::Command {
+    use clap::Args as _;
+    ConvertArgs::augment_args(
+        clap::Command::new("convert").about("Convert to external location (plugin: convert)"),
+    )
+}
+
+pub fn run_convert(
+    cfg: &crate::config::Config,
+    lib: &crate::library::Library,
+    _plugins: &[Box<dyn crate::plugins::Plugin>],
+    m: &clap::ArgMatches,
+) -> anyhow::Result<()> {
+    use clap::FromArgMatches as _;
+    let a = ConvertArgs::from_arg_matches(m)?;
+    crate::plugins::convert::command(
+        cfg,
+        lib,
+        crate::plugins::convert::CmdOpts {
+            pretend: a.pretend,
+            threads: a.threads,
+            refresh: a.refresh,
+            keep_new: a.keep_new,
+            dest: a.dest,
+            format: a.format,
+            yes: a.yes,
+            link: a.link,
+            hardlink: a.hardlink,
+            playlist: a.playlist,
+            force: a.force,
+            album: a.album,
+            limit: a.limit,
+            query: a.query,
+        },
+    )
+}

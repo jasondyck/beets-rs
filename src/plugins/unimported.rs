@@ -101,3 +101,53 @@ pub fn run(cfg: &Config, lib: &Library, out: &mut impl Write) -> Result<()> {
 #[cfg(test)]
 #[path = "unimported_tests.rs"]
 mod tests;
+
+// ---------------------------------------------------------------- registry
+
+inventory::submit! {
+    crate::plugin_registry::PluginDef {
+        name: "unimported",
+        order: 33,
+        defaults: r#"unimported:
+    ignore_extensions: []
+    ignore_subdirectories: []
+"#,
+        config_keys: &["unimported"],
+        redacted: &[],
+        make: Some(registry_make),
+        fatal: false,
+        commands: &[crate::plugin_registry::PluginCommand {
+            order: 225,
+            plugin: "unimported",
+            build: build_unimported,
+            run: run_unimported,
+        }],
+    }
+}
+
+fn registry_make(_cfg: &crate::config::Config) -> anyhow::Result<Box<dyn crate::plugins::Plugin>> {
+    Ok(Box::new(UnimportedPlugin))
+}
+
+// ---------------------------------------------------------------- command
+
+#[derive(clap::Args)]
+pub struct UnimportedArgs {}
+
+pub fn build_unimported() -> clap::Command {
+    use clap::Args as _;
+    UnimportedArgs::augment_args(clap::Command::new("unimported").about(
+        "List all files in the library folder which are not listed in the beets library database (plugin: unimported)",
+    ))
+}
+
+pub fn run_unimported(
+    cfg: &crate::config::Config,
+    lib: &crate::library::Library,
+    _plugins: &[Box<dyn crate::plugins::Plugin>],
+    m: &clap::ArgMatches,
+) -> anyhow::Result<()> {
+    use clap::FromArgMatches as _;
+    let _a = UnimportedArgs::from_arg_matches(m)?;
+    crate::plugins::unimported::command(cfg, lib)
+}

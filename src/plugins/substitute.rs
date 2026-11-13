@@ -122,3 +122,23 @@ mod tests {
         run("{a: b, b: c, d: a}", &[("a", "c"), ("b", "c"), ("d", "a")]);
     }
 }
+
+// ---------------------------------------------------------------- registry
+
+inventory::submit! {
+    crate::plugin_registry::PluginDef {
+        name: "substitute",
+        order: 29,
+        defaults: r#""#,
+        config_keys: &["substitute"],
+        redacted: &[],
+        make: Some(registry_make),
+        fatal: false,
+        commands: &[],
+    }
+}
+
+fn registry_make(cfg: &crate::config::Config) -> anyhow::Result<Box<dyn crate::plugins::Plugin>> {
+    Substitute::new(cfg)?;
+    Ok(Box::new(SubstitutePlugin))
+}

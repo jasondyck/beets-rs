@@ -709,4 +709,70 @@ impl Plugin for EditPlugin {
 }
 
 #[cfg(test)]
+#[path = "edit/tests.rs"]
 mod tests;
+
+// ---------------------------------------------------------------- registry
+
+inventory::submit! {
+    crate::plugin_registry::PluginDef {
+        name: "edit",
+        order: 3,
+        defaults: r#"edit:
+    albumfields: album albumartist
+    itemfields: track title artist album
+    ignore_fields: id path
+"#,
+        config_keys: &["edit"],
+        redacted: &[],
+        make: Some(registry_make),
+        fatal: false,
+        commands: &[
+            crate::plugin_registry::PluginCommand {
+                order: 260,
+                plugin: "edit",
+                build: build_edit,
+                run: run_edit,
+            },
+        ],
+    }
+}
+
+fn registry_make(cfg: &crate::config::Config) -> anyhow::Result<Box<dyn crate::plugins::Plugin>> {
+    Ok(Box::new(EditPlugin::new(cfg)))
+}
+
+// ---------------------------------------------------------------- command
+
+#[derive(clap::Args)]
+pub struct EditArgs {
+    /// Edit this field also
+    #[arg(short = 'f', long = "field", value_name = "FIELD")]
+    field: Vec<String>,
+    /// Edit all fields
+    #[arg(long)]
+    all: bool,
+    /// Match albums instead of tracks
+    #[arg(short = 'a', long)]
+    album: bool,
+    #[arg(allow_hyphen_values = true)]
+    query: Vec<String>,
+}
+
+pub fn build_edit() -> clap::Command {
+    use clap::Args as _;
+    EditArgs::augment_args(
+        clap::Command::new("edit").about("Interactively edit metadata (plugin: edit)"),
+    )
+}
+
+pub fn run_edit(
+    cfg: &crate::config::Config,
+    lib: &crate::library::Library,
+    _plugins: &[Box<dyn crate::plugins::Plugin>],
+    m: &clap::ArgMatches,
+) -> anyhow::Result<()> {
+    use clap::FromArgMatches as _;
+    let a = EditArgs::from_arg_matches(m)?;
+    crate::plugins::edit::command(cfg, lib, a.album, &a.field, a.all, &a.query)
+}

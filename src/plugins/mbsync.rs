@@ -326,3 +326,91 @@ pub fn map_items(items: &[Item], info: &AlbumInfo) -> Vec<(usize, usize)> {
 #[cfg(test)]
 #[path = "mbsync_tests.rs"]
 mod tests;
+
+// ---------------------------------------------------------------- registry
+
+inventory::submit! {
+    crate::plugin_registry::PluginDef {
+        name: "mbsync",
+        order: 15,
+        defaults: r#""#,
+        config_keys: &["mbsync"],
+        redacted: &[],
+        make: Some(registry_make),
+        fatal: false,
+        commands: &[
+            crate::plugin_registry::PluginCommand {
+                order: 190,
+                plugin: "mbsync",
+                build: build_mbsync,
+                run: run_mbsync,
+            },
+        ],
+    }
+}
+
+fn registry_make(_cfg: &crate::config::Config) -> anyhow::Result<Box<dyn crate::plugins::Plugin>> {
+    Ok(Box::new(MbsyncPlugin))
+}
+
+// ---------------------------------------------------------------- command
+
+#[derive(clap::Args)]
+pub struct MbsyncArgs {
+    /// Show all changes but do nothing
+    #[arg(short = 'p', long)]
+    pretend: bool,
+    /// Move files in the library directory
+    #[arg(short = 'm', long = "move", overrides_with = "nomove")]
+    mv: bool,
+    /// Don't move files in library
+    #[arg(short = 'M', long = "nomove", overrides_with = "mv")]
+    nomove: bool,
+    /// Don't write updated metadata to files
+    #[arg(short = 'W', long = "nowrite")]
+    nowrite: bool,
+    /// Print with custom format
+    #[arg(short = 'f', long)]
+    format: Option<String>,
+    /// Limit query results
+    #[arg(short = 'l', long)]
+    limit: Option<usize>,
+    #[arg(allow_hyphen_values = true)]
+    query: Vec<String>,
+}
+
+pub fn build_mbsync() -> clap::Command {
+    use clap::Args as _;
+    MbsyncArgs::augment_args(
+        clap::Command::new("mbsync").about("Update metadata from musicbrainz (plugin: mbsync)"),
+    )
+}
+
+pub fn run_mbsync(
+    cfg: &crate::config::Config,
+    lib: &crate::library::Library,
+    _plugins: &[Box<dyn crate::plugins::Plugin>],
+    m: &clap::ArgMatches,
+) -> anyhow::Result<()> {
+    use clap::FromArgMatches as _;
+    let a = MbsyncArgs::from_arg_matches(m)?;
+    crate::plugins::mbsync::command(
+        cfg,
+        lib,
+        crate::plugins::mbsync::CmdOpts {
+            pretend: a.pretend,
+            // The last of -m/-M given wins (clap's overrides).
+            mv: if a.mv {
+                Some(true)
+            } else if a.nomove {
+                Some(false)
+            } else {
+                None
+            },
+            write: a.nowrite.then_some(false),
+            format: a.format,
+            limit: a.limit,
+            query: a.query,
+        },
+    )
+}

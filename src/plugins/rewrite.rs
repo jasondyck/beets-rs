@@ -300,4 +300,47 @@ impl super::Plugin for RewritePlugin {
 }
 
 #[cfg(test)]
+#[path = "rewrite/tests.rs"]
 mod tests;
+
+// ---------------------------------------------------------------- registry
+
+inventory::submit! {
+    crate::plugin_registry::PluginDef {
+        name: "rewrite",
+        order: 27,
+        defaults: r#""#,
+        config_keys: &["rewrite"],
+        redacted: &[],
+        make: Some(registry_make),
+        fatal: false,
+        commands: &[],
+    }
+}
+
+fn registry_make(cfg: &crate::config::Config) -> anyhow::Result<Box<dyn crate::plugins::Plugin>> {
+    Rewriter::rewrite(cfg)?;
+    Ok(Box::new(RewritePlugin("rewrite")))
+}
+
+// ---------------------------------------------------------------- registry
+
+inventory::submit! {
+    crate::plugin_registry::PluginDef {
+        name: "advancedrewrite",
+        order: 28,
+        defaults: r#""#,
+        config_keys: &["advancedrewrite"],
+        redacted: &[],
+        make: Some(registry_make_advanced),
+        fatal: true,
+        commands: &[],
+    }
+}
+
+fn registry_make_advanced(
+    cfg: &crate::config::Config,
+) -> anyhow::Result<Box<dyn crate::plugins::Plugin>> {
+    Rewriter::advanced(cfg)?;
+    Ok(Box::new(RewritePlugin("advancedrewrite")))
+}

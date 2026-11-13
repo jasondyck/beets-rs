@@ -722,3 +722,139 @@ impl Dup<'_> {
 #[cfg(test)]
 #[path = "duplicates_tests.rs"]
 mod tests;
+
+// ---------------------------------------------------------------- registry
+
+inventory::submit! {
+    crate::plugin_registry::PluginDef {
+        name: "duplicates",
+        order: 2,
+        defaults: r#"duplicates:
+    album: no
+    checksum: ''
+    copy: ''
+    count: no
+    delete: no
+    format: ''
+    full: no
+    keys: []
+    merge: no
+    move: ''
+    path: no
+    tiebreak: {}
+    strict: no
+    tag: ''
+    remove: no
+"#,
+        config_keys: &["duplicates"],
+        redacted: &[],
+        make: Some(registry_make),
+        fatal: false,
+        commands: &[
+            crate::plugin_registry::PluginCommand {
+                order: 180,
+                plugin: "duplicates",
+                build: build_duplicates,
+                run: run_duplicates,
+            },
+        ],
+    }
+}
+
+fn registry_make(_cfg: &crate::config::Config) -> anyhow::Result<Box<dyn crate::plugins::Plugin>> {
+    Ok(Box::new(DuplicatesPlugin))
+}
+
+// ---------------------------------------------------------------- command
+
+#[derive(clap::Args)]
+pub struct DuplicatesArgs {
+    /// Show duplicate counts
+    #[arg(short = 'c', long)]
+    count: bool,
+    /// Report duplicates based on arbitrary command
+    #[arg(short = 'C', long, value_name = "PROG", allow_hyphen_values = true)]
+    checksum: Option<String>,
+    /// Delete items from library and disk
+    #[arg(short = 'd', long)]
+    delete: bool,
+    /// Show all versions of duplicate tracks or albums
+    #[arg(short = 'F', long)]
+    full: bool,
+    /// Report duplicates only if all attributes are set
+    #[arg(short = 's', long)]
+    strict: bool,
+    /// Report duplicates based on keys (use multiple times)
+    #[arg(short = 'k', long = "key", value_name = "KEY")]
+    keys: Vec<String>,
+    /// Merge duplicate items
+    #[arg(short = 'M', long)]
+    merge: bool,
+    /// Move items to dest
+    #[arg(short = 'm', long = "move", value_name = "DEST")]
+    move_to: Option<String>,
+    /// Copy items to dest
+    #[arg(short = 'o', long = "copy", value_name = "DEST")]
+    copy_to: Option<String>,
+    /// Tag matched items with 'k=v' attribute
+    #[arg(short = 't', long)]
+    tag: Option<String>,
+    /// Remove items from library
+    #[arg(short = 'r', long)]
+    remove: bool,
+    /// Match albums instead of tracks
+    #[arg(short = 'a', long)]
+    album: bool,
+    /// Print paths for matched items or albums
+    #[arg(short = 'p', long)]
+    path: bool,
+    /// Print with custom format
+    #[arg(short = 'f', long)]
+    format: Option<String>,
+    /// Limit query results
+    #[arg(short = 'l', long)]
+    limit: Option<usize>,
+    #[arg(allow_hyphen_values = true)]
+    query: Vec<String>,
+}
+
+pub fn build_duplicates() -> clap::Command {
+    use clap::Args as _;
+    DuplicatesArgs::augment_args(
+        clap::Command::new("duplicates")
+            .about("List duplicate tracks or albums (plugin: duplicates)")
+            .visible_alias("dup"),
+    )
+}
+
+pub fn run_duplicates(
+    cfg: &crate::config::Config,
+    lib: &crate::library::Library,
+    _plugins: &[Box<dyn crate::plugins::Plugin>],
+    m: &clap::ArgMatches,
+) -> anyhow::Result<()> {
+    use clap::FromArgMatches as _;
+    let a = DuplicatesArgs::from_arg_matches(m)?;
+    crate::plugins::duplicates::command(
+        cfg,
+        lib,
+        crate::plugins::duplicates::CmdOpts {
+            count: a.count,
+            checksum: a.checksum,
+            delete: a.delete,
+            full: a.full,
+            strict: a.strict,
+            keys: a.keys,
+            merge: a.merge,
+            move_to: a.move_to,
+            copy_to: a.copy_to,
+            tag: a.tag,
+            remove: a.remove,
+            album: a.album,
+            path: a.path,
+            format: a.format,
+            limit: a.limit,
+            query: a.query,
+        },
+    )
+}

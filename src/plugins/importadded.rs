@@ -247,3 +247,25 @@ impl Listener for State {
 #[cfg(test)]
 #[path = "importadded_tests.rs"]
 mod tests;
+
+// ---------------------------------------------------------------- registry
+
+inventory::submit! {
+    crate::plugin_registry::PluginDef {
+        name: "importadded",
+        order: 10,
+        defaults: r#"importadded:
+    preserve_mtimes: no
+    preserve_write_mtimes: no
+"#,
+        config_keys: &["importadded"],
+        redacted: &[],
+        make: Some(registry_make),
+        fatal: false,
+        commands: &[],
+    }
+}
+
+fn registry_make(cfg: &crate::config::Config) -> anyhow::Result<Box<dyn crate::plugins::Plugin>> {
+    Ok(Box::new(load(cfg)))
+}

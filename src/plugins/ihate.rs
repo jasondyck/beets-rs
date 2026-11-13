@@ -64,3 +64,25 @@ impl crate::plugins::Plugin for IHatePlugin {
 #[cfg(test)]
 #[path = "ihate_tests.rs"]
 mod tests;
+
+// ---------------------------------------------------------------- registry
+
+inventory::submit! {
+    crate::plugin_registry::PluginDef {
+        name: "ihate",
+        order: 9,
+        defaults: r#"ihate:
+    warn: []
+    skip: []
+"#,
+        config_keys: &["ihate"],
+        redacted: &[],
+        make: Some(registry_make),
+        fatal: false,
+        commands: &[],
+    }
+}
+
+fn registry_make(cfg: &crate::config::Config) -> anyhow::Result<Box<dyn crate::plugins::Plugin>> {
+    Ok(Box::new(load(cfg)))
+}

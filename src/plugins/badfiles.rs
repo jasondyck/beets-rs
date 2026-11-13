@@ -322,3 +322,65 @@ pub fn command(
 #[cfg(test)]
 #[path = "badfiles_tests.rs"]
 mod tests;
+
+// ---------------------------------------------------------------- registry
+
+inventory::submit! {
+    crate::plugin_registry::PluginDef {
+        name: "badfiles",
+        order: 0,
+        defaults: r#"badfiles:
+    check_on_import: no
+    import_action_on_warning: ask
+    import_action_on_error: ask
+"#,
+        config_keys: &["badfiles"],
+        redacted: &[],
+        make: Some(registry_make),
+        fatal: false,
+        commands: &[
+            crate::plugin_registry::PluginCommand {
+                order: 220,
+                plugin: "badfiles",
+                build: build_bad,
+                run: run_bad,
+            },
+        ],
+    }
+}
+
+fn registry_make(cfg: &crate::config::Config) -> anyhow::Result<Box<dyn crate::plugins::Plugin>> {
+    Ok(Box::new(load(cfg)))
+}
+
+// ---------------------------------------------------------------- command
+
+#[derive(clap::Args)]
+pub struct BadArgs {
+    /// View results for both the bad and uncorrupted files
+    #[arg(short = 'v', long)]
+    verbose: bool,
+    /// Limit query results
+    #[arg(short = 'l', long)]
+    limit: Option<usize>,
+    #[arg(allow_hyphen_values = true)]
+    query: Vec<String>,
+}
+
+pub fn build_bad() -> clap::Command {
+    use clap::Args as _;
+    BadArgs::augment_args(
+        clap::Command::new("bad").about("Check for corrupt or missing files (plugin: badfiles)"),
+    )
+}
+
+pub fn run_bad(
+    cfg: &crate::config::Config,
+    lib: &crate::library::Library,
+    _plugins: &[Box<dyn crate::plugins::Plugin>],
+    m: &clap::ArgMatches,
+) -> anyhow::Result<()> {
+    use clap::FromArgMatches as _;
+    let a = BadArgs::from_arg_matches(m)?;
+    crate::plugins::badfiles::command(cfg, lib, a.verbose, a.limit, &a.query)
+}

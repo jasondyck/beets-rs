@@ -147,4 +147,63 @@ pub fn command(lib: &Library, write: bool, limit: Option<usize>, query: &[String
 }
 
 #[cfg(test)]
+#[path = "scrub/tests.rs"]
 mod tests;
+
+// ---------------------------------------------------------------- registry
+
+inventory::submit! {
+    crate::plugin_registry::PluginDef {
+        name: "scrub",
+        order: 21,
+        defaults: r#"scrub:
+    auto: yes
+"#,
+        config_keys: &["scrub"],
+        redacted: &[],
+        make: Some(registry_make),
+        fatal: false,
+        commands: &[
+            crate::plugin_registry::PluginCommand {
+                order: 270,
+                plugin: "scrub",
+                build: build_scrub,
+                run: run_scrub,
+            },
+        ],
+    }
+}
+
+fn registry_make(cfg: &crate::config::Config) -> anyhow::Result<Box<dyn crate::plugins::Plugin>> {
+    Ok(Box::new(Scrub::new(cfg)))
+}
+
+// ---------------------------------------------------------------- command
+
+#[derive(clap::Args)]
+pub struct ScrubArgs {
+    /// Leave tags empty
+    #[arg(short = 'W', long = "nowrite")]
+    nowrite: bool,
+    /// Limit query results
+    #[arg(short = 'l', long)]
+    limit: Option<usize>,
+    #[arg(allow_hyphen_values = true)]
+    query: Vec<String>,
+}
+
+pub fn build_scrub() -> clap::Command {
+    use clap::Args as _;
+    ScrubArgs::augment_args(clap::Command::new("scrub").about("Clean audio tags (plugin: scrub)"))
+}
+
+pub fn run_scrub(
+    _cfg: &crate::config::Config,
+    lib: &crate::library::Library,
+    _plugins: &[Box<dyn crate::plugins::Plugin>],
+    m: &clap::ArgMatches,
+) -> anyhow::Result<()> {
+    use clap::FromArgMatches as _;
+    let a = ScrubArgs::from_arg_matches(m)?;
+    crate::plugins::scrub::command(lib, !a.nowrite, a.limit, &a.query)
+}

@@ -952,3 +952,165 @@ pub fn compare_fingerprints(a: &str, b: &str) -> Result<f64> {
 #[cfg(test)]
 #[path = "chroma_tests.rs"]
 mod tests;
+
+// ---------------------------------------------------------------- registry
+
+inventory::submit! {
+    crate::plugin_registry::PluginDef {
+        name: "chroma",
+        order: 1,
+        defaults: r#"chroma:
+    search_limit: 5
+    data_source_mismatch_penalty: 0.5
+    auto: yes
+"#,
+        config_keys: &["chroma"],
+        redacted: &["acoustid.apikey"],
+        make: Some(registry_make),
+        fatal: false,
+        commands: &[
+            crate::plugin_registry::PluginCommand {
+                order: 290,
+                plugin: "chroma",
+                build: build_submit,
+                run: run_submit,
+            },
+            crate::plugin_registry::PluginCommand {
+                order: 300,
+                plugin: "chroma",
+                build: build_fingerprint,
+                run: run_fingerprint,
+            },
+            crate::plugin_registry::PluginCommand {
+                order: 310,
+                plugin: "chroma",
+                build: build_chromasearch,
+                run: run_chromasearch,
+            },
+        ],
+    }
+}
+
+fn registry_make(_cfg: &crate::config::Config) -> anyhow::Result<Box<dyn crate::plugins::Plugin>> {
+    Ok(Box::new(Chroma))
+}
+
+// ---------------------------------------------------------------- command
+
+#[derive(clap::Args)]
+pub struct SubmitArgs {
+    /// Limit query results
+    #[arg(short = 'l', long)]
+    limit: Option<usize>,
+    #[arg(allow_hyphen_values = true)]
+    query: Vec<String>,
+}
+
+pub fn build_submit() -> clap::Command {
+    use clap::Args as _;
+    SubmitArgs::augment_args(
+        clap::Command::new("submit").about("Submit Acoustid fingerprints (plugin: chroma)"),
+    )
+}
+
+pub fn run_submit(
+    cfg: &crate::config::Config,
+    lib: &crate::library::Library,
+    _plugins: &[Box<dyn crate::plugins::Plugin>],
+    m: &clap::ArgMatches,
+) -> anyhow::Result<()> {
+    use clap::FromArgMatches as _;
+    let a = SubmitArgs::from_arg_matches(m)?;
+    crate::plugins::chroma::submit_command(cfg, lib, a.limit, &a.query)
+}
+
+// ---------------------------------------------------------------- command
+
+#[derive(clap::Args)]
+pub struct FingerprintArgs {
+    /// Limit query results
+    #[arg(short = 'l', long)]
+    limit: Option<usize>,
+    #[arg(allow_hyphen_values = true)]
+    query: Vec<String>,
+}
+
+pub fn build_fingerprint() -> clap::Command {
+    use clap::Args as _;
+    FingerprintArgs::augment_args(
+        clap::Command::new("fingerprint")
+            .about("Generate fingerprints for items without them (plugin: chroma)"),
+    )
+}
+
+pub fn run_fingerprint(
+    cfg: &crate::config::Config,
+    lib: &crate::library::Library,
+    _plugins: &[Box<dyn crate::plugins::Plugin>],
+    m: &clap::ArgMatches,
+) -> anyhow::Result<()> {
+    use clap::FromArgMatches as _;
+    let a = FingerprintArgs::from_arg_matches(m)?;
+    crate::plugins::chroma::fingerprint_command(cfg, lib, a.limit, &a.query)
+}
+
+// ---------------------------------------------------------------- command
+
+#[derive(clap::Args)]
+pub struct ChromasearchArgs {
+    /// Print paths for matched items or albums
+    #[arg(short = 'p', long)]
+    path: bool,
+    /// Print with custom format
+    #[arg(short = 'f', long)]
+    format: Option<String>,
+    /// Fingerprint to search for (from the output of fpcalc -plain)
+    #[arg(short = 's', long)]
+    search: Option<String>,
+    /// Number of items in result
+    #[arg(short = 'c', long, default_value_t = 5, allow_negative_numbers = true)]
+    count: i64,
+    /// Don't stop searching once we found an exact match
+    #[arg(long)]
+    full: bool,
+    /// Write computed fingerprints to files
+    #[arg(short = 'w', long)]
+    write: bool,
+    /// Limit query results
+    #[arg(short = 'l', long)]
+    limit: Option<usize>,
+    #[arg(allow_hyphen_values = true)]
+    query: Vec<String>,
+}
+
+pub fn build_chromasearch() -> clap::Command {
+    use clap::Args as _;
+    ChromasearchArgs::augment_args(
+        clap::Command::new("chromasearch")
+            .about("Search local database by chroma fingerprint (plugin: chroma)"),
+    )
+}
+
+pub fn run_chromasearch(
+    cfg: &crate::config::Config,
+    lib: &crate::library::Library,
+    _plugins: &[Box<dyn crate::plugins::Plugin>],
+    m: &clap::ArgMatches,
+) -> anyhow::Result<()> {
+    use clap::FromArgMatches as _;
+    let a = ChromasearchArgs::from_arg_matches(m)?;
+    crate::plugins::chroma::chromasearch_command(
+        cfg,
+        lib,
+        crate::plugins::chroma::SearchOpts {
+            search: a.search,
+            count: a.count,
+            full: a.full,
+            write: a.write,
+            path: a.path,
+            format: a.format,
+            limit: a.limit,
+            query: a.query,
+        },
+    )
+}

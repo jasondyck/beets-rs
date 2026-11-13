@@ -296,3 +296,28 @@ mod tests {
         );
     }
 }
+
+// ---------------------------------------------------------------- registry
+
+inventory::submit! {
+    crate::plugin_registry::PluginDef {
+        name: "the",
+        order: 23,
+        defaults: r#"the:
+    the: yes
+    a: yes
+    format: '{}, {}'
+    strip: no
+    patterns: []
+"#,
+        config_keys: &["the"],
+        redacted: &[],
+        make: Some(registry_make),
+        fatal: false,
+        commands: &[],
+    }
+}
+
+fn registry_make(cfg: &crate::config::Config) -> anyhow::Result<Box<dyn crate::plugins::Plugin>> {
+    Ok(Box::new(The::load(cfg)))
+}

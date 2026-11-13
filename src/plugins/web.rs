@@ -1464,3 +1464,72 @@ pub fn command(cfg: &Config, lib: &Library, opts: CmdOpts) -> Result<()> {
 #[cfg(test)]
 #[path = "web_tests.rs"]
 mod tests;
+
+// ---------------------------------------------------------------- registry
+
+inventory::submit! {
+    crate::plugin_registry::PluginDef {
+        name: "web",
+        order: 26,
+        defaults: r#"web:
+    host: 127.0.0.1
+    port: 8337
+    cors: ''
+    cors_supports_credentials: no
+    reverse_proxy: no
+    include_paths: no
+    readonly: yes
+"#,
+        config_keys: &["web"],
+        redacted: &[],
+        make: Some(registry_make),
+        fatal: false,
+        commands: &[
+            crate::plugin_registry::PluginCommand {
+                order: 200,
+                plugin: "web",
+                build: build_web,
+                run: run_web,
+            },
+        ],
+    }
+}
+
+fn registry_make(_cfg: &crate::config::Config) -> anyhow::Result<Box<dyn crate::plugins::Plugin>> {
+    Ok(Box::new(WebPlugin))
+}
+
+// ---------------------------------------------------------------- command
+
+#[derive(clap::Args)]
+pub struct WebArgs {
+    /// Debug mode
+    #[arg(short = 'd', long)]
+    debug: bool,
+    /// [HOST] [PORT]
+    #[arg(value_name = "HOST PORT")]
+    args: Vec<String>,
+}
+
+pub fn build_web() -> clap::Command {
+    use clap::Args as _;
+    WebArgs::augment_args(clap::Command::new("web").about("Start a Web interface (plugin: web)"))
+}
+
+pub fn run_web(
+    cfg: &crate::config::Config,
+    lib: &crate::library::Library,
+    _plugins: &[Box<dyn crate::plugins::Plugin>],
+    m: &clap::ArgMatches,
+) -> anyhow::Result<()> {
+    use clap::FromArgMatches as _;
+    let a = WebArgs::from_arg_matches(m)?;
+    crate::plugins::web::command(
+        cfg,
+        lib,
+        crate::plugins::web::CmdOpts {
+            debug: a.debug,
+            args: a.args,
+        },
+    )
+}

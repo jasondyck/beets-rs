@@ -398,4 +398,92 @@ pub fn command(
 }
 
 #[cfg(test)]
+#[path = "ftintitle/tests.rs"]
 mod tests;
+
+// ---------------------------------------------------------------- registry
+
+inventory::submit! {
+    crate::plugin_registry::PluginDef {
+        name: "ftintitle",
+        order: 7,
+        defaults: r#"ftintitle:
+    auto: yes
+    drop: no
+    format: feat. {}
+    keep_in_artist: no
+    preserve_album_artist: yes
+    custom_words: []
+    bracket_keywords:
+    - abridged
+    - acapella
+    - club
+    - demo
+    - edit
+    - edition
+    - extended
+    - instrumental
+    - live
+    - mix
+    - radio
+    - release
+    - remaster
+    - remastered
+    - remix
+    - rmx
+    - unabridged
+    - unreleased
+    - version
+    - vip
+"#,
+        config_keys: &["ftintitle"],
+        redacted: &[],
+        make: Some(registry_make),
+        fatal: false,
+        commands: &[
+            crate::plugin_registry::PluginCommand {
+                order: 240,
+                plugin: "ftintitle",
+                build: build_ftintitle,
+                run: run_ftintitle,
+            },
+        ],
+    }
+}
+
+fn registry_make(cfg: &crate::config::Config) -> anyhow::Result<Box<dyn crate::plugins::Plugin>> {
+    Ok(Box::new(FtInTitle::new(cfg)))
+}
+
+// ---------------------------------------------------------------- command
+
+#[derive(clap::Args)]
+pub struct FtintitleArgs {
+    /// Drop featuring from artists and ignore title update
+    #[arg(short = 'd', long)]
+    drop: bool,
+    /// Limit query results
+    #[arg(short = 'l', long)]
+    limit: Option<usize>,
+    #[arg(allow_hyphen_values = true)]
+    query: Vec<String>,
+}
+
+pub fn build_ftintitle() -> clap::Command {
+    use clap::Args as _;
+    FtintitleArgs::augment_args(
+        clap::Command::new("ftintitle")
+            .about("Move featured artists to the title field (plugin: ftintitle)"),
+    )
+}
+
+pub fn run_ftintitle(
+    cfg: &crate::config::Config,
+    lib: &crate::library::Library,
+    _plugins: &[Box<dyn crate::plugins::Plugin>],
+    m: &clap::ArgMatches,
+) -> anyhow::Result<()> {
+    use clap::FromArgMatches as _;
+    let a = FtintitleArgs::from_arg_matches(m)?;
+    crate::plugins::ftintitle::command(cfg, lib, a.drop, a.limit, &a.query)
+}

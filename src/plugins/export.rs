@@ -381,3 +381,108 @@ pub fn command(cfg: &Config, lib: &Library, opts: CmdOpts) -> Result<()> {
 #[cfg(test)]
 #[path = "export_tests.rs"]
 mod tests;
+
+// ---------------------------------------------------------------- registry
+
+inventory::submit! {
+    crate::plugin_registry::PluginDef {
+        name: "export",
+        order: 35,
+        defaults: r#"export:
+    default_format: json
+    json:
+        formatting:
+            ensure_ascii: no
+            indent: 4
+            separators: [',', ': ']
+            sort_keys: yes
+    jsonlines:
+        formatting:
+            ensure_ascii: no
+            separators: [',', ': ']
+            sort_keys: yes
+    csv:
+        formatting:
+            delimiter: ','
+            dialect: excel
+    xml:
+        formatting: {}
+"#,
+        config_keys: &["export"],
+        redacted: &[],
+        make: Some(registry_make),
+        fatal: false,
+        commands: &[
+            crate::plugin_registry::PluginCommand {
+                order: 330,
+                plugin: "export",
+                build: build_export,
+                run: run_export,
+            },
+        ],
+    }
+}
+
+fn registry_make(cfg: &crate::config::Config) -> anyhow::Result<Box<dyn crate::plugins::Plugin>> {
+    Ok(Box::new(ExportPlugin::new(cfg)?))
+}
+
+// ---------------------------------------------------------------- command
+
+#[derive(clap::Args)]
+pub struct ExportArgs {
+    /// Export albums instead of tracks
+    #[arg(short = 'a', long)]
+    album: bool,
+    /// Show library fields instead of tags
+    #[arg(short = 'l', long)]
+    library: bool,
+    /// Append data to the file
+    #[arg(long)]
+    append: bool,
+    /// Comma separated list of keys to show
+    #[arg(short = 'i', long = "include-keys", value_name = "KEYS")]
+    included_keys: Vec<String>,
+    /// Path for the output file; without it, print the data
+    #[arg(short = 'o', long, value_name = "PATH")]
+    output: Option<String>,
+    /// The output format: json|jsonlines|csv|xml
+    #[arg(short = 'f', long, value_parser = ["json", "jsonlines", "csv", "xml"])]
+    format: Option<String>,
+    /// Limit query results
+    #[arg(long)]
+    limit: Option<usize>,
+    #[arg(allow_hyphen_values = true)]
+    query: Vec<String>,
+}
+
+pub fn build_export() -> clap::Command {
+    use clap::Args as _;
+    ExportArgs::augment_args(
+        clap::Command::new("export").about("Export data from beets (plugin: export)"),
+    )
+}
+
+pub fn run_export(
+    cfg: &crate::config::Config,
+    lib: &crate::library::Library,
+    _plugins: &[Box<dyn crate::plugins::Plugin>],
+    m: &clap::ArgMatches,
+) -> anyhow::Result<()> {
+    use clap::FromArgMatches as _;
+    let a = ExportArgs::from_arg_matches(m)?;
+    crate::plugins::export::command(
+        cfg,
+        lib,
+        crate::plugins::export::CmdOpts {
+            album: a.album,
+            library: a.library,
+            append: a.append,
+            included_keys: a.included_keys,
+            limit: a.limit,
+            output: a.output,
+            format: a.format,
+            query: a.query,
+        },
+    )
+}

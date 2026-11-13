@@ -255,3 +255,73 @@ fn array<'a>(v: &'a J, key: &str) -> &'a [J] {
 #[cfg(test)]
 #[path = "parentwork_tests.rs"]
 mod tests;
+
+// ---------------------------------------------------------------- registry
+
+inventory::submit! {
+    crate::plugin_registry::PluginDef {
+        name: "parentwork",
+        order: 37,
+        defaults: r#"parentwork:
+    auto: no
+    force: no
+"#,
+        config_keys: &["parentwork"],
+        redacted: &[],
+        make: Some(registry_make),
+        fatal: false,
+        commands: &[
+            crate::plugin_registry::PluginCommand {
+                order: 320,
+                plugin: "parentwork",
+                build: build_parentwork,
+                run: run_parentwork,
+            },
+        ],
+    }
+}
+
+fn registry_make(cfg: &crate::config::Config) -> anyhow::Result<Box<dyn crate::plugins::Plugin>> {
+    Ok(Box::new(ParentWorkPlugin::new(cfg)))
+}
+
+// ---------------------------------------------------------------- command
+
+#[derive(clap::Args)]
+pub struct ParentworkArgs {
+    /// Re-fetch when parent work is already present
+    #[arg(short = 'f', long)]
+    force: bool,
+    /// Limit query results
+    #[arg(short = 'l', long)]
+    limit: Option<usize>,
+    #[arg(allow_hyphen_values = true)]
+    query: Vec<String>,
+}
+
+pub fn build_parentwork() -> clap::Command {
+    use clap::Args as _;
+    ParentworkArgs::augment_args(
+        clap::Command::new("parentwork")
+            .about("Fetch parent works, composers and dates (plugin: parentwork)"),
+    )
+}
+
+pub fn run_parentwork(
+    cfg: &crate::config::Config,
+    lib: &crate::library::Library,
+    _plugins: &[Box<dyn crate::plugins::Plugin>],
+    m: &clap::ArgMatches,
+) -> anyhow::Result<()> {
+    use clap::FromArgMatches as _;
+    let a = ParentworkArgs::from_arg_matches(m)?;
+    crate::plugins::parentwork::command(
+        cfg,
+        lib,
+        crate::plugins::parentwork::CmdOpts {
+            force: a.force.then_some(true),
+            limit: a.limit,
+            query: a.query,
+        },
+    )
+}
