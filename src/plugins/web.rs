@@ -136,7 +136,7 @@ pub struct Response {
 }
 
 impl Response {
-    fn new(status: u16, content_type: &str, body: Vec<u8>) -> Response {
+    pub(crate) fn new(status: u16, content_type: &str, body: Vec<u8>) -> Response {
         Response {
             status,
             headers: vec![("Content-Type".into(), content_type.into())],
@@ -178,7 +178,7 @@ impl Response {
 }
 
 /// Werkzeug's HTTP error pages (`flask.abort`).
-fn abort(code: u16, description: Option<&str>) -> Response {
+pub(crate) fn abort(code: u16, description: Option<&str>) -> Response {
     let (name, default) = match code {
         400 => (
             "Bad Request",
@@ -242,6 +242,26 @@ enum Layout {
 }
 
 impl Json {
+    /// Flask's `jsonify` output (as Flask 3 writes it): keys sorted, compact
+    /// separators (the aura plugin's documents).
+    pub(crate) fn to_flask_json(&self) -> String {
+        self.sorted().dumps(Layout::Compact)
+    }
+
+    /// The value with every object's keys sorted (Flask's `sort_keys`).
+    fn sorted(&self) -> Json {
+        match self {
+            Json::List(l) => Json::List(l.iter().map(Json::sorted).collect()),
+            Json::Obj(o) => {
+                let mut entries: Vec<(String, Json)> =
+                    o.iter().map(|(k, v)| (k.clone(), v.sorted())).collect();
+                entries.sort_by(|a, b| a.0.cmp(&b.0));
+                Json::Obj(entries)
+            }
+            other => other.clone(),
+        }
+    }
+
     fn obj(map: BTreeMap<String, Json>) -> Json {
         Json::Obj(map.into_iter().collect())
     }
@@ -361,7 +381,7 @@ fn b64encode(data: &[u8]) -> String {
 
 /// A model field's value as Python has it in `dict(obj)`, for `json.dumps`
 /// (bytes, i.e. paths, base64-encoded as `_rep` does).
-fn value_json(kind: Kind, key: &str, value: Option<Value>) -> Json {
+pub(crate) fn value_json(kind: Kind, key: &str, value: Option<Value>) -> Json {
     let Some(value) = value else {
         return Json::Null;
     };
@@ -512,7 +532,7 @@ fn route(path: &str) -> Option<Matched> {
 }
 
 /// `%XX` escapes decoded (as the WSGI server does to `PATH_INFO`).
-fn percent_decode(s: &str) -> String {
+pub(crate) fn percent_decode(s: &str) -> String {
     let b = s.as_bytes();
     let mut out = Vec::with_capacity(b.len());
     let mut i = 0;
@@ -536,7 +556,7 @@ fn hex(c: u8) -> Option<u8> {
 }
 
 /// Werkzeug's `request.args`: `&`-separated, `+` for a space.
-fn parse_args(qs: &str) -> Vec<(String, String)> {
+pub(crate) fn parse_args(qs: &str) -> Vec<(String, String)> {
     qs.split('&')
         .filter(|p| !p.is_empty())
         .map(|p| {
@@ -725,7 +745,7 @@ impl App<'_> {
                         .file_name()
                         .map(|n| n.to_string_lossy().into_owned())
                         .unwrap_or_default();
-                    send_file(p, "inline", &name, ctx)?
+                    send_file(p, "inline", &name, ctx.req)?
                 }
                 _ => abort(404, None),
             },
@@ -1097,7 +1117,7 @@ fn set_json(item: &mut Item, key: &str, v: &serde_json::Value) {
 }
 
 /// Python's `mimetypes.guess_type` (Flask adds the charset to text).
-fn mimetype(name: &str) -> &'static str {
+pub(crate) fn mimetype(name: &str) -> &'static str {
     let ext = name
         .rsplit_once('.')
         .map(|(_, e)| e.to_ascii_lowercase())
@@ -1139,7 +1159,7 @@ fn quote_header_value(v: &str) -> String {
 
 /// Werkzeug's `Content-Disposition` for `send_file`: a non-ASCII name as
 /// an ASCII `filename` plus a UTF-8 `filename*`.
-fn content_disposition(kind: &str, name: &str) -> String {
+pub(crate) fn content_disposition(kind: &str, name: &str) -> String {
     if name.is_ascii() {
         return format!("{kind}; filename={}", quote_header_value(name));
     }
@@ -1172,13 +1192,18 @@ fn item_file(item: &Item, ctx: &Ctx) -> Result<Response> {
     } else {
         crate::template::unidecode(&base)
     };
-    send_file(path, "attachment", &safe, ctx)
+    send_file(path, "attachment", &safe, ctx.req)
 }
 
 /// Werkzeug's `send_file`: the file with its type, `Content-Disposition`,
 /// `Last-Modified`, and byte ranges (`Range: bytes=...`, for seeking in
 /// the browser's player). A missing file is an error (a 500).
-fn send_file(path: &Path, disposition: &str, name: &str, ctx: &Ctx) -> Result<Response> {
+pub(crate) fn send_file(
+    path: &Path,
+    disposition: &str,
+    name: &str,
+    req: &Request,
+) -> Result<Response> {
     let mut file = File::open(path)?;
     let meta = file.metadata()?;
     let size = meta.len();
@@ -1200,7 +1225,7 @@ fn send_file(path: &Path, disposition: &str, name: &str, ctx: &Ctx) -> Result<Re
     headers.push(("Cache-Control".into(), "no-cache".into()));
     let mut status = 200;
     let mut len = size;
-    if let Some(range) = ctx.req.header("Range") {
+    if let Some(range) = req.header("Range") {
         match parse_range(range, size) {
             Some(Some((start, end))) => {
                 file.seek(SeekFrom::Start(start))?;
@@ -1339,6 +1364,11 @@ impl Cors {
 /// here, its response written out on a thread of its own. Requests are
 /// logged to stderr as Werkzeug does.
 pub fn serve(app: &App, server: &tiny_http::Server) {
+    serve_with(|req| app.handle(req), server);
+}
+
+/// [`serve`] with any request handler (the aura plugin's app).
+pub fn serve_with(handle: impl Fn(&Request) -> Response, server: &tiny_http::Server) {
     for mut rq in server.incoming_requests() {
         let mut body = vec![];
         if rq.as_reader().read_to_end(&mut body).is_err() {
@@ -1354,7 +1384,7 @@ pub fn serve(app: &App, server: &tiny_http::Server) {
                 .collect(),
             body,
         };
-        let resp = app.handle(&req);
+        let resp = handle(&req);
         let remote = rq
             .remote_addr()
             .map(|a| a.ip().to_string())

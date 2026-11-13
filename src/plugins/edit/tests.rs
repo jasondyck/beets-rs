@@ -325,6 +325,8 @@ fn keeps_flexible_fields_but_drops_item_only_fields() {
         cfg: &cfg,
         is_album: true,
         items: &mut items,
+        paths: &[],
+        rec: None,
         candidates: 0,
         selected: None,
         apply_candidate: &noop,
