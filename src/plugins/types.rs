@@ -65,6 +65,8 @@ fn declared(cfg: &Config, plugin: &str) -> Result<[Vec<(String, FieldType)>; 2]>
         }
         "lyrics" => [own(crate::plugins::lyrics::ITEM_TYPES), vec![]],
         "missing" => [vec![], own(crate::plugins::missing::ALBUM_TYPES)],
+        // 5.20b
+        "metasync" => [own(crate::plugins::metasync::ITEM_TYPES), vec![]],
         _ => [vec![], vec![]],
     })
 }

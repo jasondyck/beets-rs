@@ -48,6 +48,8 @@ pub struct FormatEnv {
     /// The rewrite and advancedrewrite plugins' rules, in plugin order
     /// (a later plugin's rules for a field win, as beets' getters).
     pub rewriters: Vec<Rc<crate::plugins::rewrite::Rewriter>>,
+    /// The titlecase plugin's `%titlecase{}`, when it's enabled.
+    pub titlecase: Option<Rc<crate::plugins::titlecase::Titlecase>>,
     /// `%substitute{}`, `%bucket{}` and `$atypes`, when their plugins are
     /// enabled.
     pub substitute: Option<Rc<crate::plugins::substitute::Substitute>>,
@@ -176,6 +178,8 @@ impl FormatEnv {
                 .then(|| crate::plugins::bucket::Bucket::new(cfg).ok())
                 .flatten()
                 .map(Rc::new),
+            titlecase: crate::plugins::enabled(cfg, "titlecase")
+                .then(|| Rc::new(crate::plugins::titlecase::Titlecase::new(cfg))),
             albumtypes: crate::plugins::enabled(cfg, "albumtypes")
                 .then(|| Rc::new(crate::plugins::albumtypes::AlbumTypes::new(cfg))),
         })
@@ -889,6 +893,11 @@ impl Context for Formatted<'_> {
             "sunique" => Some(self.sunique(args)),
             "tunique" => Some(self.tunique(args)),
             "the" => self.env.the.as_ref().map(|t| t.call(args)),
+            "titlecase" => self
+                .env
+                .titlecase
+                .as_ref()
+                .map(|t| Ok(t.titlecase(args.first().map(String::as_str).unwrap_or(""), ""))),
             "substitute" => self.env.substitute.as_ref().map(|s| s.call(args)),
             "bucket" => self.env.bucket.as_ref().map(|b| b.call(args)),
             _ => None,
