@@ -96,7 +96,6 @@ inventory::submit! {
         make: Some(registry_make),
         fatal: false,
         commands: &[crate::plugin_registry::PluginCommand {
-            order: 480,
             plugin: "limit",
             build: build_lslimit,
             run: run_lslimit,
@@ -137,7 +136,7 @@ pub struct LslimitArgs {
 pub fn build_lslimit() -> clap::Command {
     use clap::Args as _;
     LslimitArgs::augment_args(
-        clap::Command::new("lslimit").about("Query with optional head or tail (plugin: limit)"),
+        clap::Command::new("lslimit").about("query with optional head or tail"),
     )
 }
 

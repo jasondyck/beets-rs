@@ -359,7 +359,6 @@ inventory::submit! {
         fatal: false,
         commands: &[
             crate::plugin_registry::PluginCommand {
-                order: 230,
                 plugin: "missing",
                 build: build_missing,
                 run: run_missing,
@@ -406,7 +405,7 @@ pub fn build_missing() -> clap::Command {
     use clap::Args as _;
     MissingArgs::augment_args(
         clap::Command::new("missing")
-            .about("List missing tracks (plugin: missing)")
+            .about("List missing tracks.")
             .visible_alias("miss"),
     )
 }

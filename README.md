@@ -161,7 +161,6 @@ inventory::submit! {
         make: Some(registry_make),   // the plugin constructor
         fatal: false,                // a setup error ends the command
         commands: &[crate::plugin_registry::PluginCommand {
-            order: 100,              // position in `beet --help`
             plugin: "myplugin",      // the plugin the command checks/enables
             build: build_mycommand,  // fn() -> clap::Command
             run: run_mycommand,      // fn(&Config, &Library, &[Box<dyn Plugin>], &ArgMatches)
@@ -171,13 +170,12 @@ inventory::submit! {
 ```
 
 `order` in `PluginDef` is the plugin's position in beets' bundled-plugin
-list (it orders the "available:" names and the walk over enabled plugins);
-`PluginCommand.order` is the command's position among the plugin commands in
-`beet --help` (core commands come first, `version`/`help`/`config` last).
-Both are plain numbers picked per plugin: leave gaps between them (e.g. ten
-apart), take the next one for a new plugin, and the registry's tests fail on a
-duplicate (`plugin_orders_are_unique` / `command_orders_are_unique`). Ties
-would otherwise depend on link order.
+list (it orders the "available:" names and the walk over enabled plugins): a
+plain number picked per plugin, leave gaps between them (e.g. ten apart) and
+take the next one for a new plugin; `plugin_orders_are_unique` fails on a
+duplicate, which would otherwise depend on link order. Commands need no such
+number: `beet --help` lists the core and plugin commands sorted by name, as
+beets does.
 
 `plugins::load`, the configuration defaults (`beet config -d`) and the plugin
 subcommands on `beet`'s command line are built from this registry; the core

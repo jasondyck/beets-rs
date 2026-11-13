@@ -237,7 +237,6 @@ inventory::submit! {
         make: Some(registry_make),
         fatal: false,
         commands: &[crate::plugin_registry::PluginCommand {
-            order: 490,
             plugin: "fish",
             build: build_fish,
             run: run_fish,
@@ -267,7 +266,7 @@ pub struct FishArgs {
 pub fn build_fish() -> clap::Command {
     use clap::Args as _;
     FishArgs::augment_args(
-        clap::Command::new("fish").about("Generate Fish shell tab completions (plugin: fish)"),
+        clap::Command::new("fish").about("generate Fish shell tab completions"),
     )
 }
 

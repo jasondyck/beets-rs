@@ -537,7 +537,6 @@ inventory::submit! {
         make: Some(registry_make),
         fatal: false,
         commands: &[crate::plugin_registry::PluginCommand {
-            order: 500,
             plugin: "metasync",
             build: build_metasync,
             run: run_metasync,
@@ -573,7 +572,7 @@ pub fn build_metasync() -> clap::Command {
     use clap::Args as _;
     MetasyncArgs::augment_args(
         clap::Command::new("metasync")
-            .about("Update metadata from music player libraries (plugin: metasync)"),
+            .about("update metadata from music player libraries"),
     )
 }
 

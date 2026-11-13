@@ -1225,7 +1225,6 @@ inventory::submit! {
         fatal: false,
         commands: &[
             crate::plugin_registry::PluginCommand {
-                order: 150,
                 plugin: "lastgenre",
                 build: build_lastgenre,
                 run: run_lastgenre,
@@ -1273,7 +1272,7 @@ pub struct LastgenreArgs {
 pub fn build_lastgenre() -> clap::Command {
     use clap::Args as _;
     LastgenreArgs::augment_args(
-        clap::Command::new("lastgenre").about("Fetch genres (plugin: lastgenre)"),
+        clap::Command::new("lastgenre").about("fetch genres"),
     )
 }
 

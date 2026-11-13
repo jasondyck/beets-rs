@@ -2010,7 +2010,6 @@ inventory::submit! {
         fatal: false,
         commands: &[
             crate::plugin_registry::PluginCommand {
-                order: 550,
                 plugin: "bpd",
                 build: build_bpd,
                 run: run_bpd,
@@ -2034,7 +2033,7 @@ pub struct BpdArgs {
 pub fn build_bpd() -> clap::Command {
     use clap::Args as _;
     BpdArgs::augment_args(clap::Command::new("bpd").about(
-        "Run an MPD-compatible music player server (plugin: bpd)",
+        "run an MPD-compatible music player server",
     ))
 }
 

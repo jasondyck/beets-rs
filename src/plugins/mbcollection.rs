@@ -322,7 +322,6 @@ inventory::submit! {
         fatal: false,
         commands: &[
             crate::plugin_registry::PluginCommand {
-                order: 430,
                 plugin: "mbcollection",
                 build: build_mbupdate,
                 run: run_mbupdate,
@@ -349,7 +348,7 @@ pub struct MbupdateArgs {
 pub fn build_mbupdate() -> clap::Command {
     use clap::Args as _;
     MbupdateArgs::augment_args(
-        clap::Command::new("mbupdate").about("Update MusicBrainz collection (plugin: mbcollection)"),
+        clap::Command::new("mbupdate").about("Update MusicBrainz collection"),
     )
 }
 

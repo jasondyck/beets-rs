@@ -414,7 +414,6 @@ inventory::submit! {
         fatal: false,
         commands: &[
             crate::plugin_registry::PluginCommand {
-                order: 330,
                 plugin: "export",
                 build: build_export,
                 run: run_export,
@@ -459,7 +458,7 @@ pub struct ExportArgs {
 pub fn build_export() -> clap::Command {
     use clap::Args as _;
     ExportArgs::augment_args(
-        clap::Command::new("export").about("Export data from beets (plugin: export)"),
+        clap::Command::new("export").about("export data from beets"),
     )
 }
 

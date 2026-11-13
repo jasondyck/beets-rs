@@ -112,7 +112,6 @@ inventory::submit! {
         make: Some(registry_make),
         fatal: false,
         commands: &[crate::plugin_registry::PluginCommand {
-            order: 390,
             plugin: "bpsync",
             build: build_bpsync,
             run: run_bpsync,

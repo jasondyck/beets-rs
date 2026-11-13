@@ -203,7 +203,6 @@ inventory::submit! {
         fatal: false,
         commands: &[
             crate::plugin_registry::PluginCommand {
-                order: 570,
                 plugin: "keyfinder",
                 build: build_keyfinder,
                 run: run_keyfinder,
@@ -230,7 +229,7 @@ pub struct KeyfinderArgs {
 pub fn build_keyfinder() -> clap::Command {
     use clap::Args as _;
     KeyfinderArgs::augment_args(clap::Command::new("keyfinder").about(
-        "Detect and add initial key from audio (plugin: keyfinder)",
+        "detect and add initial key from audio",
     ))
 }
 

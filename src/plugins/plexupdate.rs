@@ -510,7 +510,6 @@ inventory::submit! {
         fatal: false,
         commands: &[
             crate::plugin_registry::PluginCommand {
-                order: 440,
                 plugin: "plexupdate",
                 build: build_plexupdate,
                 run: run_plexupdate,
@@ -539,7 +538,7 @@ pub fn build_plexupdate() -> clap::Command {
     PlexupdateArgs::augment_args(
         clap::Command::new("plexupdate")
             .bin_name("beet plexupdate")
-            .about("Update Plex library when beets library changes (plugin: plexupdate)"),
+            .about("Update Plex library when beets library changes"),
     )
 }
 

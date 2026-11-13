@@ -970,19 +970,16 @@ inventory::submit! {
         fatal: false,
         commands: &[
             crate::plugin_registry::PluginCommand {
-                order: 290,
                 plugin: "chroma",
                 build: build_submit,
                 run: run_submit,
             },
             crate::plugin_registry::PluginCommand {
-                order: 300,
                 plugin: "chroma",
                 build: build_fingerprint,
                 run: run_fingerprint,
             },
             crate::plugin_registry::PluginCommand {
-                order: 310,
                 plugin: "chroma",
                 build: build_chromasearch,
                 run: run_chromasearch,
@@ -1009,7 +1006,7 @@ pub struct SubmitArgs {
 pub fn build_submit() -> clap::Command {
     use clap::Args as _;
     SubmitArgs::augment_args(
-        clap::Command::new("submit").about("Submit Acoustid fingerprints (plugin: chroma)"),
+        clap::Command::new("submit").about("submit Acoustid fingerprints"),
     )
 }
 
@@ -1039,7 +1036,7 @@ pub fn build_fingerprint() -> clap::Command {
     use clap::Args as _;
     FingerprintArgs::augment_args(
         clap::Command::new("fingerprint")
-            .about("Generate fingerprints for items without them (plugin: chroma)"),
+            .about("generate fingerprints for items without them"),
     )
 }
 
@@ -1087,7 +1084,7 @@ pub fn build_chromasearch() -> clap::Command {
     use clap::Args as _;
     ChromasearchArgs::augment_args(
         clap::Command::new("chromasearch")
-            .about("Search local database by chroma fingerprint (plugin: chroma)"),
+            .about("search local database by chroma fingerprint"),
     )
 }
 

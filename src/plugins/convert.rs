@@ -1373,7 +1373,6 @@ inventory::submit! {
         fatal: false,
         commands: &[
             crate::plugin_registry::PluginCommand {
-                order: 250,
                 plugin: "convert",
                 build: build_convert,
                 run: run_convert,
@@ -1443,7 +1442,7 @@ pub struct ConvertArgs {
 pub fn build_convert() -> clap::Command {
     use clap::Args as _;
     ConvertArgs::augment_args(
-        clap::Command::new("convert").about("Convert to external location (plugin: convert)"),
+        clap::Command::new("convert").about("convert to external location"),
     )
 }
 

@@ -542,7 +542,6 @@ inventory::submit! {
         make: Some(registry_make),
         fatal: false,
         commands: &[crate::plugin_registry::PluginCommand {
-            order: 510,
             plugin: "titlecase",
             build: build_titlecase,
             run: run_titlecase,
@@ -569,7 +568,7 @@ pub fn build_titlecase() -> clap::Command {
     use clap::Args as _;
     TitlecaseArgs::augment_args(
         clap::Command::new("titlecase")
-            .about("Apply titlecasing to metadata (plugin: titlecase)"),
+            .about("Apply titlecasing to metadata specified in config."),
     )
 }
 

@@ -338,7 +338,6 @@ inventory::submit! {
         make: Some(registry_make),
         fatal: false,
         commands: &[crate::plugin_registry::PluginCommand {
-            order: 460,
             plugin: "thumbnails",
             build: build_thumbnails,
             run: run_thumbnails,
@@ -376,7 +375,7 @@ pub struct ThumbnailsArgs {
 pub fn build_thumbnails() -> clap::Command {
     use clap::Args as _;
     ThumbnailsArgs::augment_args(
-        clap::Command::new("thumbnails").about("Create album thumbnails (plugin: thumbnails)"),
+        clap::Command::new("thumbnails").about("Create album thumbnails"),
     )
 }
 

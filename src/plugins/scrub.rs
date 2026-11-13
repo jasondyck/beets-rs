@@ -165,7 +165,6 @@ inventory::submit! {
         fatal: false,
         commands: &[
             crate::plugin_registry::PluginCommand {
-                order: 270,
                 plugin: "scrub",
                 build: build_scrub,
                 run: run_scrub,
@@ -194,7 +193,7 @@ pub struct ScrubArgs {
 
 pub fn build_scrub() -> clap::Command {
     use clap::Args as _;
-    ScrubArgs::augment_args(clap::Command::new("scrub").about("Clean audio tags (plugin: scrub)"))
+    ScrubArgs::augment_args(clap::Command::new("scrub").about("clean audio tags"))
 }
 
 pub fn run_scrub(

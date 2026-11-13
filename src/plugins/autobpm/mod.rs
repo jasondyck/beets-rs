@@ -183,7 +183,6 @@ inventory::submit! {
         fatal: false,
         commands: &[
             crate::plugin_registry::PluginCommand {
-                order: 540,
                 plugin: "autobpm",
                 build: build_autobpm,
                 run: run_autobpm,
@@ -216,7 +215,7 @@ pub struct AutobpmArgs {
 pub fn build_autobpm() -> clap::Command {
     use clap::Args as _;
     AutobpmArgs::augment_args(clap::Command::new("autobpm").about(
-        "Detect and add bpm from audio using Librosa (plugin: autobpm)",
+        "detect and add bpm from audio using Librosa",
     ))
 }
 

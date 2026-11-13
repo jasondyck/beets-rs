@@ -22,6 +22,8 @@ use std::path::{Path, PathBuf};
 /// The command line's global options: beets' `config.set_args` applies them
 /// before the command runs (also when the command came from a plugin).
 pub struct Globals {
+    pub format_item: Option<String>,
+    pub format_album: Option<String>,
     pub library: Option<PathBuf>,
     pub directory: Option<PathBuf>,
     pub verbose: u8,
@@ -34,6 +36,8 @@ pub struct Globals {
 impl Globals {
     fn from_cli(cli: &Cli) -> Globals {
         Globals {
+            format_item: cli.format_item.clone(),
+            format_album: cli.format_album.clone(),
             library: cli.library.clone(),
             directory: cli.directory.clone(),
             verbose: cli.verbose,
@@ -48,6 +52,8 @@ impl Globals {
     /// global arguments are the derived ones).
     pub fn from_matches(m: &clap::ArgMatches) -> Globals {
         Globals {
+            format_item: m.get_one::<String>("format_item").cloned(),
+            format_album: m.get_one::<String>("format_album").cloned(),
             library: m.get_one::<PathBuf>("library").cloned(),
             directory: m.get_one::<PathBuf>("directory").cloned(),
             verbose: m.get_one::<u8>("verbose").copied().unwrap_or(0),
@@ -87,6 +93,14 @@ fn load_config(g: &Globals) -> Result<Config> {
     debug!("data directory: {}", cfg.config_dir.display());
     // beets' `config.set_args`: the command line is the highest-priority
     // source, its keys in option order (`beet config` shows them).
+    // As beets' root `--format-item`/`--format-album`: they set the
+    // format the way a command's `-f` does.
+    if let Some(f) = &g.format_item {
+        cfg.set("format_item", Y::String(f.clone()));
+    }
+    if let Some(f) = &g.format_album {
+        cfg.set("format_album", Y::String(f.clone()));
+    }
     if let Some(l) = &g.library {
         cfg.set("library", Y::String(l.to_string_lossy().into()));
     }
@@ -164,7 +178,7 @@ pub fn run(cli: Cli) -> Result<()> {
     };
     // Commands that don't need the library.
     match &cmd {
-        Cmd::Help { command } => return help(command.as_deref()),
+        Cmd::Help { command } => return help(&cfg, command.as_deref()),
         Cmd::Version => return version(&cfg),
         Cmd::Config {
             paths,
@@ -483,11 +497,18 @@ pub fn run_plugin(
 
 /// `beet help [COMMAND]`: the main help, or a command's (by name or alias),
 /// exactly as `beet COMMAND --help` shows it.
-fn help(command: Option<&str>) -> Result<()> {
+fn help(cfg: &Config, command: Option<&str>) -> Result<()> {
     let Some(name) = command else {
-        crate::cli().print_help()?;
+        print!("{}", crate::root_help_text(&crate::plugins::names(cfg)));
         return Ok(());
     };
+    // As beets, a plugin's command exists only while the plugin is enabled.
+    let enabled = crate::plugins::names(cfg);
+    if let Some(cmd) = crate::plugin_registry::command(name)
+        && !enabled.iter().any(|p| p == cmd.plugin)
+    {
+        bail!("unknown command '{name}'");
+    }
     match crate::cli().try_get_matches_from(["beet", name, "--help"]) {
         Err(e) if e.kind() == clap::error::ErrorKind::DisplayHelp => {
             e.print()?;
@@ -2124,11 +2145,12 @@ mod tests {
 
     #[test]
     fn help_for_unknown_commands_is_an_error() {
+        let cfg = Config::load(&[]).unwrap();
         // Parsing the full command line (clap builds every subcommand) needs
         // a deeper stack than a test thread's 2 MiB in debug builds.
         let e = std::thread::Builder::new()
             .stack_size(8 << 20)
-            .spawn(|| help(Some("frob")).unwrap_err())
+            .spawn(move || help(&cfg, Some("frob")).unwrap_err())
             .unwrap()
             .join()
             .unwrap();

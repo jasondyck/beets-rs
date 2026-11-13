@@ -219,7 +219,6 @@ inventory::submit! {
         fatal: false,
         commands: &[
             crate::plugin_registry::PluginCommand {
-                order: 340,
                 plugin: "random",
                 build: build_random,
                 run: run_random,
@@ -267,7 +266,7 @@ pub struct RandomArgs {
 pub fn build_random() -> clap::Command {
     use clap::Args as _;
     RandomArgs::augment_args(
-        clap::Command::new("random").about("Choose a random track or album (plugin: random)"),
+        clap::Command::new("random").about("choose a random track or album"),
     )
 }
 

@@ -63,7 +63,6 @@ inventory::submit! {
         make: Some(registry_make),
         fatal: false,
         commands: &[crate::plugin_registry::PluginCommand {
-            order: 350,
             plugin: "freedesktop",
             build: build_freedesktop,
             run: run_freedesktop,
