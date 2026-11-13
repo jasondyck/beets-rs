@@ -1013,26 +1013,68 @@ fn registry_make(cfg: &Config) -> Result<Box<dyn crate::plugins::Plugin>> {
     Ok(Box::new(TidalPlugin::new(cfg)))
 }
 
-// ---------------------------------------------------------------- entry points
+// ------------------------------------------------------- metadata source
 
-/// beets' `tidal.candidates` for the autotagger.
-pub fn album_candidates(cfg: &Config, items: &[Item]) -> Result<Vec<AlbumInfo>> {
-    Tidal::new(cfg).candidates(items, "", "", false)
+/// The tidal source as the autotagger's [`MetadataSource`]: its lookups
+/// need the API client mutably, and the trait takes `&self`.
+///
+/// [`MetadataSource`]: crate::metadata_plugins::MetadataSource
+struct TidalSource(std::cell::RefCell<Tidal>);
+
+impl crate::metadata_plugins::MetadataSource for TidalSource {
+    fn data_source(&self) -> &'static str {
+        "Tidal"
+    }
+
+    fn album_for_id(
+        &self,
+        _ctx: &crate::metadata_plugins::SourceCtx,
+        id: &str,
+    ) -> Result<Option<AlbumInfo>> {
+        self.0.borrow_mut().album_for_id(id)
+    }
+
+    fn track_for_id(
+        &self,
+        _ctx: &crate::metadata_plugins::SourceCtx,
+        id: &str,
+    ) -> Result<Option<TrackInfo>> {
+        self.0.borrow_mut().track_for_id(id)
+    }
+
+    fn candidates(
+        &self,
+        _ctx: &crate::metadata_plugins::SourceCtx,
+        items: &[Item],
+        _artist: &str,
+        _album: &str,
+        _va_likely: bool,
+    ) -> Result<Vec<AlbumInfo>> {
+        self.0.borrow_mut().candidates(items, "", "", false)
+    }
+
+    fn item_candidates(
+        &self,
+        _ctx: &crate::metadata_plugins::SourceCtx,
+        item: &Item,
+        _artist: &str,
+        _title: &str,
+    ) -> Result<Vec<TrackInfo>> {
+        self.0.borrow_mut().item_candidates(item, "", "")
+    }
 }
 
-/// beets' `tidal.item_candidates` for the autotagger.
-pub fn item_candidates(cfg: &Config, item: &Item) -> Result<Vec<TrackInfo>> {
-    Tidal::new(cfg).item_candidates(item, "", "")
-}
-
-/// beets' `tidal.album_for_id`.
-pub fn album_for_id(cfg: &Config, id: &str) -> Result<Option<AlbumInfo>> {
-    Tidal::new(cfg).album_for_id(id)
-}
-
-/// beets' `tidal.track_for_id`.
-pub fn track_for_id(cfg: &Config, id: &str) -> Result<Option<TrackInfo>> {
-    Tidal::new(cfg).track_for_id(id)
+inventory::submit! {
+    crate::metadata_plugins::MetadataSourceDef {
+        // 5.21b
+        order: 88,
+        plugin: "tidal",
+        data_source: "Tidal",
+        // Loading doesn't need the token (the `import_begin` hook checks
+        // it); a lookup without one fails like beets'.
+        configured: |_cfg| true,
+        make: |cfg| Ok(Box::new(TidalSource(std::cell::RefCell::new(Tidal::new(cfg))))),
+    }
 }
 
 #[cfg(test)]

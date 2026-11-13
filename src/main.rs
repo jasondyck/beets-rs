@@ -17,6 +17,7 @@ mod logging;
 mod mb;
 mod media;
 mod mediafile;
+mod metadata_plugins;
 mod migrate;
 mod model;
 mod paths;

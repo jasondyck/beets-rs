@@ -70,18 +70,29 @@ impl Source for MbSourceRef<'_> {
     }
 }
 
-/// beets' `metadata_plugins.album_for_id(id, "Tidal")` and
-/// `track_for_id`.
-struct TidalSource<'a> {
+/// beets' `metadata_plugins.album_for_id(id, NAME)`/`track_for_id`: a
+/// plugin metadata source from the registry (tidal, discogs, ...).
+struct RegistrySource<'a> {
     cfg: &'a Config,
+    mb: MusicBrainz,
+    source: Box<dyn crate::metadata_plugins::MetadataSource>,
 }
 
-impl Source for TidalSource<'_> {
+impl Source for RegistrySource<'_> {
     fn album_for_id(&self, id: &str) -> Result<Option<AlbumInfo>> {
-        crate::plugins::tidal::album_for_id(self.cfg, id)
+        let ctx = crate::metadata_plugins::SourceCtx {
+            cfg: self.cfg,
+            mb: &self.mb,
+        };
+        self.source.album_for_id(&ctx, id)
     }
+
     fn track_for_id(&self, id: &str) -> Result<Option<TrackInfo>> {
-        crate::plugins::tidal::track_for_id(self.cfg, id)
+        let ctx = crate::metadata_plugins::SourceCtx {
+            cfg: self.cfg,
+            mb: &self.mb,
+        };
+        self.source.track_for_id(&ctx, id)
     }
 }
 
@@ -141,19 +152,19 @@ impl<'a> Sync<'a> {
     }
 
     /// `metadata_plugins.get_metadata_source(name)`: MusicBrainz (the
-    /// client this command was built with), or tidal, while the plugin is
-    /// enabled. (Other metadata sources, e.g. discogs, come with their own
-    /// plugins.)
+    /// client this command was built with), or any other metadata source
+    /// plugin that is enabled (from the source registry).
     fn source_for(&self, data_source: &str) -> Option<Box<dyn Source + '_>> {
-        if data_source.eq_ignore_ascii_case("musicbrainz")
-            && crate::plugins::enabled(self.cfg, "musicbrainz")
-        {
-            return Some(Box::new(MbSourceRef(self.source)));
+        if data_source.eq_ignore_ascii_case("musicbrainz") {
+            return crate::plugins::enabled(self.cfg, "musicbrainz")
+                .then(|| Box::new(MbSourceRef(self.source)) as Box<dyn Source + '_>);
         }
-        if data_source.eq_ignore_ascii_case("tidal") && crate::plugins::enabled(self.cfg, "tidal") {
-            return Some(Box::new(TidalSource { cfg: self.cfg }));
-        }
-        None
+        let source = crate::metadata_plugins::source(self.cfg, data_source)?;
+        Some(Box::new(RegistrySource {
+            cfg: self.cfg,
+            mb: MusicBrainz::new(self.cfg),
+            source,
+        }))
     }
 
     /// `maybe_handle_plugin_error`: a lookup failure is logged (unless

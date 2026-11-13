@@ -126,7 +126,10 @@ pub struct TrackInfo {
     /// Fields beets' info dict would not have at all (the data source's
     /// constructor does not set them).
     pub omit: BTreeSet<&'static str>,
-    /// Extra information fields (mbpseudo's custom tags).
+    /// Extra information fields (mbpseudo's custom tags, and the fields the
+    /// other metadata source plugins set: `bpm`, `initial_key`, `genres`,
+    /// `deezer_track_id`, ...). In [`TrackInfo::to_data`] they override or
+    /// add to the fields above.
     pub extra: Vec<(String, V)>,
 }
 
@@ -179,7 +182,8 @@ pub struct AlbumInfo {
     /// Fields beets' info dict would not have at all (see
     /// [`TrackInfo::omit`]).
     pub omit: BTreeSet<&'static str>,
-    /// Extra information fields (mbpseudo's custom tags).
+    /// Extra information fields (see [`TrackInfo::extra`]):
+    /// `spotify_album_id`, ...
     pub extra: Vec<(String, V)>,
 }
 
@@ -921,21 +925,6 @@ fn parse_genres(j: &J, field: &str) -> Option<Vec<String>> {
     Some(counts.into_iter().map(|(n, _)| n).collect())
 }
 
-/// beets' `extract_release_id` for an external source's URL.
-fn extract_external_id(source: &str, url: &str) -> Option<String> {
-    let pat = match source {
-        "spotify" => r"(?:^|open\.spotify\.com/[^/]+/|spotify:[a-z]+:)([0-9A-Za-z]{22})",
-        "deezer" => r"(?:^|deezer\.com/)(?:[a-z]*/)?(?:[^/]+/)?(\d+)",
-        "beatport" => r"(?:^|beatport\.com/release/.+/)(\d+)$",
-        "discogs" => r"(?:^|\[?r|discogs\.com/(?:[^/]+/)?release/)(\d+)\b",
-        "bandcamp" => r"(.+)",
-        "tidal" => r"(?:^|tidal\.com/(?:browse/)?(?:album|track)/)(\d+)",
-        _ => return Some(url.to_string()),
-    };
-    let re = regex::Regex::new(pat).ok()?;
-    re.captures(url).map(|c| c[1].to_string())
-}
-
 /// beets' `_parse_external_ids`: for each wanted source, the last URL
 /// relation on its site (`<source>.com` in the URL), as its id.
 fn parse_external_ids(j: &J, wanted: &[String]) -> Vec<(String, Option<String>)> {
@@ -959,7 +948,7 @@ fn parse_external_ids(j: &J, wanted: &[String]) -> Vec<(String, Option<String>)>
             );
             out.push((
                 format!("{source}_album_id"),
-                extract_external_id(source, url),
+                crate::metadata_plugins::extract_id(source, url),
             ));
         }
     }
@@ -1138,8 +1127,7 @@ fn merge_pseudo_and_actual(mut pseudo: AlbumInfo, actual: AlbumInfo) -> AlbumInf
 /// Pull an MBID out of a bare id or a URL (beets' `extract_release_id`
 /// for MusicBrainz: as given, not lower-cased).
 pub fn extract_id(s: &str) -> Option<String> {
-    let re = regex::Regex::new(r"(\w{8}(?:-\w{4}){3}-\w{12})").unwrap();
-    re.find(s).map(|m| m.as_str().to_string())
+    crate::metadata_plugins::extract_id("musicbrainz", s)
 }
 
 /// beets' `plurality`: the most common value, ties to the first seen.

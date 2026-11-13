@@ -73,6 +73,9 @@ fn declared(cfg: &Config, plugin: &str) -> Result<[Vec<(String, FieldType)>; 2]>
         // 5.20b
         "metasync" => [own(crate::plugins::metasync::ITEM_TYPES), vec![]],
         "tidal" => [own(crate::plugins::tidal::ITEM_TYPES), own(crate::plugins::tidal::ALBUM_TYPES)],
+        // 5.19
+        "deezer" => [own(crate::plugins::deezer::ITEM_TYPES), vec![]],
+        "spotify" => [own(crate::plugins::spotify::ITEM_TYPES), vec![]],
         _ => [vec![], vec![]],
     })
 }

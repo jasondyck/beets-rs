@@ -3,6 +3,7 @@
 //! persistence, plus the API base URL prefixing (`openapi.tidal.com/v2`).
 
 use super::Urls;
+use crate::plugins::osrandom::random_string;
 use crate::plugins::requests::{self, HttpError, Request, Session};
 use anyhow::{Context, Result, anyhow, bail};
 use serde_json::{Value as J, json};
@@ -308,40 +309,6 @@ fn base64url(data: &[u8]) -> String {
 /// The PKCE S256 challenge: `BASE64URL(SHA256(verifier))`.
 pub fn code_challenge(verifier: &str) -> String {
     base64url(&Sha256::digest(verifier.as_bytes()))
-}
-
-/// Cryptographically random bytes from the OS (`getrandom`, e.g.
-/// `getentropy`/`getrandom(2)`), falling back to `/dev/urandom`.
-fn random_bytes(buf: &mut [u8]) {
-    if getrandom::fill(buf).is_ok() {
-        return;
-    }
-    use std::io::Read as _;
-    std::fs::File::open("/dev/urandom")
-        .and_then(|mut f| f.read_exact(buf))
-        .expect("no OS CSPRNG for the OAuth token");
-}
-
-/// A random string over `alphabet`, drawn from the OS CSPRNG (the PKCE
-/// verifier and the OAuth state must not be predictable). Bytes that would
-/// bias the modulo are rejected.
-fn random_string(len: usize, alphabet: &[u8]) -> String {
-    assert!(!alphabet.is_empty() && alphabet.len() <= 256);
-    let limit = 256 - 256 % alphabet.len();
-    let mut out = String::new();
-    while out.len() < len {
-        let mut bytes = [0u8; 64];
-        random_bytes(&mut bytes);
-        for b in bytes {
-            if usize::from(b) < limit {
-                out.push(alphabet[usize::from(b) % alphabet.len()] as char);
-                if out.len() == len {
-                    break;
-                }
-            }
-        }
-    }
-    out
 }
 
 /// beets' `_tokenfile`: `tidal.tokenfile` in the app directory unless it
