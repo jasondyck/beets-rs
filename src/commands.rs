@@ -498,18 +498,25 @@ pub fn run_plugin(
 /// `beet help [COMMAND]`: the main help, or a command's (by name or alias),
 /// exactly as `beet COMMAND --help` shows it.
 fn help(cfg: &Config, command: Option<&str>) -> Result<()> {
+    // As beets' `_setup`: the enabled plugins load before help is printed
+    // (their load-time warnings come first), but the library isn't opened.
+    let _ = plugins::load(cfg);
+    let enabled = plugins::names(cfg);
     let Some(name) = command else {
-        print!("{}", crate::root_help_text(&crate::plugins::names(cfg)));
+        print!("{}", crate::root_help_text(&enabled));
         return Ok(());
     };
-    // As beets, a plugin's command exists only while the plugin is enabled.
-    let enabled = crate::plugins::names(cfg);
-    if let Some(cmd) = crate::plugin_registry::command(name)
-        && !enabled.iter().any(|p| p == cmd.plugin)
-    {
+    // As beets, a plugin's command exists only while the plugin is enabled
+    // (the command line registers the enabled plugins' commands only).
+    let Some(canonical) = crate::canonical_command(name, &enabled) else {
         bail!("unknown command '{name}'");
+    };
+    if let Some(text) = crate::subcommand_help_text(&canonical) {
+        print!("{text}");
+        return Ok(());
     }
-    match crate::cli().try_get_matches_from(["beet", name, "--help"]) {
+    // Our own commands (`migrate-beets`) have no beets parser: clap's help.
+    match crate::cli(&enabled).try_get_matches_from(["beet", &canonical, "--help"]) {
         Err(e) if e.kind() == clap::error::ErrorKind::DisplayHelp => {
             e.print()?;
             Ok(())
