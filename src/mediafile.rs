@@ -1303,7 +1303,7 @@ impl Tags {
         let Tags::Id3 { tag, v1, .. } = self else {
             return None;
         };
-        for fr in tag.iter() {
+        for fr in tag {
             if fr.id_str() != id {
                 continue;
             }
@@ -1337,7 +1337,7 @@ impl Tags {
         }
     }
 
-    fn id3_set_text(&mut self, id: &str, values: Vec<String>) {
+    fn id3_set_text(&mut self, id: &str, values: &[String]) {
         let tag = self.id3_mut();
         let _ = tag.remove(&fid(id)).count();
         if values.is_empty() || values.iter().all(String::is_empty) && values.len() == 1 {
@@ -1792,7 +1792,7 @@ impl Tags {
                     items.pop();
                 }
                 let text = items.into_iter().flatten().collect::<Vec<_>>().join("/");
-                self.id3_set_text(id, vec![text]);
+                self.id3_set_text(id, &[text]);
             }
             Tuple(key, idx) => {
                 let (mut a, mut b) = self.mp4_tuple(key).unwrap_or((0, 0));
@@ -1861,7 +1861,7 @@ impl Tags {
     fn set_list(&mut self, st: &S, values: &[String]) {
         let values: Vec<String> = values.iter().map(|v| format!("{v}{}", st.suffix)).collect();
         match st.k {
-            Frame(id) => self.id3_set_text(id, values),
+            Frame(id) => self.id3_set_text(id, &values),
             TxxxList(desc, _) => self.id3_store_desc_list(desc, &values),
             People(frame, inv) => self.id3_store_people(frame, inv, &values),
             Atom(key) => self.mp4_set_strings(key, &values),
@@ -1893,7 +1893,7 @@ impl Tags {
                     .filter(|t| !t.is_empty())
                 {
                     let n = first.split('/').next().unwrap_or("").to_string();
-                    self.id3_set_text(id, vec![n]);
+                    self.id3_set_text(id, &[n]);
                 }
             }
             Txxx(desc) | TxxxList(desc, _) => self.id3_delete_desc("TXXX", desc),
@@ -2750,7 +2750,7 @@ mod tests {
         for f in TAG_FIELDS {
             match it.field_type(f) {
                 Some(crate::model::FieldType::List(_)) => {
-                    it.set_list(f, &[format!("{f}1"), format!("{f}2")])
+                    it.set_list(f, &[format!("{f}1"), format!("{f}2")]);
                 }
                 Some(crate::model::FieldType::Str) => it.set_str(f, format!("{f} v")),
                 _ => {}
@@ -3042,7 +3042,7 @@ mod tests {
     /// mutagen's `TCON.genres` (expected values from mutagen).
     #[test]
     fn tcon_genres_as_mutagen() {
-        let g = |v: &[&str]| tcon_genres(&v.iter().map(|s| s.to_string()).collect::<Vec<_>>());
+        let g = |v: &[&str]| tcon_genres(&v.iter().map(ToString::to_string).collect::<Vec<_>>());
         assert_eq!(g(&["80"]), ["Folk"]);
         assert_eq!(g(&["255"]), ["Unknown"]);
         assert_eq!(g(&["300"]), ["300"]);

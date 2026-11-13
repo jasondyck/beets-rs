@@ -446,11 +446,11 @@ pub fn track_distance(ctx: &Ctx, item: &Item, track: &TrackInfo, incl_artist: bo
 /// tracks' distances without the artist. Returns (item, track) index
 /// pairs in track order.
 pub fn assign(ctx: &Ctx, items: &[Item], tracks: &[TrackInfo]) -> Vec<(usize, usize)> {
+    const SCALE: f64 = 1e12;
     if items.is_empty() || tracks.is_empty() {
         return vec![];
     }
     let n = items.len().max(tracks.len());
-    const SCALE: f64 = 1e12;
     let mut m = Matrix::new(n, n, SCALE as i64);
     for (i, item) in items.iter().enumerate() {
         for (t, track) in tracks.iter().enumerate() {
@@ -1219,7 +1219,9 @@ mod tests {
         use serde_json::json;
 
         static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
-        let _guard = LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _guard = LOCK
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
 
         let track = |id: i64, title: &str, position: i64| {
             json!({

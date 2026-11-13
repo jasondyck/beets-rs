@@ -699,7 +699,7 @@ impl Config {
                 }
             }
         }
-        if out.as_mapping().is_none_or(|m| m.is_empty()) {
+        if out.as_mapping().is_none_or(Mapping::is_empty) {
             return String::new();
         }
         let body = crate::pyyaml::dump_confuse(&out);

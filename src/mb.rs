@@ -425,7 +425,7 @@ impl AliasPrefs {
         self.languages.iter().find_map(|locale| {
             aliases.iter().find(|al| {
                 al.get("locale").and_then(|l| l.as_str()) == Some(locale.as_str())
-                    && al.get("primary").and_then(|p| p.as_bool()) == Some(true)
+                    && al.get("primary").and_then(J::as_bool) == Some(true)
                     && !self.ignored_types.contains(&s(al, "type").to_lowercase())
             })
         })
@@ -509,7 +509,7 @@ impl ParseOpts {
             external_ids: EXTERNAL_SOURCES
                 .iter()
                 .filter(|src| cfg.bool(&format!("musicbrainz.external_ids.{src}")))
-                .map(|s| s.to_string())
+                .map(ToString::to_string)
                 .collect(),
             pseudo_scripts: if crate::plugins::enabled(cfg, "mbpseudo") {
                 cfg.list("mbpseudo.scripts")
@@ -612,7 +612,7 @@ fn s(v: &J, key: &str) -> String {
 fn arr<'j>(v: &'j J, key: &str) -> &'j [J] {
     v.get(key)
         .and_then(|x| x.as_array())
-        .map(|a| a.as_slice())
+        .map(Vec::as_slice)
         .unwrap_or(&[])
 }
 
@@ -783,7 +783,7 @@ fn parse_recording_with(
     if trackdisambig.is_empty() {
         nulls.insert("trackdisambig");
     }
-    let length = length.or_else(|| r.get("length").and_then(|l| l.as_f64()));
+    let length = length.or_else(|| r.get("length").and_then(J::as_f64));
     let id = s(r, "id");
     let mut info = TrackInfo {
         title: title.unwrap_or_else(|| prefs.title(r)),
@@ -848,12 +848,12 @@ fn medium_tracks(medium: &J, opts: &ParseOpts) -> Vec<TrackInfo> {
             let rec = t.get("recording").unwrap_or(&J::Null);
             s(rec, "title") != "[data track]"
                 && !(opts.ignore_video_tracks
-                    && rec.get("video").and_then(|v| v.as_bool()) == Some(true))
+                    && rec.get("video").and_then(J::as_bool) == Some(true))
         })
         .collect();
     let format = opt_s(medium, "format");
     let disctitle = opt_s(medium, "title");
-    let position = medium.get("position").and_then(|p| p.as_u64()).unwrap_or(0) as usize;
+    let position = medium.get("position").and_then(J::as_u64).unwrap_or(0) as usize;
     let total = valid.len();
     let prefs = &opts.aliases;
     valid
@@ -865,10 +865,7 @@ fn medium_tracks(medium: &J, opts: &ParseOpts) -> Vec<TrackInfo> {
             let title =
                 Some(s(t, "title")).filter(|t| !t.is_empty() && prefs.preferred(rec).is_none());
             let credits = Some(arr(t, "artist-credit")).filter(|a| !a.is_empty());
-            let length = t
-                .get("length")
-                .and_then(|l| l.as_f64())
-                .filter(|l| *l != 0.0);
+            let length = t.get("length").and_then(J::as_f64).filter(|l| *l != 0.0);
             let mut info = parse_recording_with(rec, opts, title, credits, length);
             info.release_track_id = s(t, "id");
             info.track_alt = opt_s(t, "number");
@@ -881,13 +878,13 @@ fn medium_tracks(medium: &J, opts: &ParseOpts) -> Vec<TrackInfo> {
             info.nulls.remove("disctitle");
             info.nulls.remove("media");
             match &disctitle {
-                Some(d) => info.disctitle = d.clone(),
+                Some(d) => info.disctitle.clone_from(d),
                 None => {
                     info.nulls.insert("disctitle");
                 }
             }
             match &format {
-                Some(f) => info.media = f.clone(),
+                Some(f) => info.media.clone_from(f),
                 None => {
                     info.nulls.insert("media");
                 }
@@ -922,7 +919,7 @@ fn parse_genres(j: &J, field: &str) -> Option<Vec<String>> {
     let mut counts: Vec<(String, i64)> = vec![];
     for g in arr(rg, field).iter().chain(arr(j, field)) {
         let name = s(g, "name");
-        let count = g.get("count").and_then(|c| c.as_i64()).unwrap_or(0);
+        let count = g.get("count").and_then(J::as_i64).unwrap_or(0);
         match counts.iter_mut().find(|(n, _)| *n == name) {
             Some((_, c)) => *c += count,
             None => counts.push((name, count)),
@@ -970,7 +967,7 @@ fn capitalize(s: &str) -> String {
     match c.next() {
         Some(f) => f
             .to_uppercase()
-            .chain(c.flat_map(|c| c.to_lowercase()))
+            .chain(c.flat_map(char::to_lowercase))
             .collect(),
         None => String::new(),
     }
@@ -1043,7 +1040,7 @@ pub fn parse_release(j: &J, opts: &ParseOpts) -> AlbumInfo {
         arr(rg, "secondary-types")
             .iter()
             .filter_map(|t| t.as_str())
-            .map(|t| t.to_lowercase()),
+            .map(str::to_lowercase),
     );
     let albumtype = null_if("albumtype", primary);
     let albumstatus = null_if("albumstatus", opt_s(j, "status"));
@@ -1098,11 +1095,11 @@ pub fn parse_release(j: &J, opts: &ParseOpts) -> AlbumInfo {
     };
     if info.va {
         let va = &opts.va_name;
-        info.artist = va.clone();
-        info.artist_sort = va.clone();
+        info.artist.clone_from(va);
+        info.artist_sort.clone_from(va);
         info.artists = vec![va.clone()];
         info.artists_sort = vec![va.clone()];
-        info.artist_credit = va.clone();
+        info.artist_credit.clone_from(va);
         info.artists_credit = vec![va.clone()];
     }
     info
@@ -1193,7 +1190,7 @@ pub fn warn_deprecated_config(cfg: &Config) {
                 "musicbrainz: 'musicbrainz.searchlimit' configuration option is deprecated \
                  and will be removed in version 3.0.0. Use 'musicbrainz.search_limit' instead."
                     .to_string(),
-            )
+            );
         });
     }
 }
@@ -1288,7 +1285,10 @@ impl MusicBrainz {
     }
 
     fn throttle(&self) {
-        let mut last = self.last.lock().unwrap_or_else(|e| e.into_inner());
+        let mut last = self
+            .last
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         if let Some(t) = *last {
             let elapsed = t.elapsed();
             if elapsed < self.interval {
@@ -1438,7 +1438,7 @@ impl MusicBrainz {
             }
             let merged = merge_pseudo_and_actual(pseudo, album.clone());
             let mut infos = vec![merged, album];
-            for info in infos.iter_mut() {
+            for info in &mut infos {
                 for l in info_listeners() {
                     l.album_info(info);
                 }
@@ -1446,7 +1446,7 @@ impl MusicBrainz {
             return Ok(infos);
         }
         let mut infos = vec![album];
-        for info in infos.iter_mut() {
+        for info in &mut infos {
             for l in info_listeners() {
                 l.album_info(info);
             }
@@ -1663,8 +1663,8 @@ mod tests {
         .unwrap();
         let prefs = |langs: &[&str], ignored: &[&str], as_credits| ParseOpts {
             aliases: AliasPrefs {
-                languages: langs.iter().map(|s| s.to_string()).collect(),
-                ignored_types: ignored.iter().map(|s| s.to_string()).collect(),
+                languages: langs.iter().map(ToString::to_string).collect(),
+                ignored_types: ignored.iter().map(ToString::to_string).collect(),
                 as_credits,
             },
             ..Default::default()
@@ -1799,7 +1799,7 @@ mod tests {
             let a = parse_release(
                 &j,
                 &ParseOpts {
-                    preferred_countries: c.iter().map(|s| s.to_string()).collect(),
+                    preferred_countries: c.iter().map(ToString::to_string).collect(),
                     ..Default::default()
                 },
             );

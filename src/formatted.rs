@@ -116,6 +116,7 @@ pub(crate) fn python_repl(r: &str) -> String {
 
 impl FormatEnv {
     pub fn new(cfg: &Config) -> Result<Self> {
+        static NEXT_ID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
         let mut replacements = vec![];
         for (pat, rep) in cfg.mapping("replace") {
             let re = Regex::new(&pat)
@@ -128,7 +129,6 @@ impl FormatEnv {
             bracket: cfg.str(&format!("{name}.bracket")),
         };
         let ecr = cfg.str("empty_component_replace");
-        static NEXT_ID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
         Ok(FormatEnv {
             id: NEXT_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
             path_sep_replace: cfg.str("path_sep_replace"),
@@ -266,7 +266,7 @@ fn join_components(comps: &[String]) -> String {
     let mut out = String::new();
     for c in comps {
         if c.starts_with('/') {
-            out = c.clone();
+            out.clone_from(c);
         } else {
             if !out.is_empty() && !out.ends_with('/') {
                 out.push('/');
@@ -387,9 +387,14 @@ impl<'a> Formatted<'a> {
         };
         let with_computed = |rec: &Record| {
             let mut keys = rec.keys();
-            keys.extend(computed(rec.kind).iter().map(|k| k.to_string()));
+            keys.extend(computed(rec.kind).iter().map(ToString::to_string));
             if rec.kind == Kind::Album {
-                keys.extend(self.env.album_template_fields.iter().map(|k| k.to_string()));
+                keys.extend(
+                    self.env
+                        .album_template_fields
+                        .iter()
+                        .map(ToString::to_string),
+                );
             }
             keys.extend(self.inline_names(rec.kind));
             keys
@@ -730,7 +735,7 @@ impl<'a> Formatted<'a> {
                             })
                         })
                         .flatten()
-                        .map(|d| d.to_string());
+                        .map(ToString::to_string);
                     (k, (group.len(), disambiguator))
                 })
                 .collect::<Groups>()

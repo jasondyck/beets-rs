@@ -404,7 +404,7 @@ fn group(int_part: &str, sep: char, every: usize) -> String {
     out
 }
 
-fn pad(body: String, sign: &str, s: &Spec, default_align: char) -> String {
+fn pad(body: &str, sign: &str, s: &Spec, default_align: char) -> String {
     let fill = s.fill.unwrap_or(if s.zero && s.align.is_none() {
         '0'
     } else {
@@ -440,7 +440,7 @@ pub fn format_value(v: &V, spec: &str) -> PyResult<String> {
     match v {
         V::Int(_) | V::Bool(_) if s.ty.is_none_or(|t| "bcdoxXn".contains(t)) => {
             if matches!(v, V::Bool(_)) && s.ty.is_none() {
-                return Ok(pad(v.to_str(), "", &s, '<'));
+                return Ok(pad(&v.to_str(), "", &s, '<'));
             }
             let i = v.int().unwrap();
             let sign = if i < 0 {
@@ -460,7 +460,7 @@ pub fn format_value(v: &V, spec: &str) -> PyResult<String> {
                 Some('X') => ("0X", format!("{a:X}")),
                 Some('c') => {
                     return Ok(pad(
-                        char::from_u32(a as u32).unwrap_or('?').to_string(),
+                        &char::from_u32(a as u32).unwrap_or('?').to_string(),
                         "",
                         &s,
                         '<',
@@ -473,7 +473,7 @@ pub fn format_value(v: &V, spec: &str) -> PyResult<String> {
                 None => digits,
             };
             let sign = format!("{sign}{}", if s.alt { prefix } else { "" });
-            Ok(pad(digits, &sign, &s, '>'))
+            Ok(pad(&digits, &sign, &s, '>'))
         }
         V::Int(_) | V::Bool(_) | V::Float(_) => {
             let x = v.num().unwrap();
@@ -536,7 +536,7 @@ pub fn format_value(v: &V, spec: &str) -> PyResult<String> {
                 }
                 _ => body,
             };
-            Ok(pad(body, sign, &s, '>'))
+            Ok(pad(&body, sign, &s, '>'))
         }
         V::Str(st) => {
             if let Some(t) = s.ty
@@ -551,7 +551,7 @@ pub fn format_value(v: &V, spec: &str) -> PyResult<String> {
                 Some(p) => st.chars().take(p).collect(),
                 None => st.to_string(),
             };
-            Ok(pad(st, "", &s, '<'))
+            Ok(pad(&st, "", &s, '<'))
         }
         other => {
             if spec.is_empty() {

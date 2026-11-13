@@ -451,6 +451,11 @@ pub fn join_list<S: AsRef<str>>(values: &[S], delim: &str) -> String {
 /// beets' `MusicalKey.parse`: flats as sharps, "minor" as "m", no
 /// "major", capitalized.
 pub fn normalize_key(key: &str) -> String {
+    // `[\W\s]+minor` / `[\W\s]+major`.
+    static MINOR: std::sync::LazyLock<regex::Regex> =
+        std::sync::LazyLock::new(|| regex::Regex::new(r"[\W\s]+minor").unwrap());
+    static MAJOR: std::sync::LazyLock<regex::Regex> =
+        std::sync::LazyLock::new(|| regex::Regex::new(r"[\W\s]+major").unwrap());
     let mut k = key.to_lowercase();
     for (flat, sharp) in [
         ("db", "c#"),
@@ -461,11 +466,6 @@ pub fn normalize_key(key: &str) -> String {
     ] {
         k = k.replace(flat, sharp);
     }
-    // `[\W\s]+minor` / `[\W\s]+major`.
-    static MINOR: std::sync::LazyLock<regex::Regex> =
-        std::sync::LazyLock::new(|| regex::Regex::new(r"[\W\s]+minor").unwrap());
-    static MAJOR: std::sync::LazyLock<regex::Regex> =
-        std::sync::LazyLock::new(|| regex::Regex::new(r"[\W\s]+major").unwrap());
     let k = MINOR.replace_all(&k, "m");
     let k = MAJOR.replace_all(&k, "");
     // Python's `str.capitalize`.
@@ -719,7 +719,7 @@ impl Record {
     pub fn str(&self, name: &str) -> &str {
         match self.values.get(name) {
             Some(Value::Str(s)) => s,
-            _ => self.flex.get(name).map(|s| s.as_str()).unwrap_or(""),
+            _ => self.flex.get(name).map(String::as_str).unwrap_or(""),
         }
     }
 
@@ -751,16 +751,13 @@ impl Record {
     pub fn int(&self, name: &str) -> i64 {
         self.values
             .get(name)
-            .and_then(|v| v.as_f64())
+            .and_then(Value::as_f64)
             .map(|f| f as i64)
             .unwrap_or(0)
     }
 
     pub fn float(&self, name: &str) -> f64 {
-        self.values
-            .get(name)
-            .and_then(|v| v.as_f64())
-            .unwrap_or(0.0)
+        self.values.get(name).and_then(Value::as_f64).unwrap_or(0.0)
     }
 
     pub fn bool(&self, name: &str) -> bool {

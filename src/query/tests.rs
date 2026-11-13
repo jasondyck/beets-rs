@@ -59,7 +59,7 @@ fn titles(lib: &Library, s: &str) -> BTreeSet<String> {
 }
 
 fn set(v: &[&str]) -> BTreeSet<String> {
-    v.iter().map(|s| s.to_string()).collect()
+    v.iter().map(ToString::to_string).collect()
 }
 
 // ------------------------------------------------------------ query parsing

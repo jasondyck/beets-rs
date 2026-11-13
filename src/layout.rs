@@ -89,7 +89,7 @@ fn words(s: &str) -> Vec<String> {
                 words.extend(raw[1..].iter().map(|w| format!("{esc}{w}{RESET_COLOR}")));
             } else {
                 *words.last_mut().unwrap() += raw[0];
-                words.extend(raw[1..].iter().map(|w| w.to_string()));
+                words.extend(raw[1..].iter().map(ToString::to_string));
             }
         }
         if !text.ends_with(' ') && !posttext.is_empty() && !posttext.starts_with(' ') {
@@ -131,7 +131,7 @@ pub fn split_into_lines(s: &str, first_width: usize, width: usize) -> Vec<String
             previous_fit = true;
         } else if previous_fit {
             result.push(std::mem::take(&mut next));
-            next = word.clone();
+            next.clone_from(word);
             previous_fit = color_len(&next) <= width;
         } else {
             let w = if result.is_empty() {
