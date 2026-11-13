@@ -37,11 +37,11 @@ fn key_query(key: &str) -> &str {
 /// beets' `get_max_filename_length`: `max_filename_length`, else what the
 /// library directory's filesystem allows (at most 200).
 fn max_filename_length(cfg: &Config, directory: &Path) -> usize {
+    use std::os::unix::ffi::OsStrExt;
     let configured = cfg.f64("max_filename_length") as usize;
     if configured > 0 {
         return configured;
     }
-    use std::os::unix::ffi::OsStrExt;
     let Ok(c) = std::ffi::CString::new(directory.as_os_str().as_bytes()) else {
         return MAX_FILENAME_LENGTH;
     };

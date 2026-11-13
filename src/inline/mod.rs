@@ -310,6 +310,12 @@ pub fn evaluate<'a>(
     lib: Option<&'a Library>,
     env: &Rc<FormatEnv>,
 ) -> PyResult<V<'a>> {
+    struct Guard;
+    impl Drop for Guard {
+        fn drop(&mut self) {
+            DEPTH.with(|d| d.set(d.get() - 1));
+        }
+    }
     let code = match &f.parsed {
         Ok(c) => c,
         Err(what) => {
@@ -323,12 +329,6 @@ pub fn evaluate<'a>(
         d.set(d.get() + 1);
         d.get()
     });
-    struct Guard;
-    impl Drop for Guard {
-        fn drop(&mut self) {
-            DEPTH.with(|d| d.set(d.get() - 1));
-        }
-    }
     let _g = Guard;
     if depth > 50 {
         return err("RecursionError", "maximum recursion depth exceeded");

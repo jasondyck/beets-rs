@@ -67,8 +67,6 @@ pub fn media_fields() -> impl Iterator<Item = &'static str> {
 /// first entry of the first sound track's `stsd`.
 fn mp4_sample_size(path: &Path) -> Option<i64> {
     use std::io::{Read, Seek, SeekFrom};
-    let mut f = std::fs::File::open(path).ok()?;
-    let file_len = f.metadata().ok()?.len();
     type Boxes = Vec<([u8; 4], u64, u64)>;
     // The child boxes of the box spanning `start..end`: (type, body start, end).
     fn boxes(f: &mut std::fs::File, start: u64, end: u64) -> Option<Boxes> {
@@ -95,6 +93,8 @@ fn mp4_sample_size(path: &Path) -> Option<i64> {
         }
         Some(out)
     }
+    let mut f = std::fs::File::open(path).ok()?;
+    let file_len = f.metadata().ok()?.len();
     let find = |boxes: &[([u8; 4], u64, u64)], name: &[u8; 4]| {
         boxes
             .iter()
@@ -750,7 +750,7 @@ mod roundtrip {
             // Embedding twice replaces rather than stacking covers.
             embed_art(&p, png).unwrap();
             let file = lofty::read_from_path(&p).unwrap();
-            let n: u32 = file.tags().iter().map(|t| t.picture_count()).sum();
+            let n: u32 = file.tags().iter().map(lofty::tag::Tag::picture_count).sum();
             assert_eq!(n, 1, "{ext}");
             let (data, kind) = extract_art(&p).unwrap().unwrap();
             assert_eq!((data.as_slice(), kind), (png, "png"), "{ext}");

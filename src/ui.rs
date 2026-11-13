@@ -114,7 +114,7 @@ pub fn color_codes(cfg: &Config) -> Result<HashMap<&'static str, String>> {
         let key = format!("ui.colors.{name}");
         let names: Vec<String> = match cfg.get(&key) {
             Some(Y::String(s)) => match LEGACY_COLORS.iter().find(|(n, _)| n == s) {
-                Some((_, c)) => c.iter().map(|c| c.to_string()).collect(),
+                Some((_, c)) => c.iter().map(ToString::to_string).collect(),
                 None => bail!(
                     "{key}: must be one of {} or a list of {}, not {s:?}",
                     LEGACY_COLORS
@@ -337,7 +337,7 @@ pub fn input_options(
     prompt: &str,
     fallback: &str,
 ) -> Option<char> {
-    let opts: Vec<String> = letters.iter().map(|c| c.to_string()).collect();
+    let opts: Vec<String> = letters.iter().map(ToString::to_string).collect();
     let opts: Vec<&str> = opts.iter().map(String::as_str).collect();
     match prompt_options(&opts, require, Some(prompt), Some(fallback), None, None)? {
         Choice::Letter(c) => Some(c),

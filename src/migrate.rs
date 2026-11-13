@@ -183,12 +183,12 @@ mod tests {
 
     /// A hash of the file's bytes, its mtime, and what its directory holds.
     fn snapshot(db: &Path) -> (u64, std::time::SystemTime, Vec<std::ffi::OsString>) {
+        use std::hash::{Hash, Hasher};
         let mut names: Vec<_> = std::fs::read_dir(db.parent().unwrap())
             .unwrap()
             .map(|e| e.unwrap().file_name())
             .collect();
         names.sort();
-        use std::hash::{Hash, Hasher};
         let mut h = std::collections::hash_map::DefaultHasher::new();
         std::fs::read(db).unwrap().hash(&mut h);
         (

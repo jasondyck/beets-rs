@@ -403,9 +403,9 @@ impl<'a> Obj<'a> {
     /// The inline plugin's field `key`, if it's one (beets' getters come
     /// before the fields).
     fn inline(&self, key: &str) -> Option<PyVal> {
+        use crate::inline::value::V;
         let env = crate::formatted::env();
         let f = env.inline.as_ref()?.field(self.rec.kind, key)?;
-        use crate::inline::value::V;
         match crate::inline::evaluate(f, self.rec, self.album, self.lib, &env) {
             Ok(v) => Some(match v {
                 V::None => PyVal::None,
@@ -937,6 +937,7 @@ fn db_path(path: &[u8]) -> Vec<u8> {
 /// beets' `util.case_sensitive`: whether the filesystem holding `path` is
 /// case sensitive, judged from the nearest existing ancestor.
 pub fn case_sensitive(path: &Path) -> bool {
+    use std::os::unix::fs::MetadataExt;
     let mut path = path.to_path_buf();
     loop {
         let (Some(head), Some(tail)) = (path.parent(), path.file_name()) else {
@@ -957,7 +958,6 @@ pub fn case_sensitive(path: &Path) -> bool {
         let (Ok(um), Ok(lm)) = (std::fs::metadata(&u), std::fs::metadata(&l)) else {
             return true;
         };
-        use std::os::unix::fs::MetadataExt;
         return (um.dev(), um.ino()) != (lm.dev(), lm.ino());
     }
 }
@@ -1029,12 +1029,11 @@ fn parse_number(s: &str) -> Result<Option<Num>, ()> {
 
 fn numeric_test(pattern: &str, duration: bool) -> Result<Test, String> {
     let convert = |s: &str| -> Result<Option<Num>, String> {
+        static MSS: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^(\d+):([0-5]\d)$").unwrap());
         if duration {
             if s.is_empty() {
                 return Ok(None);
             }
-            static MSS: LazyLock<Regex> =
-                LazyLock::new(|| Regex::new(r"^(\d+):([0-5]\d)$").unwrap());
             if let Some(c) = MSS.captures(s) {
                 let m: f64 = c[1].parse().unwrap_or(0.0);
                 let ss: f64 = c[2].parse().unwrap_or(0.0);
@@ -1627,7 +1626,7 @@ impl Query {
             .collect();
         let ci = context().sort_case_insensitive;
         Self::parse_sorted(kind, &parts, ci).map_err(|e| {
-            let q: Vec<&str> = args.iter().map(|s| s.as_ref()).collect();
+            let q: Vec<&str> = args.iter().map(AsRef::as_ref).collect();
             anyhow::Error::new(InvalidQueryError(format!("'{}': {e}", q.join(" "))))
         })
     }

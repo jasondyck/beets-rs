@@ -72,9 +72,9 @@ fn open(path: &Path) -> image::ImageResult<(DynamicImage, Option<ImageFormat>)> 
 /// read.
 pub fn get_size(path: &Path) -> Option<(u32, u32)> {
     let r = ImageReader::open(path)
-        .and_then(|r| r.with_guessed_format())
+        .and_then(image::ImageReader::with_guessed_format)
         .map_err(image::ImageError::IoError)
-        .and_then(|r| r.into_dimensions());
+        .and_then(image::ImageReader::into_dimensions);
     match r {
         Ok(size) => Some(size),
         Err(e) => {

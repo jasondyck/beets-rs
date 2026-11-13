@@ -243,7 +243,7 @@ fn eval(parts: &[Part], ctx: &dyn Context) -> String {
         match p {
             Part::Text(t) => out.push_str(t),
             Part::Symbol { ident, original } => {
-                out.push_str(&ctx.field(ident).unwrap_or_else(|| original.clone()))
+                out.push_str(&ctx.field(ident).unwrap_or_else(|| original.clone()));
             }
             Part::Call {
                 ident,
@@ -353,7 +353,7 @@ pub fn py_repr(s: &str) -> String {
                 out.push(c);
             }
             c if (c as u32) < 0x20 || c as u32 == 0x7f => {
-                write!(out, "\\x{:02x}", c as u32).unwrap()
+                write!(out, "\\x{:02x}", c as u32).unwrap();
             }
             c => out.push(c),
         }
@@ -576,7 +576,7 @@ mod tests {
     struct Map(HashMap<&'static str, &'static str>);
     impl Context for Map {
         fn field(&self, name: &str) -> Option<String> {
-            self.0.get(name).map(|s| s.to_string())
+            self.0.get(name).map(ToString::to_string)
         }
     }
 

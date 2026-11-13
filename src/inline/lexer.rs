@@ -129,7 +129,7 @@ pub fn tokenize(src: &str, implicit_join: bool) -> Result<Vec<(Tok, usize)>, Str
                 line = nl;
             }
             c if c.is_ascii_digit()
-                || (c == '.' && chars.get(i + 1).is_some_and(|d| d.is_ascii_digit())) =>
+                || (c == '.' && chars.get(i + 1).is_some_and(char::is_ascii_digit)) =>
             {
                 let (tok, ni) = number(&chars, i)?;
                 out.push((tok, line));
@@ -171,7 +171,7 @@ pub fn tokenize(src: &str, implicit_join: bool) -> Result<Vec<(Tok, usize)>, Str
 
 fn number(chars: &[char], mut i: usize) -> Result<(Tok, usize), String> {
     let start = i;
-    let lower = |k: usize| chars.get(k).map(|c| c.to_ascii_lowercase());
+    let lower = |k: usize| chars.get(k).map(char::to_ascii_lowercase);
     if chars[i] == '0' && matches!(lower(i + 1), Some('x' | 'o' | 'b')) {
         let radix = match lower(i + 1) {
             Some('x') => 16,
@@ -199,9 +199,9 @@ fn number(chars: &[char], mut i: usize) -> Result<(Tok, usize), String> {
         }
     }
     if matches!(lower(i), Some('e'))
-        && (chars.get(i + 1).is_some_and(|c| c.is_ascii_digit())
+        && (chars.get(i + 1).is_some_and(char::is_ascii_digit)
             || (matches!(chars.get(i + 1), Some('+' | '-'))
-                && chars.get(i + 2).is_some_and(|c| c.is_ascii_digit())))
+                && chars.get(i + 2).is_some_and(char::is_ascii_digit)))
     {
         float = true;
         i += 2;

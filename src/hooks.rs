@@ -124,7 +124,7 @@ pub fn py_repr(s: &str) -> String {
                 out.push(c);
             }
             c if (c as u32) < 0x20 || c as u32 == 0x7f => {
-                write!(out, "\\x{:02x}", c as u32).unwrap()
+                write!(out, "\\x{:02x}", c as u32).unwrap();
             }
             c => out.push(c),
         }
@@ -183,7 +183,7 @@ pub fn correct_list_fields(data: &mut Data) {
         let list: Vec<String> = data
             .get(list_field)
             .and_then(|v| v.as_list())
-            .map(|l| l.to_vec())
+            .map(<[String]>::to_vec)
             .unwrap_or_default();
         let single_lower = single.to_lowercase();
         let list_lower: Vec<String> = list.iter().map(|v| v.to_lowercase()).collect();
@@ -275,7 +275,7 @@ const TRACK_FIELD_MAP: [(&str, &str); 6] = [
 /// beets' `AlbumInfo.raw_data`: with a year, a missing month and day are 0.
 pub fn album_raw_data(a: &Data, o: &ApplyOpts) -> Data {
     let mut data = info_raw_data(a, o);
-    if data.get("year").is_some_and(|y| y.truthy()) {
+    if data.get("year").is_some_and(V::truthy) {
         for k in ["month", "day"] {
             let v = a
                 .get(k)
@@ -395,7 +395,7 @@ mod tests {
     use super::*;
 
     fn list(v: &[&str]) -> V {
-        V::List(v.iter().map(|s| s.to_string()).collect())
+        V::List(v.iter().map(ToString::to_string).collect())
     }
 
     fn data(pairs: &[(&str, V)]) -> Data {
