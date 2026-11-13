@@ -18,6 +18,7 @@ use crate::plugins::PluginLog;
 use crate::query::Query;
 use anyhow::{Result, bail};
 use std::collections::{BTreeMap, HashMap};
+use std::fmt::Write as _;
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::Path;
@@ -349,7 +350,7 @@ fn py_json_str(out: &mut String, s: &str) {
             _ => {
                 let mut buf = [0u16; 2];
                 for u in c.encode_utf16(&mut buf) {
-                    out.push_str(&format!("\\u{u:04x}"));
+                    write!(out, "\\u{u:04x}").unwrap();
                 }
             }
         }
@@ -1170,7 +1171,7 @@ pub(crate) fn content_disposition(kind: &str, name: &str) -> String {
         if b.is_ascii_alphanumeric() || b"!#$&+-.^_`|~".contains(&b) {
             quoted.push(b as char);
         } else {
-            quoted.push_str(&format!("%{b:02X}"));
+            write!(quoted, "%{b:02X}").unwrap();
         }
     }
     format!(

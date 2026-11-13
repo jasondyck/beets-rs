@@ -7,6 +7,7 @@ use crate::model::{Album, Kind};
 use crate::plugins::{Plugin, PluginLog};
 use crate::query::Query;
 use anyhow::{Context as _, Result};
+use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 
 pub fn normal_dir() -> PathBuf {
@@ -247,7 +248,7 @@ fn uri(path: &Path) -> String {
         if c.is_ascii_alphanumeric() || "/-._~!$&'()*+,;=:@".contains(c) {
             out.push(c);
         } else {
-            out.push_str(&format!("%{b:02X}"));
+            write!(out, "%{b:02X}").unwrap();
         }
     }
     out

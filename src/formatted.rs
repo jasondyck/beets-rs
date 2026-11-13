@@ -11,6 +11,7 @@ use anyhow::{Result, anyhow};
 use fancy_regex::Regex;
 use std::cell::{OnceCell, RefCell};
 use std::collections::{HashMap, HashSet};
+use std::fmt::Write as _;
 use std::rc::Rc;
 
 /// A `[aunique]`/`[sunique]`/`[tunique]` config section.
@@ -90,12 +91,12 @@ pub(crate) fn python_repl(r: &str) -> String {
                         n.push(d2);
                         chars.next();
                     }
-                    out.push_str(&format!("${{{n}}}"));
+                    write!(out, "${{{n}}}").unwrap();
                 }
                 Some('g') if chars.peek() == Some(&'<') => {
                     chars.next();
                     let name: String = chars.by_ref().take_while(|&c| c != '>').collect();
-                    out.push_str(&format!("${{{name}}}"));
+                    write!(out, "${{{name}}}").unwrap();
                 }
                 Some('n') => out.push('\n'),
                 Some('t') => out.push('\t'),

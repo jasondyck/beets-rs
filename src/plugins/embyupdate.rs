@@ -12,6 +12,7 @@ use serde_json::Value as J;
 use sha1::Sha1;
 use std::cell::Cell;
 use std::collections::BTreeMap;
+use std::fmt::Write as _;
 use std::rc::Rc;
 
 pub struct EmbyUpdate;
@@ -75,7 +76,7 @@ fn quote_plus(s: &str) -> String {
             b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
                 out.push(b as char)
             }
-            _ => out.push_str(&format!("%{b:02X}")),
+            _ => write!(out, "%{b:02X}").unwrap(),
         }
     }
     out

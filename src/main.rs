@@ -28,6 +28,7 @@ mod props;
 mod pyyaml;
 mod query;
 mod state;
+mod subcommand_help;
 mod template;
 mod ui;
 
@@ -599,36 +600,65 @@ fn max_help_position(width: usize) -> usize {
     (width.saturating_sub(20)).clamp(4, 24)
 }
 
+/// textwrap.wrap's hyphen splitting: a word breaks after a hyphen between
+/// word characters ("already-" + "imported"), as optparse's help wraps.
+fn split_hyphens(word: &str) -> Vec<String> {
+    let chars: Vec<char> = word.chars().collect();
+    let word_char = |c: char| c.is_alphanumeric() || c == '_';
+    let mut parts = vec![];
+    let mut part = String::new();
+    for (i, c) in chars.iter().enumerate() {
+        part.push(*c);
+        let breaks = *c == '-'
+            && i > 0
+            && i + 1 < chars.len()
+            && word_char(chars[i - 1])
+            && word_char(chars[i + 1]);
+        if breaks {
+            parts.push(std::mem::take(&mut part));
+        }
+    }
+    if !part.is_empty() {
+        parts.push(part);
+    }
+    parts
+}
+
 /// `textwrap.wrap(text, width)` for optparse's help, whose arguments collapse
-/// whitespace; long words are broken as textwrap does by default (beets' help
-/// texts have no hyphens, so its hyphen breaking never comes up).
+/// whitespace; long words and hyphenated words are broken as textwrap does by
+/// default.
 fn wrap_help(text: &str, width: usize) -> Vec<String> {
     let width = width.max(1);
     let mut lines = vec![];
     let mut line = String::new();
-    let push_word = |word: &str, line: &mut String, lines: &mut Vec<String>| {
-        let mut word = word;
-        if !line.is_empty() {
-            if line.chars().count() + 1 + word.chars().count() <= width {
+    let push = |frag: &str, space: bool, line: &mut String, lines: &mut Vec<String>| {
+        let sep = usize::from(space && !line.is_empty());
+        if line.chars().count() + sep + frag.chars().count() <= width {
+            if sep == 1 {
                 line.push(' ');
-                line.push_str(word);
-                return;
             }
+            line.push_str(frag);
+            return;
+        }
+        if !line.is_empty() {
             lines.push(std::mem::take(line));
         }
-        while word.chars().count() > width {
-            let split = word
+        let mut frag = frag;
+        while frag.chars().count() > width {
+            let split = frag
                 .char_indices()
                 .nth(width)
                 .map(|(i, _)| i)
-                .unwrap_or(word.len());
-            lines.push(word[..split].to_string());
-            word = &word[split..];
+                .unwrap_or(frag.len());
+            lines.push(frag[..split].to_string());
+            frag = &frag[split..];
         }
-        line.push_str(word);
+        line.push_str(frag);
     };
     for word in text.split_whitespace() {
-        push_word(word, &mut line, &mut lines);
+        for (i, frag) in split_hyphens(word).iter().enumerate() {
+            push(frag, i == 0, &mut line, &mut lines);
+        }
     }
     if !line.is_empty() {
         lines.push(line);
@@ -697,6 +727,42 @@ const ROOT_OPTIONS: &[(&str, &str)] = &[
     ),
     ("-h, --help", "show this help message and exit"),
 ];
+
+/// `beet help CMD`/`beet CMD -h`: beets' optparse help for a command (usage,
+/// blank line, `Options:` and the option table), as the reference's parser
+/// shows it. None for commands beets doesn't have (ours: `migrate-beets`).
+pub fn subcommand_help_text(name: &str) -> Option<String> {
+    subcommand_help_text_at(name, optparse_width())
+}
+
+fn subcommand_help_text_at(name: &str, width: usize) -> Option<String> {
+    let help = subcommand_help::find(name)?;
+    let rows: Vec<(String, String)> = help
+        .options
+        .iter()
+        .map(|(name, text)| (name.to_string(), text.to_string()))
+        .collect();
+    // optparse fits the help column to its longest option (plus the
+    // two-space indent and two spaces), up to `max_help_position`.
+    let max_pos = max_help_position(width);
+    let help_position = rows
+        .iter()
+        .map(|(name, _)| name.chars().count() + 4)
+        .max()
+        .unwrap_or(0)
+        .min(max_pos);
+    Some(format!(
+        "{}\n\nOptions:\n{}",
+        help.usage,
+        render_table(&rows, width, help_position)
+    ))
+}
+
+/// The canonical name of a command (by name or alias) among the enabled
+/// ones, as beets' `_subcommand_for_name` resolves it.
+pub fn canonical_command(name: &str, enabled_plugins: &[String]) -> Option<String> {
+    resolve_command(&cli(enabled_plugins), name).map(|(canonical, _)| canonical)
+}
 
 /// `beet --help`/`beet help`, byte for byte as beets' optparse prints it.
 pub fn root_help_text(enabled_plugins: &[String]) -> String {
@@ -789,14 +855,15 @@ fn match_long(name: &str, opts: &[OptInfo]) -> Result<String, PreError> {
 /// Validate/expand one option token (and its value, if separate), as
 /// optparse parses it: short options cluster left to right, a value-taking
 /// option takes the rest of the cluster or the next argument (even one
-/// starting with `-`), and long options may be abbreviated.
+/// starting with `-`), and long options may be abbreviated. Returns whether
+/// this was the help flag (`-h`/`--help`), which optparse acts on at once.
 fn process_option(
     args: &[std::ffi::OsString],
     i: &mut usize,
     opts: &[OptInfo],
     out: &mut Vec<std::ffi::OsString>,
     command: Option<&str>,
-) {
+) -> bool {
     let token = args[*i].to_string_lossy().into_owned();
     let fail = |e: PreError| -> ! { exit_option_error(command, e) };
     if let Some(body) = token.strip_prefix("--") {
@@ -832,17 +899,21 @@ fn process_option(
             *i += 1;
         }
         out.push(new);
-        return;
+        return full == "help";
     }
     // Short options (or `-` alone, which is positional).
     let cluster: Vec<char> = token[1..].chars().collect();
     let mut new = std::ffi::OsString::from("-");
+    let mut helped = false;
     let mut j = 0;
     while j < cluster.len() {
         let c = cluster[j];
         let Some(info) = opts.iter().find(|o| o.short == Some(c)) else {
             fail(PreError::Unknown(format!("-{c}")));
         };
+        if c == 'h' && !info.takes_value {
+            helped = true;
+        }
         new.push(c.to_string());
         if info.takes_value {
             let label = format!("-{c}");
@@ -891,13 +962,17 @@ fn process_option(
     if !new.is_empty() && new != "-" {
         out.push(new);
     }
+    helped
 }
 
-/// The plugins enabled by the configuration and the global options, for
-/// knowing whether a plugin command is there at all (beets registers plugin
-/// commands only for enabled plugins). A configuration that doesn't load
-/// enables none; the real command reports the error later.
-fn enabled_plugins(raw: &[std::ffi::OsString], root_opts: &[OptInfo]) -> Vec<String> {
+/// The configuration as the global options leave it, for knowing whether a
+/// plugin command is there at all (beets registers plugin commands only for
+/// enabled plugins) and for the plugins' load-time warnings before help. A
+/// configuration that doesn't load gives the default one.
+fn global_config(
+    raw: &[std::ffi::OsString],
+    root_opts: &[OptInfo],
+) -> Option<crate::config::Config> {
     let mut overlays: Vec<PathBuf> = vec![];
     let mut plugins: Option<std::ffi::OsString> = None;
     let mut disabled: Option<std::ffi::OsString> = None;
@@ -938,15 +1013,13 @@ fn enabled_plugins(raw: &[std::ffi::OsString], root_opts: &[OptInfo]) -> Vec<Str
             match info.long.as_deref() {
                 Some("config") => overlays.push(PathBuf::from(v)),
                 Some("plugins") => plugins = Some(v),
-                Some("disable_plugins") => disabled = Some(v),
+                Some("disable-plugins") => disabled = Some(v),
                 _ => {}
             }
         }
         i += 1;
     }
-    let Ok(mut cfg) = crate::config::Config::load(&overlays) else {
-        return vec![];
-    };
+    let mut cfg = crate::config::Config::load(&overlays).ok()?;
     let seq = |s: std::ffi::OsString| {
         serde_yaml::Value::Sequence(
             crate::comma_list(&s.to_string_lossy())
@@ -961,20 +1034,33 @@ fn enabled_plugins(raw: &[std::ffi::OsString], root_opts: &[OptInfo]) -> Vec<Str
     if let Some(d) = disabled {
         cfg.set("disabled_plugins", seq(d));
     }
-    crate::plugins::names(&cfg)
+    Some(cfg)
 }
 
 /// beets' optparse checks, before clap parses: unknown (and abbreviated
 /// long) options, with optparse's messages and exit code 2; `--` ends
 /// option parsing (and may precede the command). Returns the possibly
 /// rewritten arguments; whether a root-level `-h`/`--help` was given (beets
-/// then runs the help command, whatever follows); and the plugins enabled.
-fn precheck(raw: &[std::ffi::OsString]) -> (Vec<std::ffi::OsString>, bool, Vec<String>) {
-    // The full command line, including the registry's plugin commands
+/// then runs the help command, whatever follows); the plugins enabled; their
+/// configuration (for loading them before help); and the command, once seen.
+fn precheck(
+    raw: &[std::ffi::OsString],
+) -> (
+    Vec<std::ffi::OsString>,
+    bool,
+    Vec<String>,
+    Option<crate::config::Config>,
+    Option<String>,
+) {
+    // The full command line, including the enabled plugins' commands
     // (which clap only learns at run time).
-    let root = cli();
-    let root_opts = options_of(&root);
-    let enabled = enabled_plugins(raw, &root_opts);
+    let root_opts = options_of(&cli(&[]));
+    let global = global_config(raw, &root_opts);
+    let enabled = global
+        .as_ref()
+        .map(crate::plugins::names)
+        .unwrap_or_default();
+    let root = cli(&enabled);
     let mut out: Vec<std::ffi::OsString> = vec![raw[0].clone()];
     let mut command: Option<String> = None;
     let mut sub_opts: Vec<OptInfo> = vec![];
@@ -997,13 +1083,8 @@ fn precheck(raw: &[std::ffi::OsString]) -> (Vec<std::ffi::OsString>, bool, Vec<S
                             Some((canonical, sub)) => {
                                 out.push(std::ffi::OsString::from(&canonical));
                                 i += 1;
-                                if plugin_enabled(&canonical, &enabled) {
-                                    sub_opts = options_of(sub);
-                                    command = Some(canonical);
-                                } else {
-                                    out.extend(raw[i..].iter().cloned());
-                                    break;
-                                }
+                                sub_opts = options_of(sub);
+                                command = Some(canonical);
                             }
                             None => {
                                 eprintln!("error: unknown command '{name}'");
@@ -1018,15 +1099,8 @@ fn precheck(raw: &[std::ffi::OsString]) -> (Vec<std::ffi::OsString>, bool, Vec<S
                         Some((canonical, sub)) => {
                             out.push(std::ffi::OsString::from(&canonical));
                             i += 1;
-                            if plugin_enabled(&canonical, &enabled) {
-                                sub_opts = options_of(sub);
-                                command = Some(canonical);
-                            } else {
-                                // A disabled plugin's command: clap still
-                                // knows it and the command reports it.
-                                out.extend(raw[i..].iter().cloned());
-                                break;
-                            }
+                            sub_opts = options_of(sub);
+                            command = Some(canonical);
                         }
                         None => {
                             eprintln!("error: unknown command '{s}'");
@@ -1035,13 +1109,7 @@ fn precheck(raw: &[std::ffi::OsString]) -> (Vec<std::ffi::OsString>, bool, Vec<S
                     }
                     continue;
                 }
-                let before = out.len();
-                process_option(raw, &mut i, &root_opts, &mut out, None);
-                root_help |= out[before..].iter().any(|tok| {
-                    let tok = tok.to_string_lossy();
-                    tok == "--help"
-                        || (tok.starts_with('-') && !tok.starts_with("--") && tok.contains('h'))
-                });
+                root_help |= process_option(raw, &mut i, &root_opts, &mut out, None);
             }
             Some(name) => {
                 if s == "--" {
@@ -1053,19 +1121,15 @@ fn precheck(raw: &[std::ffi::OsString]) -> (Vec<std::ffi::OsString>, bool, Vec<S
                     i += 1;
                     continue;
                 }
-                process_option(raw, &mut i, &sub_opts, &mut out, Some(name));
+                if process_option(raw, &mut i, &sub_opts, &mut out, Some(name)) {
+                    // optparse's help action prints and exits, whatever
+                    // follows.
+                    break;
+                }
             }
         }
     }
-    (out, root_help, enabled)
-}
-
-/// Whether a resolved command is a core command or an enabled plugin's.
-fn plugin_enabled(canonical: &str, enabled: &[String]) -> bool {
-    match crate::plugin_registry::command(canonical) {
-        Some(cmd) => enabled.iter().any(|p| p == cmd.plugin),
-        None => true,
-    }
+    (out, root_help, enabled, global, command)
 }
 
 /// The canonical name and clap command for a command name or alias.
@@ -1090,10 +1154,12 @@ pub enum Parsed {
     },
 }
 
-/// `beet`'s clap command: the core subcommands from `Cli`, the plugins'
-/// from the registry (between the core ones and `version`/`help`/`config`,
-/// as the old central enum ordered them), each built at run time.
-pub fn cli() -> clap::Command {
+/// `beet`'s clap command: the core subcommands from `Cli` and the enabled
+/// plugins' from the registry (between the core ones and
+/// `version`/`help`/`config`, as the old central enum ordered them), each
+/// built at run time. As in beets, a disabled plugin's commands aren't
+/// registered at all (`beet web` is then an unknown command).
+pub fn cli(enabled_plugins: &[String]) -> clap::Command {
     use clap::CommandFactory;
     let base = Cli::command();
     let mut cmd = clap::Command::new("beet")
@@ -1122,6 +1188,9 @@ pub fn cli() -> clap::Command {
         }
     }
     for command in plugin_registry::commands() {
+        if !enabled_plugins.iter().any(|p| p == command.plugin) {
+            continue;
+        }
         cmd = cmd.subcommand((command.build)().display_order(order));
         order += 1;
     }
@@ -1132,12 +1201,12 @@ pub fn cli() -> clap::Command {
     cmd
 }
 
-pub fn parse_args<I, T>(args: I) -> Result<Parsed, clap::Error>
+pub fn parse_args<I, T>(args: I, enabled_plugins: &[String]) -> Result<Parsed, clap::Error>
 where
     I: IntoIterator<Item = T>,
     T: Into<std::ffi::OsString> + Clone,
 {
-    let matches = cli().try_get_matches_from(args)?;
+    let matches = cli(enabled_plugins).try_get_matches_from(args)?;
     if let Some((name, sub)) = matches.subcommand()
         && let Some(command) = plugin_registry::command(name)
     {
@@ -1171,19 +1240,36 @@ fn main() {
         libc::signal(libc::SIGPIPE, libc::SIG_DFL);
     }
     let raw: Vec<std::ffi::OsString> = std::env::args_os().collect();
-    let (args, root_help, enabled) = precheck(&raw);
+    let (args, root_help, enabled, global, command) = precheck(&raw);
+    // As beets, the enabled plugins load (and may warn) before help is
+    // printed; unlike beets, without opening the library.
+    let load_plugins = |cfg: &Option<crate::config::Config>| {
+        if let Some(cfg) = cfg {
+            let _ = crate::plugins::load(cfg);
+        }
+    };
     if root_help {
+        load_plugins(&global);
         print!("{}", root_help_text(&enabled));
         return;
     }
-    let parsed = match parse_args(args) {
+    let parsed = match parse_args(args, &enabled) {
         Ok(parsed) => parsed,
         Err(e) => match unknown_command(&e) {
             Some(name) => {
                 eprintln!("error: unknown command '{name}'");
                 std::process::exit(1);
             }
-            None => e.exit(),
+            None => {
+                if e.kind() == ErrorKind::DisplayHelp
+                    && let Some(text) = command.as_deref().and_then(subcommand_help_text)
+                {
+                    load_plugins(&global);
+                    print!("{text}");
+                    return;
+                }
+                e.exit()
+            }
         },
     };
     let result = match parsed {
@@ -1230,7 +1316,7 @@ mod tests {
             .map(String::from)
             .collect();
         on_big_stack(move || {
-            parse_args(args).map(|p| match p {
+            parse_args(args, &[]).map(|p| match p {
                 Parsed::Cli(cli) => cli,
                 Parsed::Plugin { .. } => panic!("expected a core command"),
             })
@@ -1239,7 +1325,27 @@ mod tests {
 
     #[test]
     fn cli_definition_is_valid() {
-        on_big_stack(|| cli().debug_assert());
+        on_big_stack(|| cli(&[]).debug_assert());
+    }
+
+    /// As in beets, a plugin's commands are registered only while the plugin
+    /// is enabled; otherwise the command is unknown.
+    #[test]
+    fn plugin_commands_only_for_enabled_plugins() {
+        let parse_with = |args: &[&str], enabled: &[&str]| {
+            let args: Vec<String> = std::iter::once("beet")
+                .chain(args.iter().copied())
+                .map(String::from)
+                .collect();
+            let enabled: Vec<String> = enabled.iter().map(|s| s.to_string()).collect();
+            on_big_stack(move || parse_args(args, &enabled))
+        };
+        let disabled = match parse_with(&["fetchart"], &[]) {
+            Err(e) => e,
+            Ok(_) => panic!("a disabled plugin's command parsed"),
+        };
+        assert_eq!(unknown_command(&disabled).as_deref(), Some("fetchart"));
+        assert!(parse_with(&["fetchart"], &["fetchart"]).is_ok());
     }
 
     #[test]
@@ -1397,6 +1503,92 @@ Commands:
     #[test]
     fn root_help_matches_beets() {
         assert_eq!(root_help_text_at(&[], 78), REFERENCE_CORE_HELP);
+    }
+
+    /// beets' `beet help list` at the default width (optparse's layout and
+    /// the command's own example usage line).
+    #[test]
+    fn subcommand_help_matches_beets() {
+        assert_eq!(
+            subcommand_help_text_at("list", 78).unwrap(),
+            "\
+Usage: beet [options]
+Example: beet list -f '$album: $title' artist:beatles
+
+Options:
+  -h, --help            show this help message and exit
+  -a, --album           match albums instead of tracks
+  -p PATH, --path=PATH  print paths for matched items or albums
+  -f FORMAT, --format=FORMAT
+                        print with custom format
+  -l LIMIT, --limit=LIMIT
+                        limit query results
+"
+        );
+        // With one option the help column shrinks to it, as optparse fits it.
+        assert_eq!(
+            subcommand_help_text_at("fields", 78).unwrap(),
+            "\
+Usage: beet fields [options]
+
+Options:
+  -h, --help  show this help message and exit
+"
+        );
+        // A long option goes on its own line, its help at the max column.
+        assert_eq!(
+            subcommand_help_text_at("move", 78).unwrap(),
+            "\
+Usage: beet move [options]
+
+Options:
+  -h, --help            show this help message and exit
+  -d DIR, --dest=DIR    destination directory
+  -c, --copy            copy instead of moving
+  -p, --pretend         show how files would be moved, but don't touch
+                        anything
+  -t, --timid           always confirm all actions
+  -e, --export          copy without changing the database path
+  -a, --album           match albums instead of tracks
+  -l LIMIT, --limit=LIMIT
+                        limit query results
+"
+        );
+        assert!(subcommand_help_text_at("migrate-beets", 78).is_none());
+    }
+
+    /// textwrap's hyphen breaking in optparse's help (a narrow terminal).
+    #[test]
+    fn subcommand_help_wraps_at_hyphens() {
+        let help = subcommand_help_text_at("import", 38).unwrap();
+        assert!(help.contains("  -i, --incremental\n                  skip already-\n                  imported directories\n"));
+        assert!(help.contains("  -I, --noincremental\n                  do not skip already-\n                  imported directories\n"));
+        let help = subcommand_help_text_at("import", 78).unwrap();
+        assert!(help.contains("  -i, --incremental     skip already-imported directories\n"));
+    }
+
+    /// Every command beets has help for: the ones beets-rs implements too
+    /// (the plugin registry's; `migrate-beets` is ours alone).
+    #[test]
+    fn every_command_has_beets_help() {
+        use clap::CommandFactory;
+        for sub in Cli::command().get_subcommands() {
+            let name = sub.get_name();
+            if name == "migrate-beets" {
+                continue;
+            }
+            assert!(
+                subcommand_help::find(name).is_some(),
+                "no beets help text for {name}"
+            );
+        }
+        for command in plugin_registry::commands() {
+            let name = (command.build)().get_name().to_string();
+            assert!(
+                subcommand_help::find(&name).is_some(),
+                "no beets help text for the {name} plugin command"
+            );
+        }
     }
 
     #[test]

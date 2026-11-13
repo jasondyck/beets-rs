@@ -8,6 +8,7 @@ use crate::query::Query;
 use anyhow::{Context, Result};
 use clap::CommandFactory;
 use std::collections::BTreeSet;
+use std::fmt::Write as _;
 
 pub struct FishPlugin;
 
@@ -116,15 +117,19 @@ pub fn command(_cfg: &Config, lib: &Library, opts: CmdOpts) -> Result<()> {
         }
     }
     cmds.sort_by(|a, b| a.0.cmp(&b.0));
-    out.push_str(&format!(
+    write!(
+        out,
         "set CMDS {}\n\n",
         cmds.iter().map(|c| c.0.as_str()).collect::<Vec<_>>().join(" ")
-    ));
+    )
+    .unwrap();
     if !opts.no_fields {
-        out.push_str(&format!(
+        write!(
+            out,
             "set FIELDS {}\n\n",
             fields.iter().map(|f| format!("{f}:")).collect::<Vec<_>>().join(" ")
-        ));
+        )
+        .unwrap();
     }
     let mut extra_sets = vec![];
     for field in &opts.extra_values {
@@ -139,11 +144,13 @@ pub fn command(_cfg: &Config, lib: &Library, opts: CmdOpts) -> Result<()> {
         for r in &recs {
             values.insert(text(&r.formatted(field).unwrap_or_default()));
         }
-        out.push_str(&format!(
+        write!(
+            out,
             "set  {}S {}\n\n",
             field.to_uppercase(),
             values.into_iter().collect::<Vec<_>>().join(" ")
-        ));
+        )
+        .unwrap();
         extra_sets.push(field.clone());
     }
     out.push_str("\n# ====== setup basic beet completion ======\n\n");
@@ -156,29 +163,37 @@ pub fn command(_cfg: &Config, lib: &Library, opts: CmdOpts) -> Result<()> {
         ("c", "config", "path to configuration file"),
         ("h", "help", "print this help message and exit"),
     ] {
-        out.push_str(&format!(
-            "complete -c beet -n '__fish_beet_needs_command' -s {short} -l {long} -f -d '{desc}'\n"
-        ));
+        writeln!(
+            out,
+            "complete -c beet -n '__fish_beet_needs_command' -s {short} -l {long} -f -d '{desc}'"
+        )
+        .unwrap();
     }
     out.push_str("\n# ====== setup field completion for subcommands ======\n");
     for (name, help) in &cmds {
         let n = escape(name);
-        out.push_str(&format!("\n# ------ fieldsetups for {n} -------\n"));
-        out.push_str(&format!(
-            "complete -c beet -n '__fish_beet_needs_command' -a {n} -f -d {}\n",
+        write!(out, "\n# ------ fieldsetups for {n} -------\n").unwrap();
+        writeln!(
+            out,
+            "complete -c beet -n '__fish_beet_needs_command' -a {n} -f -d {}",
             wrap(&clean(help))
-        ));
+        )
+        .unwrap();
         if !opts.no_fields {
-            out.push_str(&format!(
-                "complete -c beet -n '__fish_beet_using_command {n}' -a '$FIELDS' -d 'fieldname'\n"
-            ));
+            writeln!(
+                out,
+                "complete -c beet -n '__fish_beet_using_command {n}' -a '$FIELDS' -d 'fieldname'"
+            )
+            .unwrap();
         }
         for f in &extra_sets {
-            out.push_str(&format!(
-                "complete -c beet -n '__fish_beet_use_extra {n} {f}:' -f -A -a ${}S -d {}\n",
+            writeln!(
+                out,
+                "complete -c beet -n '__fish_beet_use_extra {n} {f}:' -f -A -a ${}S -d {}",
                 f.to_uppercase(),
                 wrap(f)
-            ));
+            )
+            .unwrap();
         }
     }
     out.push_str("\n# ====== completions for commands ======\n");
@@ -187,7 +202,7 @@ pub fn command(_cfg: &Config, lib: &Library, opts: CmdOpts) -> Result<()> {
         names.extend(sub.get_all_aliases().map(ToString::to_string));
         for name in names {
             let n = escape(&name);
-            out.push_str(&format!("\n\n\n# ====== completions for {n} =====\n"));
+            write!(out, "\n\n\n# ====== completions for {n} =====\n").unwrap();
             for arg in sub.get_arguments().filter(|a| !a.is_hide_set()) {
                 let long = arg
                     .get_long()
@@ -206,13 +221,17 @@ pub fn command(_cfg: &Config, lib: &Library, opts: CmdOpts) -> Result<()> {
                 } else {
                     ""
                 };
-                out.push_str(&format!(
-                    "complete -c beet -n '__fish_beet_using_command {n}' {args}{short}{long}{help}\n"
-                ));
+                writeln!(
+                    out,
+                    "complete -c beet -n '__fish_beet_using_command {n}' {args}{short}{long}{help}"
+                )
+                .unwrap();
             }
-            out.push_str(&format!(
-                "complete -c beet -n '__fish_beet_using_command {n}' -s h -l help -d 'print help'\n"
-            ));
+            writeln!(
+                out,
+                "complete -c beet -n '__fish_beet_using_command {n}' -s h -l help -d 'print help'"
+            )
+            .unwrap();
         }
     }
     std::fs::write(&path, out).with_context(|| format!("writing {}", path.display()))?;

@@ -17,23 +17,26 @@ things that aren't ported yet are at the end and in
 
 ## Command line and output
 
-- **A subcommand's own help** (`beet help ls`, `beet ls -h`) is still clap's
-  layout and capitalization; beets prints optparse's `Usage:` block and
-  options table. Also, beets loads the plugins before printing help, so a
-  plugin's load-time warnings (such as `limit`'s deprecation notice) appear on
-  stderr first; beets-rs' `beet --help`/`-h`/`help` (and `beet` with no
-  command) don't load them (their command list and layout otherwise match
-  beets'). Reason: not ported yet (PORTING 2.14).
+- **Help doesn't open the library**: `beet --help`, `beet help [CMD]` and
+  `beet CMD -h` load the enabled plugins first (so their load-time warnings,
+  such as `limit`'s deprecation notice, come on stderr as in beets) but not
+  the library; beets opens the library before printing help, so on a library
+  that needs migrations its stdout starts with `Created database backup at:`
+  lines. Help text and layout (optparse's `Usage:` block and options table)
+  match beets'.
 - **`beet migrate-beets`** exists only in beets-rs (it imports a beets
   library; see [MIGRATING.md](MIGRATING.md)).
 - **A plugin that fails to set up** logs beets' `** error loading plugin X`
   line with the error message; beets prints a Python traceback after it.
   Reason: no Python runtime. Both run without the plugin (its defaults still
   show in `beet config -d`, as in beets).
-- **A disabled plugin's command** (`beet web` with `web` not in `plugins:`)
-  says "the web plugin is not enabled; add it to `plugins:` in your config";
-  beets says `unknown command 'web'` (its command was never registered).
-  Reason: our commands are compiled in; not ported yet (PORTING 2.13).
+- **A plugin that fails to set up still has its commands** (it is in
+  `plugins:`): beets, which registers the loaded plugins'
+  commands only, says `unknown command 'replaygain'`; beets-rs prints the
+  command's help (from the reference's parser) and runs it with the plugin's
+  defaults. Reason: whether a plugin loads is only known after the full
+  configuration is read, and the command line (and its help) is built from
+  the `plugins:` setting first.
 - **Regex syntax errors** in queries carry the engine's message
   (Python `re` vs fancy-regex); the `invalid query: '...': '...' is not a
   regular expression:` part is the same. Reason: different regex engines.
@@ -248,8 +251,6 @@ things that aren't ported yet are at the end and in
 These aren't differences by design, just gaps (see [PORTING.md](../PORTING.md)
 for the detail):
 
-- **PORTING 2.13/2.14**: commands of disabled plugins, and subcommand help in optparse's layout (listed under
-  "Command line" above).
 - **PORTING 5.19 metadata sources**: `discogs`, `spotify`, `deezer`,
   `beatport` as extra candidate sources, and `bpsync` (PORTING 5.21d, which
   needs beatport).
