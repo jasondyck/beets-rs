@@ -4,13 +4,13 @@
 //! lists, `idle` events, password authentication, the path (VFS) commands
 //! and the library searches.
 //!
-//! **No playback.** beets plays audio with GStreamer (`gstplayer.py`);
-//! this port implements the server, its state and the protocol but no
-//! audio output: `play`/`next`/`pause`/`stop`/`seek`/`setvol` change the
-//! server's state (and the clients see it in `status`), tracks don't
-//! finish on their own (no `play_finished` events), and `status`'s
-//! `elapsed` is always 0. `decoders` lists the formats beets-rs reads,
-//! and the single output is named "beets-rs".
+//! Playback is rodio-based (the non-default `bpd-audio` feature); without
+//! it, or when no output device opens, a null player tracks the server's
+//! state only: `play`/`next`/`pause`/`stop`/`seek`/`setvol` change the
+//! state (and clients see it in `status`), tracks don't finish on their
+//! own (no `play_finished` events), and `status`'s `elapsed` stays 0.
+//! `decoders` lists the formats beets-rs reads, and the single output is
+//! named "beets-rs".
 
 pub mod player;
 pub mod vfs;

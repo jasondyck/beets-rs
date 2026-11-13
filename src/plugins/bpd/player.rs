@@ -164,8 +164,11 @@ impl Player for RodioPlayer {
     }
 
     fn seek(&mut self, pos: f64) -> Result<()> {
+        // rodio's SeekError isn't `Sync` (it holds a boxed `dyn Error +
+        // Send`), so it can't go into anyhow as-is.
         self.sink
-            .try_seek(std::time::Duration::from_secs_f64(pos.max(0.0)))?;
+            .try_seek(std::time::Duration::from_secs_f64(pos.max(0.0)))
+            .map_err(|e| anyhow::anyhow!("seek failed: {e}"))?;
         Ok(())
     }
 
