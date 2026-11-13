@@ -82,7 +82,7 @@ Done: fetchart (filesystem + CAA), lyrics (LRCLIB), embedart.
 - [x] **5.17 types**: declare flex attribute types (int/float/bool/date) for queries and sorting; also a framework for plugins' own `item_types`/`album_types` (e.g. lyrics_instrumental should format as True/False)
 - [x] **5.18a Template/path plugins**: rewrite, advancedrewrite, substitute, bucket, albumtypes, fromfilename
 - [x] **5.18b Import/file plugins**: importadded, permissions, hook, ihate, filefilter, badfiles, unimported
-- [ ] **5.18c Export/media-server plugins**: random, export, playlist, mbcollection, parentwork, mpdupdate, plexupdate, kodiupdate, subsonicupdate, listenbrainz, lastimport
+- [x] **5.18c Export/media-server plugins**: random, export, playlist, mbcollection, parentwork, mpdupdate, plexupdate, kodiupdate, subsonicupdate, listenbrainz, lastimport
 - [ ] **5.19 Metadata source plugins**: discogs, spotify, deezer, beatport (as extra candidate sources)
 - [ ] **5.20 Rarely used**: bpd, aura, play, keyfinder, autobpm, bpm, absubmit, mbsubmit, metasync, thumbnails, importfeeds, fish, loadext, fuzzy, bareasc, limit, titlecase
 - [ ] **5.21 Plugins missing from the plan** (found 2026-11-13 comparing with beetsplug/): acousticbrainz, bpsync, embyupdate, freedesktop (deprecated alias of thumbnails), importsource, ipfs, mbpseudo, mpdstats, sonosupdate, subsonicplaylist, tidal
@@ -90,7 +90,7 @@ Done: fetchart (filesystem + CAA), lyrics (LRCLIB), embedart.
   - [ ] **5.21b tidal**: OAuth2/PKCE session, JSON:API client (openapi.tidal.com/v2), album/track parsing, `tidal --auth` and `tidalsync`
   - [ ] **5.21c sonosupdate discovery**: soco isn't ported, so it always logs "Could not find a Sonos device." Do SSDP discovery and the UPnP ContentDirectory refresh in pure Rust (fake device on 127.0.0.1 in tests)
   - [ ] **5.21d bpsync**: only the deprecation warnings and flags exist; finish once the beatport source (5.19) is in
-  - [ ] **5.21e loose ends**: mpdstats reads MPD_HOST/MPD_PORT and shows beets' computed `music_directory` in `config -d` (registry defaults are static: allow a computed default); acousticbrainz `Float(6)` fields need per-field float digits in FieldType; mbpseudo's post-match adjustment needs the `album_matched` event (not sent by our importer yet) and `data_source` switching
+  - [ ] **5.21e loose ends**: move `item_types` into the plugin registry (plugins/types.rs still has a central per-plugin match, a merge-conflict spot); mpdstats reads MPD_HOST/MPD_PORT and shows beets' computed `music_directory` in `config -d` (registry defaults are static: allow a computed default); acousticbrainz `Float(6)` fields need per-field float digits in FieldType; mbpseudo's post-match adjustment needs the `album_matched` event (not sent by our importer yet) and `data_source` switching
 
 ## 6. Quality
 
