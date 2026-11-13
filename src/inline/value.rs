@@ -538,8 +538,7 @@ pub fn format_value(v: &V, spec: &str) -> PyResult<String> {
                 Some(g) if body.chars().next().is_some_and(|c| c.is_ascii_digit()) => {
                     let (int, rest) = body
                         .find(|c: char| !c.is_ascii_digit())
-                        .map(|k| (&body[..k], &body[k..]))
-                        .unwrap_or((&body, ""));
+                        .map_or((body.as_str(), ""), |k| (&body[..k], &body[k..]));
                     format!("{}{rest}", group(int, g, 3))
                 }
                 _ => body,

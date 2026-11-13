@@ -200,6 +200,7 @@ unsafe fn write_handler(data: *mut c_void, buffer: *mut u8, size: u64) -> i32 {
     1
 }
 
+#[derive(Clone, Copy)]
 enum Ev<'a> {
     StreamStart,
     StreamEnd,
@@ -531,12 +532,12 @@ impl Emitter {
             Y::Bool(b) => scalar(self, "bool", if *b { "yes" } else { "no" }),
             Y::Number(n) => {
                 if let Some(i) = n.as_i64() {
-                    scalar(self, "int", &i.to_string())
+                    scalar(self, "int", &i.to_string());
                 } else if let Some(u) = n.as_u64() {
-                    scalar(self, "int", &u.to_string())
+                    scalar(self, "int", &u.to_string());
                 } else {
                     let f = n.as_f64().unwrap_or(0.0);
-                    scalar(self, "float", &represent_float(f))
+                    scalar(self, "float", &represent_float(f));
                 }
             }
             Y::String(s) => scalar(self, "str", s),
@@ -1196,7 +1197,7 @@ fn debase64(s: &str) -> Vec<u8> {
 pub fn load_all(input: &str) -> Result<Vec<PyVal>, String> {
     let mut c = Composer {
         p: Parser::new(input),
-        anchors: Default::default(),
+        anchors: std::collections::HashMap::default(),
     };
     let mut docs = vec![];
     loop {

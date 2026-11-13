@@ -2032,7 +2032,7 @@ fn stats(lib: &Library, exact: bool, limit: Option<usize>, q: &[String]) -> Resu
         let length = i.float("length");
         total_time += length;
         total_size += if exact {
-            std::fs::metadata(i.path()).map(|m| m.len()).unwrap_or(0)
+            std::fs::metadata(i.path()).map_or(0, |m| m.len())
         } else {
             (length * i.int("bitrate") as f64 / 8.0).max(0.0) as u64
         };

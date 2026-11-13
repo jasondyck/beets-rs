@@ -105,8 +105,7 @@ impl FieldType {
             FieldType::Date => Value::Float(
                 strptime(s)
                     .and_then(|d| Local.from_local_datetime(&d).earliest())
-                    .map(|d| d.timestamp() as f64)
-                    .unwrap_or_else(float),
+                    .map_or_else(float, |d| d.timestamp() as f64),
             ),
             _ => Value::Int(int()),
         }
@@ -524,7 +523,7 @@ thread_local! {
     /// The flexible attribute types declared by the enabled plugins
     /// (beets' `item_types` / `album_types`, the types plugin's config).
     static FLEX_TYPES: std::cell::RefCell<[BTreeMap<String, FieldType>; 2]> =
-        Default::default();
+        std::cell::RefCell::default();
 }
 
 fn kind_index(kind: Kind) -> usize {
@@ -723,7 +722,7 @@ impl Record {
     pub fn str(&self, name: &str) -> &str {
         match self.values.get(name) {
             Some(Value::Str(s)) => s,
-            _ => self.flex.get(name).map(String::as_str).unwrap_or(""),
+            _ => self.flex.get(name).map_or("", String::as_str),
         }
     }
 
@@ -756,8 +755,7 @@ impl Record {
         self.values
             .get(name)
             .and_then(Value::as_f64)
-            .map(|f| f as i64)
-            .unwrap_or(0)
+            .map_or(0, |f| f as i64)
     }
 
     pub fn float(&self, name: &str) -> f64 {

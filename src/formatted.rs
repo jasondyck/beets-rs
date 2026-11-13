@@ -490,7 +490,7 @@ impl<'a> Formatted<'a> {
     fn albumtotal(&self, rec: &Record) -> i64 {
         let items = self.album_items();
         if rec.int("disctotal") == 1 || !self.env.per_disc_numbering {
-            return items.first().map(|i| i.int("tracktotal")).unwrap_or(0);
+            return items.first().map_or(0, |i| i.int("tracktotal"));
         }
         let mut counted = vec![];
         let mut total = 0;
@@ -520,9 +520,9 @@ impl<'a> Formatted<'a> {
             _ if let Some(v) = self.inline_value(rec, key) => v,
             // rewrite/advancedrewrite: the field's rewritten value.
             _ if let Some(r) = self.rewritten(rec, key) => r.formatted(key).unwrap_or_default(),
-            (Kind::Item, "filesize") => std::fs::metadata(rec.path())
-                .map(|m| m.len().to_string())
-                .unwrap_or_else(|_| "0".into()),
+            (Kind::Item, "filesize") => {
+                std::fs::metadata(rec.path()).map_or_else(|_| "0".into(), |m| m.len().to_string())
+            }
             (Kind::Item, "has_cover_art") => {
                 let art = crate::media::has_art(rec.path()).unwrap_or(false);
                 if art { "True" } else { "False" }.into()
@@ -903,7 +903,7 @@ impl Context for Formatted<'_> {
                 .env
                 .titlecase
                 .as_ref()
-                .map(|t| Ok(t.titlecase(args.first().map(String::as_str).unwrap_or(""), ""))),
+                .map(|t| Ok(t.titlecase(args.first().map_or("", String::as_str), ""))),
             "substitute" => self.env.substitute.as_ref().map(|s| s.call(args)),
             "bucket" => self.env.bucket.as_ref().map(|b| b.call(args)),
             _ => None,

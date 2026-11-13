@@ -406,8 +406,8 @@ fn py_slice(len: usize, start: Option<i64>, end: Option<i64>) -> (usize, usize) 
         let i = if i < 0 { i + len } else { i };
         i.clamp(0, len) as usize
     };
-    let a = start.map(clamp).unwrap_or(0);
-    let b = end.map(clamp).unwrap_or(len as usize);
+    let a = start.map_or(0, clamp);
+    let b = end.map_or(len as usize, clamp);
     (a, b.max(a))
 }
 

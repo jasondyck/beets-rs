@@ -212,7 +212,7 @@ impl Env {
         full.extend_from_slice(args);
         let out = self.run(&full);
         out.assert_ok("ls");
-        out.stdout_lines().iter().map(|s| s.to_string()).collect()
+        out.stdout_lines().iter().map(ToString::to_string).collect()
     }
 
     /// The library paths of the items, as `ls -p` prints them.
@@ -220,7 +220,7 @@ impl Env {
         self.ls(&["-p"]).into_iter().map(PathBuf::from).collect()
     }
 
-    pub fn file_exists(&self, path: &Path) -> bool {
+    pub fn file_exists(path: &Path) -> bool {
         path.exists()
     }
 }

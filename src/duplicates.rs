@@ -210,7 +210,7 @@ pub fn summarize_items(items: &[Item], singleton: bool) -> String {
         parts.push(format!("{}:{:02}", secs / 60, secs % 60));
         let size: u64 = items
             .iter()
-            .map(|i| std::fs::metadata(i.path()).map(|m| m.len()).unwrap_or(0))
+            .map(|i| std::fs::metadata(i.path()).map_or(0, |m| m.len()))
             .sum();
         parts.push(human_bytes(size));
     }
