@@ -1,8 +1,8 @@
 //! The plugin registry: a plugin declares its name, defaults, constructor
 //! and CLI commands in its own file with [`inventory`], and this module
 //! gathers them. Adding a plugin touches only its own files (plus its
-//! README row and diffbeets cases): `plugins::load`, the config defaults
-//! and the `beet` command line are built from here.
+//! docs/FEATURES.md section and diffbeets cases): `plugins::load`, the
+//! config defaults and the `beet` command line are built from here.
 
 use crate::config::Config;
 use crate::library::Library;
