@@ -53,11 +53,21 @@ impl BufferedSocket {
                 };
                 Sock::Unix(UnixStream::connect(path)?)
             }
+            #[cfg(any(target_os = "linux", target_os = "android"))]
             Some('@') => {
                 use std::os::linux::net::SocketAddrExt;
                 let addr =
                     std::os::unix::net::SocketAddr::from_abstract_name(&host.as_bytes()[1..])?;
                 Sock::Unix(UnixStream::connect_addr(&addr)?)
+            }
+            // The abstract socket namespace is Linux-only; elsewhere the
+            // connect fails, as it does for beets.
+            #[cfg(not(any(target_os = "linux", target_os = "android")))]
+            Some('@') => {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::Unsupported,
+                    "abstract Unix sockets are only available on Linux",
+                ));
             }
             _ => {
                 let addr = format!("{host}:{port}");

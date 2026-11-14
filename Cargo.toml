@@ -54,7 +54,6 @@ tiny_http = "0.12"
 unicode-normalization = "0.1.26"
 unsafe-libyaml = "0.2.11"
 ureq = { version = "2", features = ["json"] }
-walkdir = "2.5.0"
 zip = { version = "2", default-features = false, features = ["deflate"] }
 zbus = "5"
 

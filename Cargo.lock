@@ -314,7 +314,6 @@ dependencies = [
  "unicode-normalization",
  "unsafe-libyaml",
  "ureq",
- "walkdir",
  "zbus",
  "zip",
 ]
