@@ -153,10 +153,6 @@ build time, e.g. `libasound2-dev` on Debian/Ubuntu):
 cargo build --release --features bpd-audio
 ```
 
-**That build doesn't compile yet** (PORTING 5.20d: an error-type conversion in
-`bpd/player.rs`'s seek); until it's fixed, build without the feature, or
-expect to fix that one line.
-
 Without the feature (or when no output device opens) the server still works
 with a null player: clients can browse, queue and control, `status` reports
 the state, but no sound plays, and it logs that on startup. `beet aura` and

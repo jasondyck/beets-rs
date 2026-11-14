@@ -160,10 +160,7 @@ things that aren't ported yet are at the end and in
 
 ## Plugins, one by one
 
-- **acousticbrainz**: a URL missing at runtime is logged instead of raising,
-  and the `Float(6)` fields format with beets' default one decimal: the port
-  has no per-field float digits yet (PORTING 5.21e). Reason: no Python
-  types.
+- **acousticbrainz**: a URL missing at runtime is logged instead of raising.
 - **absubmit**: analyses run one at a time (beets uses `par_map`); a
   transport error ends the command, as beets.
 - **aura**: no Pillow, so image documents have no `width`/`height`; no
@@ -184,8 +181,7 @@ things that aren't ported yet are at the end and in
   output is named `beets-rs`; `decoders` lists the formats beets-rs reads
   rather than GStreamer's; `kill` stops the server instead of exiting the
   process; `ctrl_profile` reports that guppy (a Python memory profiler) is
-  missing; the optional `bpd-audio` (rodio) build doesn't compile yet
-  (PORTING 5.20d). Reason: no GStreamer; audio output is optional (see
+  missing; audio plays through rodio only in a `bpd-audio` build. Reason: no GStreamer; audio output is optional (see
   [MIGRATING.md](MIGRATING.md)).
 - **bareasc**: its own `unidecode` wrapper (a deunicode table with fixes for
   vulgar fractions and `™`) so its output matches Python's unidecode there.
@@ -207,19 +203,9 @@ things that aren't ported yet are at the end and in
   a `-C` program that can't start is an error (beets crashes); a `tiebreak`
   field that doesn't exist sorts as empty (beets fails); a checksum is
   stored as text (beets stores a blob).
-- **importfeeds**: `beet config -d` shows `relative_to` empty (and after the
-  other keys) where beets adds it at run time as the library directory, in
-  confuse's load order (PORTING 5.20c).
 - **ipfs**: `-m/--play` isn't wired to the ported `play` plugin yet, and
   reports that instead of playing.
-- **loadext**: beets-rs' bundled SQLite is built without extension loading,
-  so enabling the plugin only logs beets' "does not support extensions"
-  warning. Reason: statically linked SQLite with extensions disabled; whether
-  to enable `rusqlite`'s `load_extension` is still open (PORTING 5.20c).
 - **lyrics**: no `langdetect` language detection (see above).
-- **mbpseudo**: the merged info keeps `data_source` `MusicBrainz`; beets
-  switches the source after the match (the importer doesn't send beets'
-  `album_matched` event yet; PORTING 5.21e).
 - **mpdupdate / plexupdate / kodiupdate / subsonicupdate / mbcollection /
   listenbrainz / lastimport**: `mpd.host`/`port` take their values from the
   environment only while they still hold their defaults (so `beet config -d`
@@ -228,10 +214,6 @@ things that aren't ported yet are at the end and in
   carry pylast's parameters but not its XML-identical headers; the
   ListenBrainz playlist helpers beets carries but no command uses aren't
   ported.
-- **mpdstats**: `MPD_HOST`/`MPD_PORT` environment defaults aren't read
-  (config and the command's options are), and `beet config -d` shows
-  `mpd.music_directory` empty where beets fills in the library directory at
-  run time (PORTING 5.21e).
 - **random**: the shuffle uses this port's own RNG instead of Python's
   `random`; both are unseeded, so selections differ run to run.
 - **smartplaylist**: `auto` is accepted but not wired up, as in beets 2.14,
@@ -259,15 +241,6 @@ for the detail):
 - **beets' developer-only `bench` plugin** (`bench_aunique`) isn't ported.
 - **Python `pluginpath` plugins** (beets' Python plugin API) are out of
   scope; the bundled plugins are ported natively.
-- **PORTING 5.20c loose ends**: `importfeeds`' computed `relative_to` in
-  `config -d`, `loadext`'s extension loading, and the missing diffbeets cases
-  for `importfeeds`/`metasync`.
-- **PORTING 5.20d**: the `bpd-audio` build doesn't compile yet (a `?` on
-  rodio's `try_seek` error); `beet bpd` runs with the null player meanwhile.
-- **PORTING 5.21e loose ends**: `mpdstats`' environment defaults and computed
-  `music_directory`, per-field float digits for `acousticbrainz`'s `Float(6)`
-  fields, and `mbpseudo`'s post-match `data_source` switch (it needs beets'
-  `album_matched` event).
 - **`lyrics` language detection** (`langdetect`), **ASF/WMA tags**, and the
   small gaps noted above: `chroma` gzip bodies, `ipfs --play`, the
   ListenBrainz playlist helpers, `after_convert`, `bpd`'s `ctrl_profile`
