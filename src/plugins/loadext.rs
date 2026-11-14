@@ -7,7 +7,7 @@ use crate::config::Config;
 use crate::events::{Event, Listener};
 use crate::plugins::{Plugin, PluginLog};
 use std::path::PathBuf;
-use std::rc::Rc;
+use std::sync::Arc;
 
 pub struct LoadExt;
 
@@ -18,7 +18,7 @@ struct State {
 
 impl LoadExt {
     pub fn new(cfg: &Config) -> Self {
-        let state = Rc::new(State {
+        let state = Arc::new(State {
             cfg: cfg.clone(),
             log: PluginLog::new("loadext"),
         });

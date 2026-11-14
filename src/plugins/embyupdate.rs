@@ -10,10 +10,8 @@ use anyhow::Result;
 use md5::{Digest as _, Md5};
 use serde_json::Value as J;
 use sha1::Sha1;
-use std::cell::Cell;
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
-use std::rc::Rc;
 
 pub struct EmbyUpdate;
 
@@ -209,7 +207,7 @@ pub fn get_user(
 
 struct State {
     cfg: Config,
-    pending: Cell<bool>,
+    pending: std::sync::atomic::AtomicBool,
     log: PluginLog,
     session: Session,
 }
@@ -218,9 +216,9 @@ pub fn load(cfg: &Config) -> EmbyUpdate {
     let log = PluginLog::new("emby");
     // Event listeners log at WARNING, as beets' `register_listener` does.
     log.set_base_level(crate::plugins::WARNING);
-    crate::events::register(Rc::new(State {
+    crate::events::register(std::sync::Arc::new(State {
         cfg: cfg.clone(),
-        pending: Cell::new(false),
+        pending: std::sync::atomic::AtomicBool::new(false),
         log,
         session: Session::plain("python-requests/2.32.3"),
     }));
@@ -303,9 +301,9 @@ impl Listener for State {
 
     fn on(&self, ev: &Event) {
         match ev.name {
-            "database_change" => self.pending.set(true),
+            "database_change" => self.pending.store(true, std::sync::atomic::Ordering::Relaxed),
             "cli_exit" => {
-                if self.pending.replace(false)
+                if self.pending.swap(false, std::sync::atomic::Ordering::Relaxed)
                     && let Err(e) = self.update()
                 {
                     self.log.error(&format!("{e:#}"));

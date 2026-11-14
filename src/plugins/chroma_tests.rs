@@ -43,7 +43,15 @@ fn audio(dir: &Path, name: &str, source: &str, tags: &[(&str, &str)]) -> PathBuf
 }
 
 fn form(seen: &Seen) -> Vec<(String, String)> {
-    let body = String::from_utf8(seen.body.clone()).unwrap();
+    // The body is gzipped, as pyacoustid sends it.
+    assert_eq!(seen.header("Content-Encoding"), Some("gzip"));
+    let mut body = vec![];
+    std::io::Read::read_to_end(
+        &mut flate2::read::GzDecoder::new(seen.body.as_slice()),
+        &mut body,
+    )
+    .unwrap();
+    let body = String::from_utf8(body).unwrap();
     body.split('&')
         .filter(|p| !p.is_empty())
         .map(|p| {
@@ -380,6 +388,11 @@ fn acoustid_match_records_sorted_releases() {
     let seen = &server.requests()[0];
     assert_eq!(seen.method, "POST");
     assert_eq!(seen.target, "/v2/lookup");
+    assert_eq!(seen.header("Accept-Encoding"), Some("gzip"));
+    assert_eq!(
+        seen.header("Content-Type"),
+        Some("application/x-www-form-urlencoded")
+    );
     let f = form(seen);
     let keys: Vec<&str> = f.iter().map(|(k, _)| k.as_str()).collect();
     assert_eq!(

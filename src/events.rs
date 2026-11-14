@@ -3,13 +3,18 @@
 //! (plugins, such as hook, importadded and permissions) registered when
 //! the plugins load get them in registration order.
 //!
-//! Events are sent from the main thread, so the registry is per thread.
+//! As in beets, the registry is global: convert's parallel transcoders send
+//! `write`/`after_convert` from worker threads and reach the listeners the
+//! plugins registered. Tests keep a registry per test thread (so parallel
+//! tests can't see each other's listeners); a thread spawned for a test
+//! inherits it with [`inherit`]/[`install`].
 
 use crate::library::Library;
 use crate::model::{Album, Item, Record};
+#[cfg(test)]
 use std::cell::RefCell;
 use std::path::{Path, PathBuf};
-use std::rc::Rc;
+use std::sync::Arc;
 
 /// beets' `ALL_EVENTS`, in its order (hook's choices).
 pub const ALL_EVENTS: &[&str] = &[
@@ -86,6 +91,8 @@ pub enum Arg<'a> {
     Task(&'a TaskInfo),
     /// The tags of a `write` event (`{name: value}` as Python's `str()`).
     Tags(&'a [(String, String)]),
+    /// A boolean argument (`after_convert`'s `keepnew`).
+    Bool(bool),
     /// `album_matched`'s `match`: mutable, as beets' listeners adjust it
     /// (mbpseudo switches its data source).
     Match(&'a std::cell::RefCell<crate::autotag::AlbumMatch>),
@@ -148,36 +155,80 @@ impl<'a> Event<'a> {
     }
 }
 
-/// A plugin's listener.
-pub trait Listener {
+/// A plugin's listener. As in beets' global registry, the same listener
+/// serves every thread (convert's parallel transcoders send `write` and
+/// `after_convert` from worker threads).
+pub trait Listener: Send + Sync {
     /// Whether it listens for this event.
     fn wants(&self, event: &str) -> bool;
     fn on(&self, event: &Event);
 }
 
+type Listeners = Vec<Arc<dyn Listener>>;
+
+// As beets, one registry for the process; the listeners keep their state
+// behind atomics and locks. Tests run in parallel, so there each test
+// thread has its own (see `inherit`).
+#[cfg(not(test))]
+static LISTENERS: std::sync::RwLock<Listeners> = std::sync::RwLock::new(Vec::new());
+#[cfg(test)]
 thread_local! {
-    static LISTENERS: RefCell<Vec<Rc<dyn Listener>>> = const { RefCell::new(Vec::new()) };
+    static LISTENERS: RefCell<Listeners> = const { RefCell::new(Vec::new()) };
 }
 
 /// Register a listener (a plugin, when it loads).
-pub fn register(l: Rc<dyn Listener>) {
+pub fn register(l: Arc<dyn Listener>) {
+    #[cfg(not(test))]
+    LISTENERS
+        .write()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .push(l);
+    #[cfg(test)]
     LISTENERS.with(|v| v.borrow_mut().push(l));
+}
+
+/// The current registry (tests: this thread's), for a worker thread that
+/// must send events to the listeners its spawner knows.
+pub struct Inherited(#[cfg(test)] Arc<Listeners>);
+
+/// Capture the listeners for a thread spawned from here. In a normal build
+/// the registry is shared anyway, so this is a marker.
+pub fn inherit() -> Inherited {
+    #[cfg(test)]
+    {
+        Inherited(LISTENERS.with(|v| Arc::new(v.borrow().clone())))
+    }
+    #[cfg(not(test))]
+    {
+        Inherited()
+    }
+}
+
+/// Give a spawned thread the captured listeners (test builds only: the
+/// registry is global otherwise).
+pub fn install(_inherited: &Inherited) {
+    #[cfg(test)]
+    LISTENERS.with(|v| *v.borrow_mut() = (*_inherited.0).clone());
+}
+
+fn listeners() -> Listeners {
+    #[cfg(not(test))]
+    return LISTENERS
+        .read()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .clone();
+    #[cfg(test)]
+    LISTENERS.with(|v| v.borrow().clone())
 }
 
 /// Whether anything listens for `event` (to skip building its arguments).
 pub fn listening(event: &str) -> bool {
-    LISTENERS.with(|v| v.borrow().iter().any(|l| l.wants(event)))
+    listeners().iter().any(|l| l.wants(event))
 }
 
 /// beets' `plugins.send(event, **kwargs)`.
 pub fn send(name: &'static str, args: &[(&'static str, Arg)]) {
-    let ls: Vec<Rc<dyn Listener>> = LISTENERS.with(|v| {
-        v.borrow()
-            .iter()
-            .filter(|l| l.wants(name))
-            .cloned()
-            .collect()
-    });
+    let ls: Listeners = listeners().into_iter().filter(|l| l.wants(name)).collect();
     if ls.is_empty() {
         return;
     }

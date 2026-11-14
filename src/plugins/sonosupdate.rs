@@ -7,8 +7,6 @@ use crate::config::Config;
 use crate::events::{Event, Listener};
 use crate::plugins::sonos::{self, Device};
 use crate::plugins::{Plugin, PluginLog};
-use std::cell::Cell;
-use std::rc::Rc;
 
 pub struct SonosUpdate;
 
@@ -20,18 +18,18 @@ impl Plugin for SonosUpdate {
 
 struct State {
     /// The library changed during this command.
-    pending: Cell<bool>,
+    pending: std::sync::atomic::AtomicBool,
     log: PluginLog,
     /// beets' `soco.discovery.any_soco()`, injectable for tests.
-    discover: Box<dyn Fn() -> Option<Device>>,
+    discover: Box<dyn Fn() -> Option<Device> + Send + Sync>,
 }
 
 pub fn load(_cfg: &Config) -> SonosUpdate {
     let log = PluginLog::new("sonosupdate");
     // Event listeners log at WARNING, as beets' `register_listener` does.
     log.set_base_level(crate::plugins::WARNING);
-    crate::events::register(Rc::new(State {
-        pending: Cell::new(false),
+    crate::events::register(std::sync::Arc::new(State {
+        pending: std::sync::atomic::AtomicBool::new(false),
         log,
         discover: Box::new(sonos::any_soco),
     }));
@@ -67,8 +65,8 @@ impl Listener for State {
 
     fn on(&self, ev: &Event) {
         match ev.name {
-            "database_change" => self.pending.set(true),
-            "cli_exit" if self.pending.replace(false) => self.update(),
+            "database_change" => self.pending.store(true, std::sync::atomic::Ordering::Relaxed),
+            "cli_exit" if self.pending.swap(false, std::sync::atomic::Ordering::Relaxed) => self.update(),
             _ => {}
         }
     }

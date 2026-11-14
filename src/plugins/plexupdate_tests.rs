@@ -290,3 +290,126 @@ fn no_change_no_update() {
     crate::events::send("cli_exit", &[]);
     assert!(env.local.requests().is_empty());
 }
+
+// --------------------------------------------------------- TLS (verify=False)
+
+/// A self-signed certificate and its PKCS#8 private key, as DER, made with
+/// openssl (None when openssl isn't installed).
+fn self_signed(dir: &Path) -> Option<(Vec<u8>, Vec<u8>)> {
+    let ok = |args: &[&str]| {
+        std::process::Command::new("openssl")
+            .args(args)
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .is_ok_and(|s| s.success())
+    };
+    let cert_pem = dir.join("cert.pem");
+    let key_pem = dir.join("key.pem");
+    let cert_der = dir.join("cert.der");
+    let key_der = dir.join("key.der");
+    let (c, k) = (cert_pem.to_str()?, key_pem.to_str()?);
+    let (cd, kd) = (cert_der.to_str()?, key_der.to_str()?);
+    if !ok(&[
+        "req", "-x509", "-newkey", "rsa:2048", "-nodes", "-keyout", k, "-out", c, "-days", "1",
+        "-subj", "/CN=localhost",
+    ]) {
+        return None;
+    }
+    if !ok(&["x509", "-in", c, "-outform", "DER", "-out", cd]) {
+        return None;
+    }
+    if !ok(&["pkcs8", "-topk8", "-nocrypt", "-in", k, "-outform", "DER", "-out", kd]) {
+        return None;
+    }
+    Some((std::fs::read(cert_der).ok()?, std::fs::read(key_der).ok()?))
+}
+
+/// A local HTTPS server on 127.0.0.1 (a free port) answering each request
+/// with `body` as JSON, and the port. Handshakes that fail (the verifying
+/// client rejects the certificate) are ignored.
+fn tls_server(cert: Vec<u8>, key: Vec<u8>, body: &'static str) -> u16 {
+    use std::io::{Read as _, Write as _};
+    use rustls::pki_types::{CertificateDer, PrivatePkcs8KeyDer};
+    let certs = vec![CertificateDer::from(cert)];
+    let key = rustls::pki_types::PrivateKeyDer::Pkcs8(PrivatePkcs8KeyDer::from(key));
+    let config = Arc::new(
+        rustls::ServerConfig::builder()
+            .with_no_client_auth()
+            .with_single_cert(certs, key)
+            .unwrap(),
+    );
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    std::thread::spawn(move || {
+        for stream in listener.incoming() {
+            let Ok(mut stream) = stream else { break };
+            let config = config.clone();
+            std::thread::spawn(move || {
+                let Ok(mut conn) = rustls::ServerConnection::new(config) else {
+                    return;
+                };
+                loop {
+                    if conn.wants_write() && conn.write_tls(&mut stream).is_err() {
+                        return;
+                    }
+                    if !conn.is_handshaking() {
+                        break;
+                    }
+                    let Ok(n) = conn.read_tls(&mut stream) else {
+                        return;
+                    };
+                    if n == 0 || conn.process_new_packets().is_err() {
+                        return;
+                    }
+                }
+                // One HTTP request, then the response.
+                let mut req = vec![];
+                while !req.windows(4).any(|w| w == b"\r\n\r\n") {
+                    let Ok(n) = conn.read_tls(&mut stream) else {
+                        return;
+                    };
+                    if n == 0 || conn.process_new_packets().is_err() {
+                        return;
+                    }
+                    conn.reader().read_to_end(&mut req).ok();
+                }
+                let resp = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\
+                     Content-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                    body.len()
+                );
+                conn.writer().write_all(resp.as_bytes()).ok();
+                conn.complete_io(&mut stream).ok();
+            });
+        }
+    });
+    port
+}
+
+#[test]
+fn ignore_cert_errors_accepts_a_self_signed_server() {
+    let dir = tempfile::tempdir().unwrap();
+    let Some((cert, key)) = self_signed(dir.path()) else {
+        return;
+    };
+    let port = tls_server(cert, key, "{\"MediaContainer\": {\"Directory\": []}}");
+    let token_path = dir.path().join("plex_token.json");
+    let api = |verify| {
+        let mut api = PlexAPI::new(
+            token_path.clone(),
+            "127.0.0.1",
+            port,
+            "Music",
+            true,
+            verify,
+            None,
+        );
+        api.open_browser = false;
+        api
+    };
+    // The bad certificate is refused by default...
+    assert!(api(true).get_music_section().is_err());
+    // ...and accepted with `plex.ignore_cert_errors`.
+    assert_eq!(api(false).get_music_section().unwrap(), None);
+}

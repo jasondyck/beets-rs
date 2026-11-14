@@ -14,7 +14,6 @@ use crate::template::Template;
 use anyhow::{Result, bail};
 use serde_yaml::Value as Y;
 use std::os::unix::ffi::OsStrExt;
-use std::rc::Rc;
 
 /// The plugin; its hooks listen on the event bus.
 pub struct HookPlugin;
@@ -74,7 +73,7 @@ pub fn load(cfg: &Config) -> Result<HookPlugin> {
     let log = PluginLog::new("hook");
     // Listeners log at WARNING (each -v a level lower), as beets' do.
     log.set_base_level(crate::plugins::WARNING);
-    crate::events::register(Rc::new(Hooks {
+    crate::events::register(std::sync::Arc::new(Hooks {
         hooks,
         format_item: cfg.str("format_item"),
         format_album: cfg.str("format_album"),
@@ -334,6 +333,7 @@ impl Hooks {
                         .collect::<Vec<_>>()
                         .join(", ")
                 ),
+                Arg::Bool(b) => if *b { "True" } else { "False" }.into(),
                 Arg::Opaque(class) => format!("<{class} object at 0x7f0000000000>"),
                 Arg::Match(_) => "<beets.autotag.match.AlbumMatch object at 0x7f0000000000>".into(),
             },

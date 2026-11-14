@@ -9,7 +9,7 @@ use crate::fileops::FileOp;
 use crate::library::Library;
 use crate::model::{Album, Item};
 use anyhow::{Result, bail};
-use std::cell::Cell;
+
 use std::path::PathBuf;
 
 pub const USER_AGENT: &str = concat!(
@@ -233,36 +233,44 @@ pub const ERROR: u8 = 40;
 /// hooks and event listeners; each `-v` lowers it a level.
 pub struct PluginLog {
     name: &'static str,
-    base_level: Cell<u8>,
+    base_level: std::sync::atomic::AtomicU8,
 }
 
 impl PluginLog {
     pub fn new(name: &'static str) -> Self {
         PluginLog {
             name,
-            base_level: Cell::new(INFO),
+            base_level: std::sync::atomic::AtomicU8::new(INFO),
         }
     }
 
     pub fn set_base_level(&self, level: u8) {
-        self.base_level.set(level);
+        self.base_level
+            .store(level, std::sync::atomic::Ordering::Relaxed);
     }
 
     pub fn base_level(&self) -> u8 {
-        self.base_level.get()
+        self.base_level.load(std::sync::atomic::Ordering::Relaxed)
     }
 
     /// Run `f` with the base level at `level`, restoring it afterwards.
     pub fn at_level<R>(&self, level: u8, f: impl FnOnce() -> R) -> R {
-        let old = self.base_level.replace(level);
+        let old = self
+            .base_level
+            .swap(level, std::sync::atomic::Ordering::Relaxed);
         let r = f();
-        self.base_level.set(old);
+        self.base_level
+            .store(old, std::sync::atomic::Ordering::Relaxed);
         r
     }
 
     pub fn log(&self, level: u8, msg: &str) {
         let v = crate::logging::verbosity();
-        let threshold = self.base_level.get().saturating_sub(10 * v).max(DEBUG);
+        let threshold = self
+            .base_level
+            .load(std::sync::atomic::Ordering::Relaxed)
+            .saturating_sub(10 * v)
+            .max(DEBUG);
         if level >= threshold {
             crate::logging::emit(format!("{}: {msg}", self.name));
         }
