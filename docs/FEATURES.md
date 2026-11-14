@@ -516,12 +516,11 @@ beets 2.14's, on the plugin event bus: after a command that changed the library,
 
 **mbcollection** (`mbcollection.auto`/`collection`/`remove`) adds each imported album's `mb_albumid` to the user's MusicBrainz release collection (`musicbrainz.user`/`pass`, HTTP digest); `beet mbupdate [-r]` adds the library's albums, and `-r` also removes releases that are no longer in it, fetching in pages of 100 and submitting in batches of 200, with beets' `Failed to update MusicBrainz collection: HTTP Error: 401 Unauthorized. Check your musicbrainz.user and musicbrainz.pass configuration`.
 
-**listenbrainz** (`listenbrainz.token`/`username`, both required) fetches all listens page by page or reads a data-export `.zip` (`beet lbimport [-f PATH] [--max N]`), aggregates them per recording MBID (else artist/title/album) and stores `listenbrainz_play_count`.
+**listenbrainz** (`listenbrainz.token`/`username`, both required) fetches all listens page by page or reads a data-export `.zip` (`beet lbimport [-f PATH] [--max N]`), aggregates them per recording MBID (else artist/title/album) and stores `listenbrainz_play_count`. It also carries beets' playlist helpers, unused by any command there too: `get_playlists_createdfor`, `get_listenbrainz_playlists` (ListenBrainz's "Weekly Jams"/"Weekly Exploration" playlists, typed by title, dated from a `week of YYYY-MM-DD` title, newest first and same-date by type A-Z), `get_playlist`, `get_tracks_from_playlist` (the identifier's last `/` part, looked up on MusicBrainz for title, first artist and first release's title/year), `get_track_info` and `get_weekly_playlist` (the newest or second newest of a type; malformed entries and missing playlists are errors as beets raises, a playlist that can't be fetched is no tracks).
 
 **lastimport** (`lastfm.user`/`api_key` and `lastimport.per_page`/`retry_limit`) reads last.fm's top tracks page by page and stores `lastfm_play_count`, matching items by `mb_trackid`, then exact artist/title (or album), then substring. `plex.ignore_cert_errors` turns certificate verification off for the Plex session only (beets' `verify=False`). Differences:
 
 - Last.fm requests carry pylast's parameters but not its XML-identical headers
-- The ListenBrainz playlist helpers beets carries but no command uses aren't ported
 
 ### play
 

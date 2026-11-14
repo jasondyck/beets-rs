@@ -323,7 +323,7 @@ impl ListenBrainzPlugin {
 
     /// `get_mb_recording_id`: the first recording search result.
     #[allow(dead_code)] // beets' plugin API; `lbimport` does not use it.
-    pub fn get_mb_recording_id(&self, track: &J) -> Result<Option<String>, HttpError> {
+    pub(crate) fn get_mb_recording_id(&self, track: &J) -> Result<Option<String>, HttpError> {
         let meta = &track["track_metadata"];
         let filters = [
             (
@@ -350,10 +350,173 @@ impl ListenBrainzPlugin {
             .map(String::from))
     }
 
+    /// beets' `get_playlists_createdfor`: the playlists a user created
+    /// (or that ListenBrainz made for them).
+    #[allow(dead_code)] // beets' plugin API; no command uses it.
+    pub(crate) fn get_playlists_createdfor(&self, username: &str) -> Option<J> {
+        let url = format!("{}/user/{username}/playlists/createdfor", self.root);
+        self.make_request(&url, None)
+    }
+
+    /// beets' `get_listenbrainz_playlists`: the "Weekly Jams"/"Weekly
+    /// Exploration" playlists, newest first (same-date: type A-Z), as
+    /// `{type, date, identifier}` maps.
+    #[allow(dead_code)] // beets' plugin API; no command uses it.
+    pub(crate) fn get_listenbrainz_playlists(&self) -> Result<Vec<J>> {
+        let Some(resp) = self.get_playlists_createdfor(&self.username) else {
+            return Ok(vec![]);
+        };
+        // `if not resp`: an empty response is no response.
+        if !py_truthy(&resp) {
+            return Ok(vec![]);
+        }
+        // `resp.get("playlists", [])`; a missing key is no playlists, but a
+        // null one would be iterated by beets (a TypeError).
+        let playlists = match resp.get("playlists") {
+            None => return Ok(vec![]),
+            Some(J::Array(a)) => a,
+            _ => anyhow::bail!("'NoneType' object is not iterable"),
+        };
+        let mut found: Vec<J> = vec![];
+        for playlist in playlists {
+            // beets calls `.get` on this without checking.
+            let info = playlist
+                .get("playlist")
+                .filter(|p| p.is_object())
+                .ok_or_else(|| anyhow::anyhow!("playlist entry has no playlist object"))?;
+            if info.get("creator").and_then(J::as_str) != Some("listenbrainz") {
+                continue;
+            }
+            let title = info
+                .get("title")
+                .and_then(J::as_str)
+                .ok_or_else(|| anyhow::anyhow!("playlist has no title"))?;
+            self.log.debug(&format!("Playlist title: {title}"));
+            let kind = if title.contains("Exploration") {
+                "Exploration"
+            } else {
+                "Jams"
+            };
+            // `title.split("week of ")[1].split(" ")[0]`; no marker is
+            // `continue`.
+            let Some(rest) = title.split("week of ").nth(1) else {
+                continue;
+            };
+            let date_str = rest.split(' ').next().unwrap_or_default();
+            let date = chrono::NaiveDate::parse_from_str(date_str, "%Y-%m-%d").map_err(|e| {
+                anyhow::anyhow!("time data {date_str:?} does not match format '%Y-%m-%d': {e}")
+            })?;
+            let identifier = info
+                .get("identifier")
+                .and_then(J::as_str)
+                .ok_or_else(|| anyhow::anyhow!("playlist has no identifier"))?;
+            let id = identifier.rsplit('/').next().unwrap_or_default();
+            found.push(serde_json::json!({
+                "type": kind,
+                "date": date.format("%Y-%m-%d").to_string(),
+                "identifier": id,
+            }));
+        }
+        // Python's two stable sorts: by type, then by date descending.
+        found.sort_by(|a, b| a["type"].as_str().cmp(&b["type"].as_str()));
+        found.sort_by(|a, b| b["date"].as_str().cmp(&a["date"].as_str()));
+        for playlist in &found {
+            self.log.debug(&format!(
+                "Playlist: {} - {}",
+                playlist["type"].as_str().unwrap_or_default(),
+                playlist["date"].as_str().unwrap_or_default()
+            ));
+        }
+        Ok(found)
+    }
+
+    /// beets' `get_playlist`: one playlist by its ID.
+    #[allow(dead_code)] // beets' plugin API; no command uses it.
+    pub(crate) fn get_playlist(&self, identifier: &str) -> Option<J> {
+        let url = format!("{}/playlist/{identifier}", self.root);
+        self.make_request(&url, None)
+    }
+
+    /// beets' `get_tracks_from_playlist`: the playlist's tracks, looked up
+    /// on MusicBrainz (recording ID from the last `/` part of each
+    /// identifier; a list uses its first entry).
+    #[allow(dead_code)] // beets' plugin API; no command uses it.
+    pub(crate) fn get_tracks_from_playlist(&self, playlist: &J) -> Result<Vec<J>> {
+        let mut tracks = vec![];
+        // `playlist.get("playlist", {}).get("track")`; beets iterates the
+        // None that a missing list gives.
+        let entries = playlist
+            .get("playlist")
+            .and_then(|p| p.get("track"))
+            .and_then(J::as_array)
+            .ok_or_else(|| anyhow::anyhow!("playlist has no tracks"))?;
+        for track in entries {
+            let mut identifier = track.get("identifier");
+            if let Some(J::Array(a)) = identifier {
+                // `identifier[0]`: an empty list is an IndexError in beets.
+                identifier = Some(
+                    a.first()
+                        .ok_or_else(|| anyhow::anyhow!("list index out of range"))?,
+                );
+            }
+            // `identifier.split("/")`: a missing identifier is an
+            // AttributeError in beets.
+            let identifier = identifier
+                .and_then(J::as_str)
+                .ok_or_else(|| anyhow::anyhow!("track has no identifier"))?;
+            let id = identifier.rsplit('/').next().unwrap_or_default();
+            let artist = match track.get("creator") {
+                Some(v) => v.clone(),
+                None => J::String("Unknown artist".into()),
+            };
+            tracks.push(serde_json::json!({
+                "artist": artist,
+                "identifier": id,
+                "title": track.get("title").cloned().unwrap_or(J::Null),
+            }));
+        }
+        Ok(self.get_track_info(&tracks)?)
+    }
+
+    /// beets' `get_weekly_playlist`: the newest (`most_recent`) or second
+    /// newest playlist of `playlist_type`, and its tracks.
+    #[allow(dead_code)] // beets' plugin API; no command uses it.
+    pub(crate) fn get_weekly_playlist(
+        &self,
+        playlist_type: &str,
+        most_recent: bool,
+    ) -> Result<Vec<J>> {
+        let mut filtered: Vec<J> = self
+            .get_listenbrainz_playlists()?
+            .into_iter()
+            .filter(|p| p["type"].as_str() == Some(playlist_type))
+            .collect();
+        filtered.sort_by(|a, b| b["date"].as_str().cmp(&a["date"].as_str()));
+        // beets indexes `[0]`/`[1]` and raises an IndexError when there is
+        // no such playlist.
+        let index = if most_recent { 0 } else { 1 };
+        let Some(selected) = filtered.get(index) else {
+            anyhow::bail!("list index out of range");
+        };
+        self.log.debug(&format!(
+            "Selected playlist: {} - {}",
+            selected["type"].as_str().unwrap_or_default(),
+            selected["date"].as_str().unwrap_or_default()
+        ));
+        if let Some(identifier) = selected.get("identifier").and_then(J::as_str)
+            && let Some(playlist) = self.get_playlist(identifier)
+            // `if (playlist := ...)`: an empty response is no playlist.
+            && py_truthy(&playlist)
+        {
+            return self.get_tracks_from_playlist(&playlist);
+        }
+        Ok(vec![])
+    }
+
     /// `get_track_info`: recording title, first artist and first release's
     /// title/year.
     #[allow(dead_code)] // beets' plugin API; `lbimport` does not use it.
-    pub fn get_track_info(&self, tracks: &[J]) -> Result<Vec<J>, HttpError> {
+    pub(crate) fn get_track_info(&self, tracks: &[J]) -> Result<Vec<J>, HttpError> {
         let api = MusicBrainzApi::new(&self.cfg);
         let mut info = vec![];
         for track in tracks {
@@ -393,6 +556,18 @@ impl ListenBrainzPlugin {
             }));
         }
         Ok(info)
+    }
+}
+
+/// Python truthiness of a JSON value (`if not resp`).
+fn py_truthy(v: &J) -> bool {
+    match v {
+        J::Null => false,
+        J::Bool(b) => *b,
+        J::Number(n) => n.as_f64().is_some_and(|f| f != 0.0),
+        J::String(s) => !s.is_empty(),
+        J::Array(a) => !a.is_empty(),
+        J::Object(o) => !o.is_empty(),
     }
 }
 
