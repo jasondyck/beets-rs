@@ -76,8 +76,6 @@ things that aren't ported yet are at the end and in
   is rebuilt in beets' layout once, after a
   `<library>-before-beets_layout.bak` backup. beets never sees such a
   database.
-- **ASF/WMA tags are not supported** (lofty has no ASF reader), so such
-  files aren't imported as audio.
 - **An empty list field written to APEv2 removes the tag**, where beets
   writes an empty value; MediaFile reads both as "no value". Reason: beets'
   own `write -f` then reports the field as changed again, which beets-rs
@@ -245,6 +243,6 @@ for the detail):
 - **beets' developer-only `bench` plugin** (`bench_aunique`) isn't ported.
 - **Python `pluginpath` plugins** (beets' Python plugin API) are out of
   scope; the bundled plugins are ported natively.
-- **ASF/WMA tags**, and the small gaps noted above: `chroma` gzip bodies,
-  `ipfs --play`, the ListenBrainz playlist helpers, `after_convert`, `bpd`'s
-  `ctrl_profile` (guppy).
+- The small gaps noted above: `chroma` gzip bodies, `ipfs --play`, the
+  ListenBrainz playlist helpers, `after_convert`, `bpd`'s `ctrl_profile`
+  (guppy).

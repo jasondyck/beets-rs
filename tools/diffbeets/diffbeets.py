@@ -80,6 +80,10 @@ FORMATS = {
     "wv": ["-ar", "44100", "-ac", "1", "-c:a", "wavpack"],
     "aiff": ["-ar", "48000", "-ac", "2", "-c:a", "pcm_s24be", "-write_id3v2", "1"],
     "wav": ["-ar", "22050", "-ac", "1", "-c:a", "pcm_s16le"],
+    "wma": ["-ar", "44100", "-ac", "1", "-c:a", "wmav2", "-b:a", "128k"],
+    # MP3 inside ASF: no byte rate in the stream, so beets estimates the
+    # bitrate from the file size (MediaFile's fallback).
+    "wma_mp3": ["-ar", "44100", "-ac", "1", "-c:a", "libmp3lame", "-b:a", "96k"],
 }
 
 
@@ -238,7 +242,7 @@ def setup(work, ref, rs, verbose):
 # Tag round trips
 
 
-AUDIO = (".mp3", ".flac", ".m4a", ".ogg", ".opus", ".wv", ".aiff", ".wav")
+AUDIO = (".mp3", ".flac", ".m4a", ".ogg", ".opus", ".wv", ".aiff", ".wav", ".wma")
 
 
 def mediafile_view(path):

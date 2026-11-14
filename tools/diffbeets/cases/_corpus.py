@@ -258,6 +258,12 @@ CORPUS = (
     + _album("a13", "ogg", {"artist": "Ogg Artist", "album_artist": "Ogg Artist",
                             "album": "Vorbis Album", "date": "1970-01-01"},
              [{"title": "Ogg Song", "tracknumber": "7"}])
+    # ASF (Windows Media): Content Description and Extended Content
+    # Description tags, read and written by the ASF port.
+    + _album("a16", "wma", {"artist": "WMA Artist", "album_artist": "WMA Artist",
+                            "album": "Windows Album", "date": "2016"},
+             [{"title": "Wma One", "track": "1"},
+              {"title": "Wma Two", "track": "2"}])
     # One track per format and codec, odd lengths: exact length and bitrate.
     + [(f"a14/{n:02d}.{ext}", fmt,
         {"artist": "Format Artist", "album_artist": "Format Artist",
@@ -267,7 +273,8 @@ CORPUS = (
            ("mp3", "mp3", "1.37"), ("mp3", "mp3vbr", "2.71"), ("mp3", "mp3noxing", "1.9"),
            ("flac", "flac", "1.37"), ("m4a", "m4a", "1.37"), ("m4a", "alac", "0.5"),
            ("ogg", "ogg", "3.33"), ("opus", "opus", "1.37"), ("wv", "wv", "2.05"),
-           ("aiff", "aiff", "1.37"), ("mp3", "mp3abr", "1.6")], 1)]
+           ("aiff", "aiff", "1.37"), ("mp3", "mp3abr", "1.6"),
+           ("wma", "wma", "1.37"), ("wma", "wma_mp3", "2.13")], 1)]
     # Tags for MediaFile's other fields, as ffmpeg writes them per format
     # (MP3 frames and TXXX, Vorbis comments, APEv2): alternative keys
     # ("ALBUM ARTIST" before "ALBUMARTIST"), "; " in a genre (a list in
@@ -323,7 +330,7 @@ IMPORTS = [
     for d in ["a01", "a02", "a03", "a04", "a05", "a06", "a07", "a08"]
 ] + [
     [*_UNTHREADED, "import", "-A", "-q", d]
-    for d in ["a09", "a10", "a11", "a12", "a13", "a14", "a15"]
+    for d in ["a09", "a10", "a11", "a12", "a13", "a14", "a15", "a16"]
 ] + [
     ["import", "-A", "-q", "-s", "s01"],
     ["import", "-A", "-q", "-s", "s02"],
