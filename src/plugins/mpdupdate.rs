@@ -13,6 +13,7 @@ use std::cell::Cell;
 use std::fmt::Write as _;
 use std::io::{Read, Write};
 use std::net::TcpStream;
+#[cfg(unix)]
 use std::os::unix::net::UnixStream;
 use std::rc::Rc;
 use std::time::Duration;
@@ -28,6 +29,7 @@ impl crate::plugins::Plugin for MpdUpdatePlugin {
 /// beets' `BufferedSocket`: send commands and read replies line by line.
 enum Sock {
     Tcp(TcpStream),
+    #[cfg(unix)]
     Unix(UnixStream),
 }
 
@@ -41,6 +43,7 @@ impl BufferedSocket {
     /// `/`, `~` or `@` (`@` for the abstract namespace).
     fn connect(host: &str, port: u16) -> std::io::Result<Self> {
         let sock = match host.chars().next() {
+            #[cfg(unix)]
             Some('/') | Some('~') => {
                 let path = if let Some(rest) = host.strip_prefix('~') {
                     dirs::home_dir()
@@ -53,11 +56,29 @@ impl BufferedSocket {
                 };
                 Sock::Unix(UnixStream::connect(path)?)
             }
+            // Unix sockets do not exist on Windows (beets' connect fails).
+            #[cfg(not(unix))]
+            Some('/') | Some('~') => {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::Unsupported,
+                    "Unix sockets are only available on Unix",
+                ));
+            }
+            #[cfg(any(target_os = "linux", target_os = "android"))]
             Some('@') => {
                 use std::os::linux::net::SocketAddrExt;
                 let addr =
                     std::os::unix::net::SocketAddr::from_abstract_name(&host.as_bytes()[1..])?;
                 Sock::Unix(UnixStream::connect_addr(&addr)?)
+            }
+            // The abstract socket namespace is Linux-only; elsewhere the
+            // connect fails, as it does for beets.
+            #[cfg(not(any(target_os = "linux", target_os = "android")))]
+            Some('@') => {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::Unsupported,
+                    "abstract Unix sockets are only available on Linux",
+                ));
             }
             _ => {
                 let addr = format!("{host}:{port}");
@@ -79,6 +100,7 @@ impl BufferedSocket {
             let mut chunk = [0u8; 1024];
             let n = match &mut self.sock {
                 Sock::Tcp(s) => s.read(&mut chunk),
+                #[cfg(unix)]
                 Sock::Unix(s) => s.read(&mut chunk),
             };
             match n {
@@ -91,6 +113,7 @@ impl BufferedSocket {
     fn send(&mut self, data: &[u8]) {
         let _ = match &mut self.sock {
             Sock::Tcp(s) => s.write_all(data),
+            #[cfg(unix)]
             Sock::Unix(s) => s.write_all(data),
         };
     }

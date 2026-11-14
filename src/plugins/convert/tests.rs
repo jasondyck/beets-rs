@@ -657,7 +657,6 @@ fn command_errors() {
 
 #[test]
 fn link_and_hardlink_untranscoded() {
-    use std::os::unix::fs::MetadataExt;
     if !ffmpeg_ok() {
         return;
     }
@@ -687,10 +686,14 @@ fn link_and_hardlink_untranscoded() {
         },
     );
     assert!(!std::fs::symlink_metadata(&out).unwrap().is_symlink());
-    assert_eq!(
-        std::fs::metadata(&out).unwrap().ino(),
-        std::fs::metadata(e.item().path()).unwrap().ino()
-    );
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        assert_eq!(
+            std::fs::metadata(&out).unwrap().ino(),
+            std::fs::metadata(e.item().path()).unwrap().ino()
+        );
+    }
 }
 
 #[test]

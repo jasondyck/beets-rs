@@ -103,7 +103,7 @@ impl ImportFeeds {
             for p in &paths {
                 let dest = feeds.join(p.file_name().unwrap_or_default());
                 if !dest.exists()
-                    && let Err(e) = std::os::unix::fs::symlink(p, &dest)
+                    && let Err(e) = crate::osutil::symlink_file(p, &dest)
                 {
                     eprintln!(
                         "warning: importfeeds: could not create symlink for {}: {e}",

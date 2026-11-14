@@ -24,9 +24,8 @@ pub fn components(path: &str) -> Vec<String> {
 /// `item_components`: the item's path relative to the library directory,
 /// as components.
 pub fn item_components(lib: &Library, item: &Item) -> Vec<String> {
-    use std::os::unix::ffi::OsStrExt;
     let path = item.path();
-    let stored = crate::library::to_db_path(path.as_os_str().as_bytes(), lib.music_dir());
+    let stored = crate::library::to_db_path(&crate::osutil::path_bytes(path), lib.music_dir());
     components(&String::from_utf8_lossy(&stored))
 }
 

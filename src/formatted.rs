@@ -203,10 +203,21 @@ impl FormatEnv {
     /// configured ones, or with `None` beets' built-in `CHAR_REPLACE`) to
     /// each component.
     pub fn sanitize_path(&self, path: &str, user: bool) -> String {
+        self.sanitize_path_of(path, user, crate::osutil::Flavor::NATIVE)
+    }
+
+    /// `sanitize_path` for a given platform's path syntax (so the Windows
+    /// rules can be tested on Unix).
+    pub fn sanitize_path_of(
+        &self,
+        path: &str,
+        user: bool,
+        flavor: crate::osutil::Flavor,
+    ) -> String {
         let filled;
         let path = match &self.empty_component_replace {
             Some(r) => {
-                filled = fill_empty_components(path, r);
+                filled = fill_empty_components(path, r, flavor);
                 filled.as_str()
             }
             None => path,
@@ -218,7 +229,7 @@ impl FormatEnv {
             defaults = default_replacements();
             &defaults
         };
-        let comps: Vec<String> = components(path)
+        let comps: Vec<String> = components_of(path, flavor)
             .into_iter()
             .map(|mut comp| {
                 for (re, rep) in replacements {
@@ -229,32 +240,33 @@ impl FormatEnv {
                 comp
             })
             .collect();
-        join_components(&comps)
+        join_components(&comps, flavor)
     }
 }
 
-/// Fill every empty `/`-separated component (leading, trailing, or the
-/// whole path) with `r`.
-fn fill_empty_components(path: &str, r: &str) -> String {
-    path.split('/')
+/// Fill every empty component (leading, trailing, or the whole path) with
+/// `r`, recognizing both of the platform's separators.
+fn fill_empty_components(path: &str, r: &str, flavor: crate::osutil::Flavor) -> String {
+    path.split(|c| flavor.is_sep(c))
         .map(|c| if c.is_empty() { r } else { c })
         .collect::<Vec<_>>()
-        .join("/")
+        .join(&flavor.sep.to_string())
 }
 
 /// beets' `util.components`: the components of a path, with a leading run
 /// of separators kept as the first component (`/a//b` → `/`, `a`, `b`);
-/// empty components are dropped.
-pub fn components(path: &str) -> Vec<String> {
+/// empty components are dropped. The platform's path syntax decides what a
+/// separator is (beets' `os.path`).
+pub fn components_of(path: &str, flavor: crate::osutil::Flavor) -> Vec<String> {
     let mut out = vec![];
-    let trimmed = path.trim_start_matches('/');
+    let trimmed = path.trim_start_matches(|c| flavor.is_sep(c));
     let lead = path.len() - trimmed.len();
     if lead > 0 {
         out.push(path[..lead].to_string());
     }
     out.extend(
         trimmed
-            .split('/')
+            .split(|c| flavor.is_sep(c))
             .filter(|c| !c.is_empty())
             .map(String::from),
     );
@@ -262,14 +274,14 @@ pub fn components(path: &str) -> Vec<String> {
 }
 
 /// `os.path.join(*comps)`.
-fn join_components(comps: &[String]) -> String {
+fn join_components(comps: &[String], flavor: crate::osutil::Flavor) -> String {
     let mut out = String::new();
     for c in comps {
-        if c.starts_with('/') {
+        if c.starts_with(|c| flavor.is_sep(c)) {
             out.clone_from(c);
         } else {
-            if !out.is_empty() && !out.ends_with('/') {
-                out.push('/');
+            if !out.is_empty() && !out.ends_with(|c| flavor.is_sep(c)) {
+                out.push(flavor.sep);
             }
             out.push_str(c);
         }
@@ -1017,5 +1029,28 @@ mod tests {
         env.empty_component_replace = Some("_".into());
         assert_eq!(env.sanitize_path("/a//b/", true), "_/a/_/b/_");
         assert_eq!(python_repl(r"\1$x\g<n>"), "${1}$$x${n}");
+    }
+
+    // The Windows path rules, run on any platform (beets' `os.path` with
+    // `ntpath`: both separators, `\` in the result).
+    #[test]
+    fn sanitize_windows() {
+        let env = FormatEnv::defaults();
+        let win = crate::osutil::Flavor::WINDOWS;
+        assert_eq!(
+            components_of(r"a\b/c", win),
+            vec!["a".to_string(), "b".into(), "c".into()]
+        );
+        assert_eq!(
+            env.sanitize_path_of("a/b\\c", true, win),
+            r"a\b\c".to_string()
+        );
+        // A leading separator is a component of its own (replaced by `_`).
+        assert_eq!(env.sanitize_path_of("/a/b", true, win), r"_\a\b");
+        // The Windows "reserved characters" (`beets.util.CHAR_REPLACE`).
+        assert_eq!(
+            env.sanitize_path_of(r#"a<b>c:"d|e?f*g"#, true, win),
+            r"a_b_c__d_e_f_g"
+        );
     }
 }

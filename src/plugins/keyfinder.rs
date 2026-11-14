@@ -139,12 +139,11 @@ fn py_list_repr(items: &[String]) -> String {
 /// beets' `util.command_output`: the command's stdout, with the error
 /// messages Python's `OSError` and `CalledProcessError` print.
 fn run_output(command: &[String], target: &Path) -> std::result::Result<Vec<u8>, String> {
-    use std::os::unix::ffi::OsStrExt;
     let args: Vec<std::ffi::OsString> = command[1..]
         .iter()
         .map(std::ffi::OsString::from)
-        .chain(std::iter::once(std::ffi::OsString::from(
-            std::ffi::OsStr::from_bytes(target.as_os_str().as_bytes()),
+        .chain(std::iter::once(crate::osutil::os_string(
+            &crate::osutil::path_bytes(target),
         )))
         .collect();
     match std::process::Command::new(&command[0]).args(&args).output() {
@@ -246,6 +245,6 @@ pub fn run_keyfinder(
     crate::plugins::keyfinder::command(cfg, lib, a.limit, &a.query)
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 #[path = "keyfinder_tests.rs"]
 mod tests;

@@ -5,7 +5,6 @@
 use super::*;
 use crate::ui::script;
 use serde_yaml::Value as Y;
-use std::os::unix::fs::PermissionsExt;
 
 const TRACK_COUNT: usize = 10;
 
@@ -55,7 +54,7 @@ impl Env {
     fn editor(&mut self, body: &str) {
         let p = self.dir.path().join("editor.sh");
         std::fs::write(&p, format!("#!/bin/sh\n{body}\n")).unwrap();
-        std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o755)).unwrap();
+        crate::osutil::set_mode(&p, 0o755);
         self.cfg.set("editor", Y::String(p.display().to_string()));
     }
 

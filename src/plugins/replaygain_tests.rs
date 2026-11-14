@@ -710,8 +710,7 @@ fn defaults() {
 /// A fake mp3gain: logs its arguments and prints canned `-o` output for
 /// each file (and an album line).
 fn fake_mp3gain(dir: &Path, name: &str) -> PathBuf {
-    use std::os::unix::fs::PermissionsExt;
-    let p = dir.join(name);
+        let p = dir.join(name);
     let script = format!(
         "#!/bin/sh\n\
          echo \"$@\" >> {log}\n\
@@ -722,7 +721,7 @@ fn fake_mp3gain(dir: &Path, name: &str) -> PathBuf {
         log = dir.join("args.log").display()
     );
     std::fs::write(&p, script).unwrap();
-    std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o755)).unwrap();
+    crate::osutil::set_mode(&p, 0o755);
     p
 }
 

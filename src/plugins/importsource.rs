@@ -77,14 +77,8 @@ pub fn source_path(item: &Item) -> Option<PathBuf> {
 
 /// `os.access(path, os.W_OK)` / `X_OK` for the source (and its directory).
 fn writable(p: &Path) -> bool {
-    use std::os::unix::fs::PermissionsExt;
-    let ok = |p: &Path, bit: u32| {
-        std::fs::metadata(p)
-            .is_ok_and(|m| m.permissions().mode() & bit != 0)
-    };
-    ok(p, 0o222)
-        && p.parent()
-            .is_some_and(|d| ok(d, 0o222 | 0o111))
+    let ok = |p: &Path, bit: u32| crate::osutil::access(p, bit);
+    ok(p, 0o222) && p.parent().is_some_and(|d| ok(d, 0o222 | 0o111))
 }
 
 impl State {

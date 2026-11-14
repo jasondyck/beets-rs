@@ -49,9 +49,7 @@ pub fn load(cfg: &Config) -> ImportAddedPlugin {
 
 /// A file's mtime as Python's `os.stat().st_mtime`.
 pub fn st_mtime(path: &Path) -> Option<f64> {
-    use std::os::unix::fs::MetadataExt;
-    let m = std::fs::metadata(path).ok()?;
-    Some(m.mtime() as f64 + m.mtime_nsec() as f64 * 1e-9)
+    crate::osutil::mtime_of(path)
 }
 
 /// `os.utime(path, (atime, mtime))`, keeping the access time.

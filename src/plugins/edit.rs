@@ -707,7 +707,7 @@ impl Plugin for EditPlugin {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 #[path = "edit/tests.rs"]
 mod tests;
 

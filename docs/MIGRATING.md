@@ -20,6 +20,15 @@ No Python, ImageMagick or GStreamer is needed for the core and for most
 plugins; a few plugins call external programs (section 5) and `bpd`'s audio
 output is an optional build feature (section 6).
 
+On Windows, download the `x86_64-pc-windows-msvc` zip from the release page
+(or `cargo build --release` on windows-latest): it contains `beet.exe`. The
+configuration directory is `%APPDATA%\beets-rs` (or `$BEETSRSDIR`), the
+database and the import state live there as on the other platforms, and
+`beets-rs` reads and writes the same library databases as beets does on
+Windows (UTF-8 paths with `/` separators, case-insensitive `path:` queries).
+Windows has no Unix sockets, so `mpdupdate` can only use TCP, and symlinked
+imports (`importfeeds` `link`, `import.write: link`) need Developer Mode.
+
 ## 2. Where beets-rs keeps its files
 
 | What | Where |

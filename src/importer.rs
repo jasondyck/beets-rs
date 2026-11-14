@@ -4774,11 +4774,11 @@ mod tests {
 
     /// beets' `test_edit` `EditDuringImporter` cases without candidates:
     /// "eDit" at the prompt, with a script as the editor.
+    #[cfg(unix)]
     fn edit_import(
         singleton: bool,
         answers: &[&'static str],
     ) -> Option<(tempfile::TempDir, Library, Vec<String>)> {
-        use std::os::unix::fs::PermissionsExt;
         let (d, mut cfg, lib, top, _) = rescan_setup()?;
         let ed = d.path().join("editor.sh");
         std::fs::write(
@@ -4786,7 +4786,7 @@ mod tests {
             "#!/bin/sh\nsed -i -e 's/title: one/title: Edited one/' \"$1\"\n",
         )
         .unwrap();
-        std::fs::set_permissions(&ed, std::fs::Permissions::from_mode(0o755)).unwrap();
+        crate::osutil::set_mode(&ed, 0o755);
         cfg.set("editor", ed.display().to_string().into());
         cfg.set("plugins", serde_yaml::from_str("[edit]").unwrap());
         let plugins: Vec<Box<dyn Plugin>> =
@@ -4808,6 +4808,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
     fn edit_apply_asis() {
         let Some((_d, lib, titles)) = edit_import(false, &["d", "a"]) else {
             return;
@@ -4820,6 +4821,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
     fn edit_discard_asis() {
         let Some((_d, _lib, titles)) = edit_import(false, &["d", "c", "u"]) else {
             return;
@@ -4828,6 +4830,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
     fn edit_apply_asis_singleton() {
         let Some((_d, lib, titles)) = edit_import(true, &["d", "a", "s"]) else {
             return;

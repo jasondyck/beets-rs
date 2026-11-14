@@ -81,10 +81,7 @@ fn command_output(args: &[String]) -> std::result::Result<Output, Option<(i32, V
         .output()
         .map_err(|_| None)?;
     if !out.status.success() {
-        let code = out.status.code().unwrap_or_else(|| {
-            use std::os::unix::process::ExitStatusExt;
-            -out.status.signal().unwrap_or(1)
-        });
+        let code = crate::osutil::returncode_or(&out.status, 1);
         let mut both = out.stdout;
         both.extend(out.stderr);
         return Err(Some((code, both)));
@@ -660,20 +657,7 @@ const TOOLS: &[(&str, &[&str])] = &[
 
 /// `shutil.which`.
 fn which(cmd: &str) -> Option<PathBuf> {
-    use std::os::unix::fs::PermissionsExt;
-    let executable = |p: &Path| {
-        p.is_file()
-            && std::fs::metadata(p)
-                .is_ok_and(|m| m.permissions().mode() & 0o111 != 0)
-    };
-    if cmd.contains('/') {
-        let p = PathBuf::from(cmd);
-        return executable(&p).then_some(p);
-    }
-    let path = std::env::var_os("PATH")?;
-    std::env::split_paths(&path)
-        .map(|d| d.join(cmd))
-        .find(|p| executable(p))
+    crate::osutil::which(cmd)
 }
 
 impl CommandBackend {
@@ -1465,7 +1449,7 @@ impl ReplayGain {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 #[path = "replaygain_tests.rs"]
 mod tests;
 

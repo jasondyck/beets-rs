@@ -19,7 +19,6 @@ use anyhow::{Result, bail};
 use serde_yaml::Value as Y;
 use std::collections::{HashMap, HashSet};
 use std::io::Write;
-use std::os::unix::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
 
 /// The plugin, once its `output` setting checks out.
@@ -366,7 +365,7 @@ fn item_uri(cfg: &Config, lib: &Library, s: &Settings, item: &Item) -> Result<Ve
     if let Some(r) = &s.relative_to {
         uri = relpath(&uri, r);
     }
-    let mut bytes = uri.as_os_str().as_bytes().to_vec();
+    let mut bytes = crate::osutil::path_bytes(&uri).to_vec();
     if s.forward_slash {
         bytes = bytes
             .into_iter()

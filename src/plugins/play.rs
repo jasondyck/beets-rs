@@ -353,8 +353,7 @@ pub fn create_tmp_playlist(cfg: &Config, paths: &[PathBuf]) -> Result<PathBuf> {
         out.write_all(b"\xef\xbb\xbf")?;
     }
     for p in paths {
-        use std::os::unix::ffi::OsStrExt;
-        out.write_all(p.as_os_str().as_bytes())?;
+        out.write_all(&crate::osutil::path_bytes(p))?;
         out.write_all(b"\n")?;
     }
     Ok(file)

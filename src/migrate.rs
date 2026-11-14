@@ -8,7 +8,6 @@ use crate::library::Library;
 use anyhow::{Context, Result, bail};
 use rusqlite::{Connection, OpenFlags};
 use std::fmt::Write as _;
-use std::os::unix::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
 
 /// beets' default `directory`.
@@ -98,7 +97,7 @@ fn open_read_only(path: &Path) -> Result<Connection> {
     let path = std::path::absolute(path)?;
     let uri = format!(
         "file:{}?mode=ro&immutable=1",
-        uri_escape(path.as_os_str().as_bytes())
+        uri_escape(&crate::osutil::path_bytes(&path))
     );
     let conn = Connection::open_with_flags(
         &uri,

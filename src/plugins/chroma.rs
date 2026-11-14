@@ -90,8 +90,7 @@ fn api_base() -> String {
 
 /// Python's `repr()` of a bytes path (`b'/a/b.mp3'`).
 fn bytes_repr(p: &Path) -> String {
-    use std::os::unix::ffi::OsStrExt;
-    let b = p.as_os_str().as_bytes();
+    let b = crate::osutil::path_bytes(p);
     let q = if b.contains(&b'\'') && !b.contains(&b'"') {
         b'"'
     } else {
@@ -99,7 +98,7 @@ fn bytes_repr(p: &Path) -> String {
     };
     let mut out = String::from("b");
     out.push(q as char);
-    for &c in b {
+    for &c in &*b {
         match c {
             b'\\' => out.push_str("\\\\"),
             b'\n' => out.push_str("\\n"),

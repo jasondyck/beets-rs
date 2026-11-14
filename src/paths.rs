@@ -39,22 +39,32 @@ fn key_query(key: &str) -> &str {
 // as beets' int(max_filename_length): floats truncate like Python int().
 #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
 fn max_filename_length(cfg: &Config, directory: &Path) -> usize {
-    use std::os::unix::ffi::OsStrExt;
     let configured = cfg.f64("max_filename_length") as usize;
     if configured > 0 {
         return configured;
     }
-    let Ok(c) = std::ffi::CString::new(directory.as_os_str().as_bytes()) else {
+    namemax(directory)
+}
+
+#[cfg(unix)]
+fn namemax(directory: &Path) -> usize {
+    let Ok(c) = std::ffi::CString::new(&*crate::osutil::path_bytes(directory)) else {
         return MAX_FILENAME_LENGTH;
     };
-    // SAFETY: all-zero bytes are a valid `libc::statvfs` (a plain C struct of
-    // integers); `statvfs` fills it in.
+    // SAFETY: all-zero bytes are a valid `libc::statvfs` (a plain C
+    // struct of integers); `statvfs` fills it in.
     let mut st: libc::statvfs = unsafe { std::mem::zeroed() };
     // SAFETY: `c` is a valid C string and `st` a writable statvfs.
     if unsafe { libc::statvfs(c.as_ptr(), &mut st) } != 0 {
         return MAX_FILENAME_LENGTH;
     }
     (st.f_namemax as usize).min(MAX_FILENAME_LENGTH)
+}
+
+/// Windows has no `statvfs`: beets uses its limit (`MAX_FILENAME_LENGTH`).
+#[cfg(not(unix))]
+fn namemax(_directory: &Path) -> usize {
+    MAX_FILENAME_LENGTH
 }
 
 impl PathFormatter {
@@ -163,7 +173,8 @@ impl PathFormatter {
                  Configure replacements to avoid lengthening the filename."
             );
         }
-        normpath(&self.directory.join(legal.trim_start_matches('/')))
+        let legal = legal.trim_start_matches(|c| crate::osutil::Flavor::NATIVE.is_sep(c));
+        normpath(&self.directory.join(legal))
     }
 
     /// One round of beets' `_legalize_stage`: sanitize, add the
@@ -216,7 +227,12 @@ pub fn art_destination(
 /// `os.path.splitext`: the extension of the last component, unless that
 /// component starts with its only dots.
 fn splitext(path: &str) -> (&str, &str) {
-    let name_start = path.rfind('/').map_or(0, |i| i + 1);
+    splitext_of(path, crate::osutil::Flavor::NATIVE)
+}
+
+/// `splitext` for a given platform's path syntax.
+fn splitext_of(path: &str, flavor: crate::osutil::Flavor) -> (&str, &str) {
+    let name_start = path.rfind(|c| flavor.is_sep(c)).map_or(0, |i| i + 1);
     let name = &path[name_start..];
     let lead = name.len() - name.trim_start_matches('.').len();
     match name[lead..].rfind('.') {
@@ -240,7 +256,13 @@ fn truncate_str(s: &str, len: usize) -> &str {
 /// beets' `truncate_path`: each component to `max` bytes, the last one's
 /// stem to `max` less the extension's length.
 fn truncate_path(path: &str, max: usize) -> String {
-    let comps = crate::formatted::components(path);
+    truncate_path_of(path, max, crate::osutil::Flavor::NATIVE)
+}
+
+/// `truncate_path` for a given platform's path syntax (`pathlib`'s parts and
+/// `os.path.join`).
+fn truncate_path_of(path: &str, max: usize, flavor: crate::osutil::Flavor) -> String {
+    let comps = crate::formatted::components_of(path, flavor);
     let Some((last, parents)) = comps.split_last() else {
         return String::new();
     };
@@ -250,11 +272,11 @@ fn truncate_path(path: &str, max: usize) -> String {
     out.push(stem);
     let mut joined = String::new();
     for c in out {
-        if c.starts_with('/') {
-            joined = "/".into();
+        if c.starts_with(|c| flavor.is_sep(c)) {
+            joined = flavor.sep.to_string();
         } else if !c.is_empty() {
-            if !joined.is_empty() && !joined.ends_with('/') {
-                joined.push('/');
+            if !joined.is_empty() && !joined.ends_with(|c| flavor.is_sep(c)) {
+                joined.push(flavor.sep);
             }
             joined.push_str(c);
         }
@@ -394,6 +416,20 @@ mod tests {
         assert_eq!(dest(&f, &it), "/lib/CafE ½.mp3");
         let f = fmt("paths:\n  default: $title\nreplace:\n  '(\\w+) (\\S+)': '\\2 \\1'\n");
         assert_eq!(dest(&f, &it), "/lib/½ Café.mp3");
+    }
+
+    // beets' `os.path.splitext`/`truncate_path` on Windows (`ntpath`): both
+    // separators, `\` in the result.
+    #[test]
+    fn windows_path_rules() {
+        use crate::osutil::Flavor;
+        let windows = Flavor::WINDOWS;
+        assert_eq!(splitext_of(r"a\b.mp3", windows), (r"a\b", ".mp3"));
+        assert_eq!(splitext_of(r"a/b", windows), ("a/b", ""));
+        assert_eq!(
+            truncate_path_of(r"dir\abcdefgh.mp3", 10, windows),
+            r"dir\abcdef.mp3"
+        );
     }
 
     #[test]

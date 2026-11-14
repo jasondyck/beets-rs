@@ -3,7 +3,6 @@
 use super::*;
 use crate::config::Config;
 use crate::library::Library;
-use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use tempfile::TempDir;
 
@@ -60,7 +59,7 @@ fn make_mp3(dir: &Path, name: &str, tags: &[(&str, &str)]) -> bool {
 }
 
 fn mode(p: &Path) -> u32 {
-    std::fs::metadata(p).unwrap().permissions().mode() & 0o777
+    crate::osutil::mode(&std::fs::metadata(p).unwrap()) & 0o777
 }
 
 fn import(cfg: &Config, lib: &Library, src: &Path) {

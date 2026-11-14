@@ -31,7 +31,7 @@ pub fn binary() -> PathBuf {
     PathBuf::from("ipfs")
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 pub fn set_test_binary(p: Option<PathBuf>) {
     TEST_BINARY.with(|b| *b.borrow_mut() = p);
 }
@@ -447,6 +447,6 @@ fn registry_make(
     Ok(Box::new(IPFSPlugin))
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 #[path = "ipfs_tests.rs"]
 mod tests;

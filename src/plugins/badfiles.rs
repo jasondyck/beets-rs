@@ -104,10 +104,7 @@ impl BadFiles {
         Ok(match out.status.code() {
             Some(0) => (0, 0, lines),
             Some(n) => (n, 1, lines),
-            None => {
-                use std::os::unix::process::ExitStatusExt;
-                (-out.status.signal().unwrap_or(0), 1, lines)
-            }
+            None => (crate::osutil::returncode_or(&out.status, 0), 1, lines),
         })
     }
 
@@ -319,7 +316,7 @@ pub fn command(
     Ok(())
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 #[path = "badfiles_tests.rs"]
 mod tests;
 

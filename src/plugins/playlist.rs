@@ -13,7 +13,6 @@ use crate::plugins::PluginLog;
 use crate::query::Context;
 use anyhow::Result;
 use std::collections::HashMap;
-use std::os::unix::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
@@ -98,11 +97,11 @@ fn rstrip_ws(line: &[u8]) -> &[u8] {
 }
 
 fn bytes_path(p: &Path) -> Vec<u8> {
-    p.as_os_str().as_bytes().to_vec()
+    crate::osutil::path_bytes(p).to_vec()
 }
 
 fn path_from_bytes(b: &[u8]) -> PathBuf {
-    PathBuf::from(std::ffi::OsStr::from_bytes(b))
+    PathBuf::from(crate::osutil::os_string(b))
 }
 
 /// `PlaylistQuery`: the paths an M3U playlist lists (as `InQuery("path",
@@ -261,7 +260,7 @@ fn update_playlist(filename: &Path, base_dir: &Path, log: &PluginLog) -> Result<
                     path_from_bytes(new_path)
                 };
                 // `line.replace(original_path, new_path)`.
-                out.extend_from_slice(new_path.as_os_str().as_bytes());
+                out.extend_from_slice(&crate::osutil::path_bytes(&new_path));
                 out.extend_from_slice(&line[original.len()..]);
             }
         }

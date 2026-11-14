@@ -1121,10 +1121,9 @@ pub fn command(cfg: &Config, lib: &Library, opts: &CmdOpts) -> Result<()> {
 
 /// `M3UFile.write` with `#EXTM3U`.
 fn write_m3u(path: &Path, entries: &[PathBuf]) -> Result<()> {
-    use std::os::unix::ffi::OsStrExt;
     let mut out = b"#EXTM3U\n".to_vec();
     for e in entries {
-        out.extend_from_slice(e.as_os_str().as_bytes());
+        out.extend_from_slice(&crate::osutil::path_bytes(e));
         out.push(b'\n');
     }
     out.push(b'\n');

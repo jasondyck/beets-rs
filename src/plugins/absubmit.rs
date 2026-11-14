@@ -261,18 +261,7 @@ fn call(args: &[&Path]) -> std::result::Result<(), String> {
 
 /// `shutil.which`: the executable on `$PATH`.
 fn which(name: &str) -> Option<PathBuf> {
-    use std::os::unix::fs::PermissionsExt;
-    let path = std::env::var_os("PATH")?;
-    for dir in std::env::split_paths(&path) {
-        let candidate = dir.join(name);
-        if let Ok(meta) = std::fs::metadata(&candidate)
-            && meta.is_file()
-            && meta.permissions().mode() & 0o111 != 0
-        {
-            return Some(candidate);
-        }
-    }
-    None
+    crate::osutil::which(name)
 }
 
 /// `tempfile.mkstemp(suffix=".json")`.
@@ -440,6 +429,6 @@ pub fn run_absubmit(
     )
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 #[path = "absubmit_tests.rs"]
 mod tests;

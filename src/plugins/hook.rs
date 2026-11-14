@@ -13,7 +13,6 @@ use crate::query::{Obj, PyVal};
 use crate::template::Template;
 use anyhow::{Result, bail};
 use serde_yaml::Value as Y;
-use std::os::unix::ffi::OsStrExt;
 use std::rc::Rc;
 
 /// The plugin; its hooks listen on the event bus.
@@ -127,8 +126,7 @@ impl Hooks {
         match std::process::Command::new(prog).args(args).status() {
             Ok(st) if st.success() => {}
             Ok(st) => {
-                use std::os::unix::process::ExitStatusExt;
-                let code = st.code().unwrap_or_else(|| -st.signal().unwrap_or(0));
+                let code = crate::osutil::returncode_or(&st, 0);
                 self.log
                     .error(&format!("hook for {} exited with status {code}", ev.name));
             }
@@ -310,7 +308,7 @@ impl Hooks {
                 Arg::Paths(ps) => format!(
                     "[{}]",
                     ps.iter()
-                        .map(|p| bytes_repr(p.as_os_str().as_bytes()))
+                        .map(|p| bytes_repr(&crate::osutil::path_bytes(p)))
                         .collect::<Vec<_>>()
                         .join(", ")
                 ),
@@ -347,7 +345,7 @@ impl Hooks {
             Value::Py(PyVal::Str(s)) => crate::hooks::py_repr(s),
             Value::Py(PyVal::Bytes(b)) => bytes_repr(b),
             Value::Py(p) => py_str(p),
-            Value::Arg(Arg::Path(p)) => bytes_repr(p.as_os_str().as_bytes()),
+            Value::Arg(Arg::Path(p)) => bytes_repr(&crate::osutil::path_bytes(p)),
             Value::Arg(Arg::Item(r) | Arg::Album(r) | Arg::Model(r)) => {
                 let class = if r.kind == Kind::Item {
                     "Item"

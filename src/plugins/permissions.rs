@@ -7,7 +7,6 @@ use crate::config::Config;
 use crate::events::{Event, Listener};
 use crate::plugins::PluginLog;
 use serde_yaml::Value as Y;
-use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
@@ -59,7 +58,7 @@ pub fn convert_perm(v: Option<&Y>) -> Option<u32> {
 
 /// `check_permissions`: the file's mode bits are exactly `perm`.
 fn check(path: &Path, perm: u32) -> bool {
-    std::fs::metadata(path).is_ok_and(|m| m.permissions().mode() & 0o7777 == perm)
+    std::fs::metadata(path).is_ok_and(|m| crate::osutil::mode(&m) & 0o7777 == perm)
 }
 
 /// `dirs_in_library`: the path's ancestors inside the library, from the
@@ -103,14 +102,14 @@ impl Perms {
 
     fn apply(&self, p: &Path, perm: u32) {
         if !check(p, perm) {
-            let _ = std::fs::set_permissions(p, std::fs::Permissions::from_mode(perm));
+            crate::osutil::set_mode(p, perm);
         }
         // `assert_permissions`.
         if !check(p, perm) {
             self.log
                 .warning(&format!("could not set permissions on {}", p.display()));
             let now = std::fs::metadata(p)
-                .map_or(0, |m| m.permissions().mode() & 0o777);
+                .map_or(0, |m| crate::osutil::mode(&m) & 0o777);
             self.log.debug(&format!(
                 "set permissions to {perm}, but permissions are now {now}"
             ));
@@ -167,7 +166,7 @@ impl Listener for Perms {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 #[path = "permissions_tests.rs"]
 mod tests;
 

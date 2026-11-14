@@ -74,9 +74,55 @@ jobs:
             ${{ steps.package.outputs.name }}.tar.gz
             ${{ steps.package.outputs.name }}.tar.gz.sha256
 
+  windows:
+    name: Build x86_64-pc-windows-msvc
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: x86_64-pc-windows-msvc
+
+      - name: Build
+        run: cargo build --release --locked --target x86_64-pc-windows-msvc
+
+      - name: Smoke test
+        shell: bash
+        run: |
+          export BEETSRSDIR="$RUNNER_TEMP/beets-rs"
+          target/x86_64-pc-windows-msvc/release/beet.exe version
+
+      - name: Package
+        id: package
+        shell: bash
+        run: |
+          name="beets-rs-${GITHUB_REF_NAME}-x86_64-pc-windows-msvc"
+          [[ $GITHUB_REF_TYPE == tag ]] || name="beets-rs-dev-x86_64-pc-windows-msvc"
+          mkdir "$name"
+          cp "target/x86_64-pc-windows-msvc/release/beet.exe" README.md LICENSE NOTICE.md "$name/"
+          cp -r docs "$name/"
+          # `7z` is on the Windows runners; a zip keeps the executable bit
+          # question out of it (Windows has none).
+          (cd "$name" && 7z a -bd "../$name.zip" . >/dev/null)
+          sha256sum "$name.zip" > "$name.zip.sha256"
+          echo "name=$name" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.package.outputs.name }}
+          path: |
+            ${{ steps.package.outputs.name }}.zip
+            ${{ steps.package.outputs.name }}.zip.sha256
+
   release:
     name: Publish release
-    needs: build
+    needs: [build, windows]
     if: github.ref_type == 'tag'
     runs-on: ubuntu-latest
     permissions:

@@ -7,7 +7,6 @@ use crate::config::Config;
 use crate::importer::{CandidateSource, ImportOptions, Importer};
 use crate::library::Library;
 use crate::model::Item;
-use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tempfile::TempDir;
@@ -53,7 +52,7 @@ fn env(yaml_cfg: &str) -> (TempDir, Config, Library) {
 fn script(dir: &Path, name: &str, body: &str) -> PathBuf {
     let p = dir.join(name);
     std::fs::write(&p, format!("#!/bin/sh\n{body}\n")).unwrap();
-    std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o755)).unwrap();
+    crate::osutil::set_mode(&p, 0o755);
     p
 }
 

@@ -396,10 +396,7 @@ pub(crate) fn value_json(kind: Kind, key: &str, value: Option<Value>) -> Json {
         ),
         // A nullable path (`artpath`) that isn't set is None.
         (_, Value::Path(p)) if p.as_os_str().is_empty() => Json::Null,
-        (_, Value::Path(p)) => {
-            use std::os::unix::ffi::OsStrExt;
-            Json::Str(b64encode(p.as_os_str().as_bytes()))
-        }
+        (_, Value::Path(p)) => Json::Str(b64encode(&crate::osutil::path_bytes(&p))),
         // A singleton's `album_id` is None.
         (_, Value::Int(0)) if kind == Kind::Item && key == "album_id" => Json::Null,
         (_, Value::Int(i)) => Json::Int(i),

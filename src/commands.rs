@@ -1908,6 +1908,9 @@ fn editor_command_with(configured: Option<String>, var: impl Fn(&str) -> Option<
         .unwrap_or_else(|| {
             if cfg!(target_os = "macos") {
                 "open".into()
+            } else if cfg!(windows) {
+                // `start` is a cmd.exe builtin, so go through the shell.
+                "cmd /c start \"\"".into()
             } else {
                 "xdg-open".into()
             }
@@ -2891,6 +2894,8 @@ mod tests {
         assert_eq!(editor_command_with(None, env(&[("EDITOR", "ed")])), "ed");
         let opener = if cfg!(target_os = "macos") {
             "open"
+        } else if cfg!(windows) {
+            "cmd /c start \"\""
         } else {
             "xdg-open"
         };

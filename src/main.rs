@@ -28,6 +28,7 @@ mod mediafile;
 mod metadata_plugins;
 mod migrate;
 mod model;
+mod osutil;
 mod paths;
 mod pipeline;
 mod plugin_registry;

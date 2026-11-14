@@ -104,6 +104,38 @@ things that aren't ported yet are at the end and in
   templates and path formats is checked against beets case by case in
   `tools/diffbeets`.
 
+## Windows
+
+Windows builds are `x86_64-pc-windows-msvc` (the release workflow ships a
+zip with `beet.exe`; `windows.yml` builds and runs the tests on
+windows-latest). The port follows beets' Windows rules:
+
+- **Paths are UTF-8**: beets stores paths as the bytes
+  `bytestring_path` gives, which are the OS's bytes on Unix and UTF-8 on
+  Windows; beets-rs does the same, so a Windows library holds the same path
+  values as beets' and the two stay interchangeable. Undecodable file names
+  (which Unix keeps byte for byte) are the one thing Windows can't represent.
+- **Stored paths use `/`**: like beets' `path_as_posix`, a relative library
+  path is joined with `/` in the database and turned back into `\\` when
+  read.
+- **Long paths** get the `\\?\` prefix (beets' `syspath`) on filesystem
+  calls and external programs; Rust's standard library adds the prefix to its
+  own calls as well.
+- **Path comparisons are case-insensitive on Windows** (beets'
+  `os.path.normcase`): `path:` queries and `replace`d paths fold case.
+- **`max_filename_length`** falls back to beets' 200-byte limit, since
+  Windows has no `statvfs`.
+- **Unix-only things degrade as they do in beets**: `mpdupdate` speaks TCP
+  only (no Unix sockets); `permissions` sets and checks only the read-only
+  flag (all `os.chmod` does there); the executable checks in `replaygain`
+  and `absubmit` accept any existing file, as `os.access(X_OK)` does;
+  `importfeeds`' `link` format needs Developer Mode or the symlink
+  privilege, as beets' `os.symlink` does; `hook`, `badfiles` and
+  `replaygain` report a process's exit code, since Windows has no signals.
+- **Reserved device names** (`CON`, `NUL`, ...) are not sanitized, because
+  beets 2.14 doesn't either: its `sanitize_path` only replaces the reserved
+  characters, trailing dots and trailing whitespace.
+
 ## Album art
 
 - **Images are processed in Rust** (the `image` and `jpeg-encoder` crates)

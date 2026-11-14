@@ -132,19 +132,30 @@ pub fn unique_path_for(path: &Path, own: Option<&Path>) -> PathBuf {
 }
 
 pub fn move_file(src: &Path, dest: &Path) -> Result<()> {
+    // beets' `util.move`: nothing to do if it is already the same file;
+    // the OS calls get `syspath` (the long-path prefix on Windows; Rust's
+    // std adds it only for its own calls).
+    if crate::osutil::same_file(src, dest) {
+        return Ok(());
+    }
     create_parent(dest)?;
-    if std::fs::rename(src, dest).is_err() {
+    let (from, to) = (crate::osutil::syspath(src), crate::osutil::syspath(dest));
+    if std::fs::rename(&from, &to).is_err() {
         // Cross-device: copy then remove.
-        std::fs::copy(src, dest)
+        std::fs::copy(&from, &to)
             .with_context(|| format!("copying {} to {}", src.display(), dest.display()))?;
-        std::fs::remove_file(src).with_context(|| format!("removing {}", src.display()))?;
+        std::fs::remove_file(&from).with_context(|| format!("removing {}", src.display()))?;
     }
     Ok(())
 }
 
 pub fn copy_file(src: &Path, dest: &Path) -> Result<()> {
+    if crate::osutil::same_file(src, dest) {
+        return Ok(());
+    }
     create_parent(dest)?;
-    std::fs::copy(src, dest)
+    let (from, to) = (crate::osutil::syspath(src), crate::osutil::syspath(dest));
+    std::fs::copy(&from, &to)
         .with_context(|| format!("copying {} to {}", src.display(), dest.display()))?;
     Ok(())
 }
@@ -153,18 +164,8 @@ pub fn copy_file(src: &Path, dest: &Path) -> Result<()> {
 pub fn link_file(src: &Path, dest: &Path) -> Result<()> {
     create_parent(dest)?;
     let ctx = || format!("linking {} to {}", src.display(), dest.display());
-    #[cfg(unix)]
-    {
-        std::os::unix::fs::symlink(src, dest).with_context(ctx)
-    }
-    #[cfg(windows)]
-    {
-        std::os::windows::fs::symlink_file(src, dest).with_context(ctx)
-    }
-    #[cfg(not(any(unix, windows)))]
-    {
-        Err(anyhow!("OS does not support symbolic links.")).with_context(ctx)
-    }
+    crate::osutil::symlink_file(&crate::osutil::syspath(src), &crate::osutil::syspath(dest))
+        .with_context(ctx)
 }
 
 /// A hard link at `dest` to `src`, with symlinks in `src` resolved first

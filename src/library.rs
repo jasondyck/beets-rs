@@ -8,7 +8,6 @@ use rusqlite::{Connection, Row, params};
 use std::any::Any;
 use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap};
-use std::os::unix::ffi::{OsStrExt, OsStringExt};
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
@@ -113,50 +112,73 @@ fn attr_table(kind: Kind) -> &'static str {
 }
 
 /// Python's `os.path.normpath` for an absolute path: `.` and `..`
-/// resolved lexically (bytes kept as they are).
+/// resolved lexically (bytes kept as they are), with the root and any
+/// Windows drive prefix preserved.
 pub fn lexical_normpath(p: &Path) -> PathBuf {
+    let mut prefix: Option<&std::ffi::OsStr> = None;
+    let mut rooted = false;
     let mut out: Vec<&std::ffi::OsStr> = vec![];
     for c in p.components() {
         use std::path::Component as C;
         match c {
-            C::RootDir | C::Prefix(_) | C::CurDir => {}
+            C::Prefix(pre) => prefix = Some(pre.as_os_str()),
+            C::RootDir => rooted = true,
+            C::CurDir => {}
             C::ParentDir => {
                 out.pop();
             }
             C::Normal(s) => out.push(s),
         }
     }
-    let mut r = PathBuf::from("/");
+    let mut r = PathBuf::new();
+    if let Some(pre) = prefix {
+        r.push(pre);
+    }
+    if rooted {
+        r.push(std::path::MAIN_SEPARATOR_STR);
+    }
     r.extend(out);
     r
 }
 
 /// beets' `normalize_path_for_db`: an absolute path inside the library
-/// directory as `os.path.relpath` gives it; any other path unchanged.
+/// directory as `os.path.relpath` gives it, with `/` separators
+/// (`path_as_posix`); any other path unchanged. On Windows the comparison
+/// is case-insensitive (`os.path.normcase`).
 pub fn to_db_path(path: &[u8], music_dir: Option<&Path>) -> Vec<u8> {
     let Some(music) = music_dir else {
         return path.to_vec();
     };
-    if !path.starts_with(b"/") {
+    let p = PathBuf::from(crate::osutil::os_string(path));
+    if !p.is_absolute() {
         return path.to_vec();
     }
-    let m = music.as_os_str().as_bytes();
-    let mut prefix = m.to_vec();
-    if !prefix.ends_with(b"/") {
-        prefix.push(b'/');
-    }
-    if path != m && !path.starts_with(&prefix) {
+    // `_is_same_path_or_child`: under the library directory (or equal to
+    // it), compared with `os.path.normcase`.
+    let (pkey, mkey) = (
+        crate::osutil::path_components_key(&p),
+        crate::osutil::path_components_key(music),
+    );
+    if pkey != mkey && !pkey.starts_with(&mkey) {
         return path.to_vec();
     }
-    // `os.path.relpath`: both sides normalized, `..` for what's left of
-    // the start after the common part.
-    let p = lexical_normpath(Path::new(std::ffi::OsStr::from_bytes(path)));
-    let s = lexical_normpath(music);
-    let p: Vec<_> = p.components().skip(1).collect();
-    let s: Vec<_> = s.components().skip(1).collect();
-    let common = p.iter().zip(&s).take_while(|(a, b)| a == b).count();
-    let mut parts: Vec<&[u8]> = vec![b".."; s.len() - common];
-    parts.extend(p[common..].iter().map(|c| c.as_os_str().as_bytes()));
+    // `os.path.relpath`: both sides normalized, `..` for what's left of the
+    // library directory after the common part, then the rest of the path.
+    // The names keep their case (`normcase` only decided the comparison).
+    let comps = |p: &Path| -> Vec<Vec<u8>> {
+        p.components()
+            .map(|c| crate::osutil::os_bytes(c.as_os_str()).into_owned())
+            .collect()
+    };
+    let (np, nm) = (lexical_normpath(&p), lexical_normpath(music));
+    let (pn, mn) = (comps(&np), comps(&nm));
+    let (pf, mf) = (
+        crate::osutil::path_components_key(&np),
+        crate::osutil::path_components_key(&nm),
+    );
+    let common = pf.iter().zip(&mf).take_while(|(a, b)| a == b).count();
+    let mut parts: Vec<&[u8]> = vec![b".."; mn.len() - common];
+    parts.extend(pn[common..].iter().map(Vec::as_slice));
     if parts.is_empty() {
         b".".to_vec()
     } else {
@@ -164,14 +186,16 @@ pub fn to_db_path(path: &[u8], music_dir: Option<&Path>) -> Vec<u8> {
     }
 }
 
-/// beets' `expand_path_from_db`: a stored relative path is under the
-/// library directory.
+/// beets' `expand_path_from_db`: a stored relative path (with `/`
+/// separators) is under the library directory.
 pub fn from_db_path(path: Vec<u8>, music_dir: Option<&Path>) -> PathBuf {
+    let absolute = Path::new(&crate::osutil::os_string(&path)).is_absolute();
     match music_dir {
-        Some(m) if !path.is_empty() && !path.starts_with(b"/") => {
-            lexical_normpath(&m.join(std::ffi::OsStr::from_bytes(&path)))
+        Some(m) if !path.is_empty() && !absolute => {
+            let native = crate::osutil::db_path_to_native(path, cfg!(windows));
+            lexical_normpath(&m.join(crate::osutil::os_string_owned(native)))
         }
-        _ => PathBuf::from(std::ffi::OsString::from_vec(path)),
+        _ => PathBuf::from(crate::osutil::os_string_owned(path)),
     }
 }
 
@@ -189,7 +213,7 @@ impl Library {
             Value::Bool(b) => SqlValue::Integer(i64::from(*b)),
             Value::Path(p) if p.as_os_str().is_empty() => SqlValue::Null,
             Value::Path(p) => SqlValue::Blob(to_db_path(
-                p.as_os_str().as_bytes(),
+                &crate::osutil::path_bytes(p),
                 self.music_dir.as_deref(),
             )),
         }
@@ -1315,7 +1339,7 @@ impl Library {
     /// item on reimport), in one query per few hundred paths: beets' schema
     /// has no index on `path`, so each query reads the whole table.
     pub fn items_with_paths(&self, paths: &[&Path]) -> Result<Vec<Vec<Item>>> {
-        let key = |p: &Path| to_db_path(p.as_os_str().as_bytes(), self.music_dir.as_deref());
+        let key = |p: &Path| to_db_path(&crate::osutil::path_bytes(p), self.music_dir.as_deref());
         let mut found: HashMap<Vec<u8>, Vec<Item>> = HashMap::new();
         for chunk in paths.chunks(500) {
             let args: Vec<SqlValue> = chunk.iter().map(|p| SqlValue::Blob(key(p))).collect();
@@ -1344,7 +1368,7 @@ impl Library {
             Kind::Item,
             "WHERE path=?",
             &[SqlValue::Blob(to_db_path(
-                path.as_os_str().as_bytes(),
+                &crate::osutil::path_bytes(path),
                 self.music_dir.as_deref(),
             ))],
         )
@@ -1506,7 +1530,7 @@ impl Library {
         if path.is_empty() {
             return Ok(SqlValue::Blob(path));
         }
-        if !path.starts_with(b"/") && src_dir.is_none() {
+        if !Path::new(&crate::osutil::os_string(&path)).is_absolute() && src_dir.is_none() {
             bail!(
                 "the beets library stores paths relative to its directory (such as {:?}): \
                  pass --directory or --beets-config",
@@ -1515,7 +1539,7 @@ impl Library {
         }
         let abs = from_db_path(path, src_dir);
         Ok(SqlValue::Blob(to_db_path(
-            abs.as_os_str().as_bytes(),
+            &crate::osutil::path_bytes(&abs),
             self.music_dir.as_deref(),
         )))
     }
@@ -1715,12 +1739,32 @@ mod tests {
         // Bytes that aren't UTF-8 survive both ways.
         assert_eq!(to_db_path(b"/music/\xff.mp3", m), b"\xff.mp3");
         assert_eq!(
-            from_db_path(b"\xff.mp3".to_vec(), m).as_os_str().as_bytes(),
-            b"/music/\xff.mp3"
+            crate::osutil::path_bytes(&from_db_path(b"\xff.mp3".to_vec(), m)),
+            b"/music/\xff.mp3".as_slice()
         );
         assert_eq!(from_db_path(b"a/./b".to_vec(), m), Path::new("/music/a/b"));
         assert_eq!(from_db_path(b"/x/y".to_vec(), m), Path::new("/x/y"));
         assert_eq!(from_db_path(b"a".to_vec(), None), Path::new("a"));
+    }
+
+    /// The Windows form (`path_as_posix`, `os.path.normcase`).
+    #[cfg(windows)]
+    #[test]
+    fn db_paths_as_beets_windows() {
+        let m = Some(Path::new(r"C:\Music"));
+        assert_eq!(to_db_path(br"C:\Music\a\b.mp3", m), b"a/b.mp3");
+        // Case-insensitive directory check, but names keep their case.
+        assert_eq!(to_db_path(br"c:\music\AC_DC\x.mp3", m), b"AC_DC/x.mp3");
+        assert_eq!(to_db_path(br"C:\Music", m), b".");
+        assert_eq!(to_db_path(br"C:\Other\x.mp3", m), br"C:\Other\x.mp3");
+        assert_eq!(
+            from_db_path(b"a/b.mp3".to_vec(), m),
+            Path::new(r"C:\Music\a\b.mp3")
+        );
+        assert_eq!(
+            from_db_path(br"C:\Other\x.mp3".to_vec(), m),
+            Path::new(r"C:\Other\x.mp3")
+        );
     }
 
     #[test]

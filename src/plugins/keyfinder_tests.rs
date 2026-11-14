@@ -6,7 +6,6 @@ use crate::config::Config;
 use crate::library::Library;
 use crate::model::Item;
 use serde_yaml::Value as Y;
-use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use tempfile::TempDir;
 
@@ -21,7 +20,7 @@ fn program(dir: &Path, name: &str, key: &str, status: i32) -> PathBuf {
         ),
     )
     .unwrap();
-    std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o755)).unwrap();
+    crate::osutil::set_mode(&p, 0o755);
     p
 }
 

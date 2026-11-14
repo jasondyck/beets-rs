@@ -2,8 +2,12 @@
 
 use super::*;
 use crate::config::Config;
-use crate::events::{Arg, Event};
+#[cfg(unix)]
+use crate::events::Arg;
+use crate::events::Event;
+#[cfg(unix)]
 use crate::model::Item;
+#[cfg(unix)]
 use std::path::{Path, PathBuf};
 use tempfile::TempDir;
 
@@ -26,6 +30,7 @@ fn hook(event: &str, command: &str) -> String {
     )
 }
 
+#[cfg(unix)]
 fn send_path(event: &'static str, path: &Path) {
     crate::events::send(event, &[("path", Arg::Path(path))]);
 }
@@ -44,6 +49,7 @@ fn hook_empty_command() {
 }
 
 #[test]
+#[cfg(unix)]
 fn hook_non_zero_exit() {
     let (_d, cfg) = env(&hook("write", "sh -c \"exit 1\""));
     let (_p, lines) = crate::logging::capture(|| {
@@ -73,6 +79,7 @@ fn hook_non_existent_command() {
 
 /// The command for each event touches a path; both events run.
 #[test]
+#[cfg(unix)]
 fn hook_commands_run_per_event() {
     let (d, mut cfg) = env("");
     cfg.set(
@@ -92,6 +99,7 @@ fn hook_commands_run_per_event() {
 }
 
 #[test]
+#[cfg(unix)]
 fn hook_event_substitution() {
     let (d, mut cfg) = env("");
     cfg.set(
@@ -108,6 +116,7 @@ fn hook_event_substitution() {
 }
 
 #[test]
+#[cfg(unix)]
 fn hook_argument_substitution() {
     let (d, cfg) = env(&hook("after_write", "touch {path}"));
     let target = d.path().join("touched");
@@ -117,6 +126,7 @@ fn hook_argument_substitution() {
 }
 
 #[test]
+#[cfg(unix)]
 fn hook_bytes_interpolation() {
     let (d, cfg) = env(&hook("after_write", "touch '{path}'"));
     // A non-ASCII path, as a bytes kwarg in beets.
@@ -127,6 +137,7 @@ fn hook_bytes_interpolation() {
 }
 
 #[test]
+#[cfg(unix)]
 fn hook_item_and_task_arguments() {
     let (d, mut cfg) = env("");
     let out = d.path().join("titles");

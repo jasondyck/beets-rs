@@ -16,7 +16,6 @@ use rusqlite::types::Value as SqlValue;
 use std::cell::RefCell;
 use std::cmp::Ordering;
 use std::fmt;
-use std::os::unix::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
 use std::sync::LazyLock;
 use unicode_normalization::UnicodeNormalization;
@@ -158,7 +157,7 @@ impl PyVal {
             Value::Int(i) => PyVal::Int(i),
             Value::Float(f) => PyVal::Float(f),
             Value::Bool(b) => PyVal::Bool(b),
-            Value::Path(p) => PyVal::Bytes(p.as_os_str().as_bytes().to_vec()),
+            Value::Path(p) => PyVal::Bytes(crate::osutil::path_bytes(&p).to_vec()),
         }
     }
 
@@ -465,7 +464,7 @@ impl<'a> Obj<'a> {
                 "path" => {
                     return Some(PyVal::Bytes(
                         self.album_dir
-                            .map(|p| p.as_os_str().as_bytes().to_vec())
+                            .map(|p| crate::osutil::path_bytes(p).to_vec())
                             .unwrap_or_default(),
                     ));
                 }
@@ -853,10 +852,10 @@ impl FieldQuery {
             Test::In(paths) => match value {
                 Some(PyVal::Bytes(b)) => {
                     let p = crate::library::lexical_normpath(&PathBuf::from(
-                        std::ffi::OsStr::from_bytes(&b),
+                        crate::osutil::os_string(&b),
                     ));
-                    let p = p.as_os_str().as_bytes();
-                    paths.iter().any(|q| q.as_slice() == p)
+                    let p = crate::osutil::path_bytes(&p);
+                    paths.iter().any(|q| q.as_slice() == &*p)
                 }
                 _ => false,
             },
@@ -919,7 +918,7 @@ impl FieldQuery {
 
 /// Python's `os.path.normpath(os.path.abspath(os.path.expanduser(p)))`.
 pub fn normpath(p: &Path) -> PathBuf {
-    let p = if p.as_os_str().as_bytes().starts_with(b"~") {
+    let p = if crate::osutil::path_bytes(p).starts_with(b"~") {
         crate::config::expand_tilde(&p.to_string_lossy())
     } else {
         p.to_path_buf()
@@ -941,11 +940,11 @@ fn db_path(path: &[u8]) -> Vec<u8> {
 /// beets' `util.case_sensitive`: whether the filesystem holding `path` is
 /// case sensitive, judged from the nearest existing ancestor.
 pub fn case_sensitive(path: &Path) -> bool {
-    use std::os::unix::fs::MetadataExt;
     let mut path = path.to_path_buf();
     loop {
         let (Some(head), Some(tail)) = (path.parent(), path.file_name()) else {
-            return true;
+            // The root: Windows filesystems are case-insensitive by default.
+            return !cfg!(windows);
         };
         let head = head.to_path_buf();
         if !path.exists() {
@@ -959,10 +958,14 @@ pub fn case_sensitive(path: &Path) -> bool {
             continue;
         }
         let (u, l) = (head.join(&upper), head.join(&low));
-        let (Ok(um), Ok(lm)) = (std::fs::metadata(&u), std::fs::metadata(&l)) else {
+        if !u.exists() || !l.exists() {
             return true;
-        };
-        return (um.dev(), um.ino()) != (lm.dev(), lm.ino());
+        }
+        // Both case variants exist: are they the same file?
+        #[cfg(unix)]
+        return !crate::osutil::same_file(&u, &l);
+        #[cfg(not(unix))]
+        return false;
     }
 }
 
@@ -970,13 +973,15 @@ pub fn case_sensitive(path: &Path) -> bool {
 /// `/` and exists.
 pub fn is_path_query(part: &str) -> bool {
     let p = part.split(':').next().unwrap_or("");
-    p.contains('/') && normpath(Path::new(p)).exists()
+    // `os.sep` and `os.altsep`: Windows accepts both separators.
+    let sep = p.contains('/') || (cfg!(windows) && p.contains('\\'));
+    sep && normpath(Path::new(p)).exists()
 }
 
 fn path_test(pattern: &str) -> Test {
     let ctx = context();
     let mut p = PathBuf::from(pattern);
-    if !pattern.starts_with('/')
+    if !Path::new(pattern).is_absolute()
         && let Some(md) = &ctx.music_dir
     {
         p = md.join(pattern);
@@ -1403,7 +1408,7 @@ fn field_query(kind: Kind, field: &str, pattern: &str, class: Class) -> Result<P
 }
 
 fn db_path_of(p: &Path) -> Vec<u8> {
-    db_path(p.as_os_str().as_bytes())
+    db_path(&crate::osutil::path_bytes(p))
 }
 
 /// beets' `util.str2bool`.

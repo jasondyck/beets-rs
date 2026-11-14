@@ -4,7 +4,6 @@
 use super::*;
 use crate::config::Config;
 use crate::model::Item;
-use std::os::unix::fs::PermissionsExt;
 
 fn fake_ipfs(dir: &Path) -> PathBuf {
     let p = dir.join("ipfs");
@@ -13,7 +12,7 @@ fn fake_ipfs(dir: &Path) -> PathBuf {
         "#!/bin/sh\nif [ \"$1\" = add ]; then\n  echo QmItemOne\n  echo QmItemTwo\n  echo QmAlbumHash\nfi\nif [ \"$1\" = get ]; then\n  mkdir -p \"$2\"\n  echo audio > \"$2/download.mp3\"\nfi\n",
     )
     .unwrap();
-    std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o755)).unwrap();
+    crate::osutil::set_mode(&p, 0o755);
     p
 }
 

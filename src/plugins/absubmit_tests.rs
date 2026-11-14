@@ -8,7 +8,6 @@ use crate::library::Library;
 use crate::model::Item;
 use crate::plugins::requests::testserver::{Reply, serve};
 use serde_yaml::Value as Y;
-use std::os::unix::fs::PermissionsExt;
 use tempfile::TempDir;
 
 #[test]
@@ -32,7 +31,7 @@ fn extractor(dir: &Path, json: &str) -> PathBuf {
         format!("#!/bin/sh\nprintf '%s' '{json}' > \"$2\"\n"),
     )
     .unwrap();
-    std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o755)).unwrap();
+    crate::osutil::set_mode(&p, 0o755);
     p
 }
 
@@ -40,7 +39,7 @@ fn extractor(dir: &Path, json: &str) -> PathBuf {
 fn failing_extractor(dir: &Path) -> PathBuf {
     let p = dir.join("failing_extractor");
     std::fs::write(&p, "#!/bin/sh\nexit 2\n").unwrap();
-    std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o755)).unwrap();
+    crate::osutil::set_mode(&p, 0o755);
     p
 }
 
