@@ -735,7 +735,10 @@ mod tests {
 
     #[test]
     fn normpath_is_absolute_and_normal() {
-        assert_eq!(normpath(Path::new("/a/./b/../c")), PathBuf::from("/a/c"));
+        assert_eq!(
+            normpath(Path::new("/a/./b/../c")),
+            crate::query::normpath(Path::new("/a/c"))
+        );
         assert!(normpath(Path::new("x")).is_absolute());
     }
 

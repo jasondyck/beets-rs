@@ -603,7 +603,9 @@ impl Migrator<'_> {
                 SqlValue::Text(s) => Some((id, s.into_bytes())),
                 _ => None,
             })
-            .filter(|(_, p)| p.starts_with(b"/"))
+            // beets' `os.path.isabs` (on Windows a drive prefix is needed;
+            // `/x` is not absolute there).
+            .filter(|(_, p)| Path::new(&crate::osutil::os_string(p)).is_absolute())
             .collect();
         if todo.is_empty() {
             return Ok(());

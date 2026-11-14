@@ -378,7 +378,9 @@ fn changed_items_are_moved_in_the_library() {
     assert_eq!(
         new,
         music_dir
-            .join("Non-Album/Supersillyus/Mirage a Trois.mp3")
+            .join("Non-Album")
+            .join("Supersillyus")
+            .join("Mirage a Trois.mp3")
             .display()
             .to_string()
     );

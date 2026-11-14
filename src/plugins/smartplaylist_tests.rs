@@ -259,7 +259,7 @@ fn get_item_uri() {
 #[test]
 fn playlist_writes_native_paths() {
     let env = Env::new("[{name: all.m3u, query: ''}]");
-    let path = env.dir.path().join("music/A b.mp3");
+    let path = env.dir.path().join("music").join("A b.mp3");
     env.add(path.to_string_lossy().as_ref(), &[("title", "A b")]);
     env.run(&CmdOpts::default()).0.unwrap();
     assert_eq!(

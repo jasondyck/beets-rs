@@ -140,7 +140,9 @@ fn beets_directory(config: &Path) -> Result<PathBuf> {
         Some(_) => bail!("{}: directory must be a filename", config.display()),
     };
     let dir = expand_tilde(&dir);
-    let dir = if dir.is_absolute() {
+    // `os.path.isabs`: a rooted path without a drive (`/m/...`) counts as
+    // absolute on Windows too (`Path::is_absolute` would not).
+    let dir = if dir.has_root() {
         dir
     } else {
         std::path::absolute(config)?

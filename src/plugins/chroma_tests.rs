@@ -133,7 +133,7 @@ fn search_env() -> Env {
         ("TEST_TITLE_2", FINGERPRINT_2),
     ] {
         env.add(
-            &env.dir.path().join("music/file"),
+            &env.dir.path().join("music").join("file"),
             &[
                 ("length", "30"),
                 ("title", title),
@@ -203,7 +203,7 @@ fn chroma_search_options() {
         out,
         [format!(
             "[100.0%] {}",
-            env.dir.path().join("music/file").display()
+            env.dir.path().join("music").join("file").display()
         )]
     );
 }

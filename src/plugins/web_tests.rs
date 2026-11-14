@@ -67,7 +67,7 @@ impl Env {
         a1.set_str("album", "album");
         a1.set_str("albumtest", "xyz");
         lib.add(&mut a1).unwrap();
-        let path4 = music.join("somewhere2/art_path_2");
+        let path4 = music.join("somewhere2").join("art_path_2");
         let mut a2 = Album::new_album();
         a2.set_str("album", "other album");
         a2.set("artpath", Value::Path(path4.clone()));

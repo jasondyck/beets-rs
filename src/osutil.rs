@@ -156,11 +156,12 @@ pub fn fold_case(b: Vec<u8>) -> Vec<u8> {
 
 #[cfg(not(unix))]
 pub fn fold_case(b: Vec<u8>) -> Vec<u8> {
+    // `ntpath.normcase`: lower-case, with `/` as `\` (so a component that
+    // is a root separator compares equal either way).
+    let lower = |s: &str| s.replace('/', "\\").to_lowercase().into_bytes();
     match String::from_utf8(b) {
-        Ok(s) => s.to_lowercase().into_bytes(),
-        Err(e) => String::from_utf8_lossy(e.as_bytes())
-            .to_lowercase()
-            .into_bytes(),
+        Ok(s) => lower(&s),
+        Err(e) => lower(&String::from_utf8_lossy(e.as_bytes())),
     }
 }
 
