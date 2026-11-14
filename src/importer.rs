@@ -3994,7 +3994,12 @@ mod tests {
                 assert!(p.starts_with(cfg.directory()), "{}", p.display());
                 assert_eq!(is_symlink(p), op == FileOp::Link, "{op:?}");
                 if op == FileOp::Link {
-                    assert!(std::fs::read_link(p).unwrap().starts_with(&dir));
+                    // beets links to `syspath` (the `\\?\` form on Windows).
+                    assert!(
+                        std::fs::read_link(p)
+                            .unwrap()
+                            .starts_with(crate::osutil::syspath(&dir))
+                    );
                 }
                 #[cfg(unix)]
                 if op == FileOp::Hardlink {

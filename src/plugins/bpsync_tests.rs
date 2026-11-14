@@ -351,6 +351,7 @@ fn a_release_not_found_is_logged() {
 fn changed_items_are_moved_in_the_library() {
     let env = Env::new();
     let music = env.cfg.str("directory");
+    let music_dir = std::path::Path::new(&music);
     std::fs::create_dir_all(&music).unwrap();
     let old = format!("{music}/old.mp3");
     std::fs::write(&old, b"").unwrap();
@@ -374,7 +375,13 @@ fn changed_items_are_moved_in_the_library() {
         .0
         .unwrap();
     let new = env.reload(&it).path().display().to_string();
-    assert_eq!(new, format!("{music}/Non-Album/Supersillyus/Mirage a Trois.mp3"));
+    assert_eq!(
+        new,
+        music_dir
+            .join("Non-Album/Supersillyus/Mirage a Trois.mp3")
+            .display()
+            .to_string()
+    );
     assert!(std::path::Path::new(&new).exists(), "{new}");
     assert!(!std::path::Path::new(&old).exists());
 }

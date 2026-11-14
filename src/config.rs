@@ -909,7 +909,9 @@ mod tests {
             let out = c.dump(full, true);
             assert_eq!(out.lines().next(), Some("importfeeds:"), "{out}");
             let lines: Vec<&str> = out.lines().collect();
-            assert!(lines.contains(&"    relative_to: /srv/music"), "{out}");
+            let directory = c.directory().display().to_string();
+            let expected = format!("    relative_to: {directory}");
+            assert!(lines.contains(&expected.as_str()), "{out}");
             let keys: Vec<&str> = lines
                 .iter()
                 .skip(1)
@@ -950,7 +952,10 @@ mod tests {
         )
         .unwrap();
         let c = Config::load_file(&file).unwrap();
-        assert_eq!(c.directory(), PathBuf::from("/srv/music"));
+        assert_eq!(
+            c.directory(),
+            crate::query::normpath(Path::new("/srv/music"))
+        );
         assert!(c.bool("import.move"));
         assert!(c.bool("import.copy"));
         let paths = c.mapping("paths");

@@ -70,6 +70,8 @@ fn loads_an_extension_when_the_library_opens() {
     assert!(lines.is_empty(), "{lines:?}");
 }
 
+// SQLite appends ".so" on Unix; Windows needs the full ".dll" path.
+#[cfg(unix)]
 #[test]
 fn a_path_without_the_suffix_is_resolved_by_sqlite() {
     let dir = tempfile::tempdir().unwrap();

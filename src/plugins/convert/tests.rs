@@ -672,7 +672,10 @@ fn link_and_hardlink_untranscoded() {
         },
     );
     let out = e.dest().join("converted.ogg");
-    assert_eq!(std::fs::read_link(&out).unwrap(), e.item().path());
+    assert_eq!(
+        std::fs::read_link(&out).unwrap(),
+        crate::osutil::syspath(e.item().path())
+    );
     std::fs::remove_file(&out).unwrap();
     // -H overrides -l.
     e.run(

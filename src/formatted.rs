@@ -576,8 +576,8 @@ impl<'a> Formatted<'a> {
     }
 
     /// beets' `_get_formatted` for paths: a drive-like `X:` prefix gets
-    /// `drive_sep_replace` for its colons, and `/` becomes
-    /// `path_sep_replace`.
+    /// `drive_sep_replace` for its colons, and every separator (`os.sep`
+    /// and `os.altsep`) becomes `path_sep_replace`.
     fn path_value(&self, v: String) -> String {
         let b = v.as_bytes();
         let v = if b.len() >= 2 && b[0].is_ascii_alphabetic() && b[1] == b':' {
@@ -595,7 +595,15 @@ impl<'a> Formatted<'a> {
         } else {
             v
         };
-        v.replace('/', &self.env.path_sep_replace)
+        let flavor = crate::osutil::Flavor::NATIVE;
+        let mut v = v;
+        for sep in std::iter::once(Some(flavor.sep))
+            .chain(std::iter::once(flavor.alt_sep))
+            .flatten()
+        {
+            v = v.replace(sep, &self.env.path_sep_replace);
+        }
+        v
     }
 
     fn get_raw(&self, key: &str) -> Option<String> {
@@ -964,9 +972,12 @@ mod tests {
             "320kbps 44kHz 62:05 03/01 0999 MP3 1234 7"
         );
         assert_eq!(render("$singleton $album_id", &it, None, false), "True ");
+        // The drive's colon and every separator become replace characters.
         assert_eq!(
             render("$path", &it, None, true),
-            p.to_string_lossy().replace('/', "_")
+            p.to_string_lossy()
+                .replace(':', "_")
+                .replace(['/', '\\'], "_")
         );
     }
 
@@ -1021,13 +1032,16 @@ mod tests {
     #[test]
     fn sanitize() {
         let env = FormatEnv::defaults();
-        assert_eq!(env.sanitize_path("a//b/.c./d ", true), "a/b/_c_/d");
+        // The rules are the same on every platform: use Unix's path syntax.
+        let unix = crate::osutil::Flavor::UNIX;
+        let san = |env: &FormatEnv, p: &str| env.sanitize_path_of(p, true, unix);
+        assert_eq!(san(&env, "a//b/.c./d "), "a/b/_c_/d");
         // A leading empty component becomes `_` with the default rules.
-        assert_eq!(env.sanitize_path("/a/b", true), "_/a/b");
-        assert_eq!(env.sanitize_path("a/-b?", true), "a/_b_");
+        assert_eq!(san(&env, "/a/b"), "_/a/b");
+        assert_eq!(san(&env, "a/-b?"), "a/_b_");
         let mut env = env;
         env.empty_component_replace = Some("_".into());
-        assert_eq!(env.sanitize_path("/a//b/", true), "_/a/_/b/_");
+        assert_eq!(san(&env, "/a//b/"), "_/a/_/b/_");
         assert_eq!(python_repl(r"\1$x\g<n>"), "${1}$$x${n}");
     }
 

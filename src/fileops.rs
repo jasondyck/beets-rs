@@ -353,7 +353,12 @@ mod tests {
         let sym = d.path().join("a/sym.mp3");
         transfer(FileOp::Link, &src, &sym).unwrap();
         assert!(sym.symlink_metadata().unwrap().file_type().is_symlink());
-        assert_eq!(std::fs::read_link(&sym).unwrap(), src);
+        // beets' `util.link` links to `syspath(path)` (the `\\?\` form on
+        // Windows).
+        assert_eq!(
+            std::fs::read_link(&sym).unwrap(),
+            crate::osutil::syspath(&src)
+        );
 
         // A hard link through the symlink links the real file.
         let hard = d.path().join("b/hard.mp3");

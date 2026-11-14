@@ -19,7 +19,8 @@ fn m3u_multi_uses_the_album_name() {
     let file = std::fs::read_dir(&feeds).unwrap().next().unwrap().unwrap();
     let name = file.file_name().to_string_lossy().into_owned();
     assert!(name.ends_with("_album_name.m3u"), "{name}");
-    assert!(std::fs::read_to_string(file.path()).unwrap().contains("music/a.mp3"));
+    let text = std::fs::read_to_string(file.path()).unwrap().replace('\\', "/");
+    assert!(text.contains("music/a.mp3"), "{text}");
 }
 
 #[test]
@@ -34,7 +35,7 @@ fn relative_and_absolute_paths() {
     item.set("path", Value::Path(feeds.join("sub/a.mp3")));
     p.record("x", std::slice::from_ref(&item)).unwrap();
     let text = std::fs::read_to_string(feeds.join("imported.m3u")).unwrap();
-    assert_eq!(text.trim(), "sub/a.mp3");
+    assert_eq!(text.trim().replace('\\', "/"), "sub/a.mp3");
 }
 
 #[test]

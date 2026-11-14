@@ -11,6 +11,16 @@ use serde_yaml::Value as Y;
 use std::path::{Path, PathBuf};
 use tempfile::TempDir;
 
+/// Whether the tests can generate their input (as other ffmpeg-based tests).
+fn ffmpeg_ok() -> bool {
+    std::process::Command::new("ffmpeg")
+        .arg("-version")
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .is_ok_and(|s| s.success())
+}
+
 /// A click track: a 1 kHz beep for 40 ms every `period` seconds.
 fn click_track(dir: &Path, name: &str, bpm: f64) -> PathBuf {
     let period = 60.0 / bpm;
@@ -35,6 +45,10 @@ fn measured(path: &Path) -> f64 {
 
 #[test]
 fn measures_steady_tempi_like_librosa() {
+    if !ffmpeg_ok() {
+        eprintln!("no ffmpeg: skipping");
+        return;
+    }
     let dir = tempfile::tempdir().unwrap();
     // librosa 1.0.1's own estimates for these click tracks.
     for (bpm, expected) in [(90.0, 89), (100.0, 99), (120.0, 117), (150.0, 152)] {
@@ -104,8 +118,13 @@ fn rounds_like_python() {
 fn a_missing_file_is_an_error() {
     let err = librosa::load(Path::new("/nonexistent/file.mp3"))
         .unwrap_err()
-        .to_string();
-    assert!(err.contains("No such file"), "{err}");
+        .to_string()
+        .to_lowercase();
+    // Python's OSError text on Unix, Rust's on Windows.
+    assert!(
+        err.contains("no such file") || err.contains("cannot find"),
+        "{err}"
+    );
 }
 
 struct Env {
@@ -148,6 +167,10 @@ fn run(env: &Env, items: &mut [Item], force: bool, quiet: bool) -> Result<()> {
 
 #[test]
 fn sets_the_bpm() {
+    if !ffmpeg_ok() {
+        eprintln!("no ffmpeg: skipping");
+        return;
+    }
     let dir = tempfile::tempdir().unwrap();
     let path = click_track(dir.path(), "120.wav", 120.0);
     let env = env();
@@ -160,6 +183,10 @@ fn sets_the_bpm() {
 
 #[test]
 fn keeps_an_existing_bpm_unless_forced() {
+    if !ffmpeg_ok() {
+        eprintln!("no ffmpeg: skipping");
+        return;
+    }
     let dir = tempfile::tempdir().unwrap();
     let path = click_track(dir.path(), "120.wav", 120.0);
     let env = env();
@@ -190,6 +217,10 @@ fn a_missing_file_is_logged_and_skipped() {
 
 #[test]
 fn the_command_honours_the_limit() {
+    if !ffmpeg_ok() {
+        eprintln!("no ffmpeg: skipping");
+        return;
+    }
     let dir = tempfile::tempdir().unwrap();
     let a = click_track(dir.path(), "a.wav", 120.0);
     let b = click_track(dir.path(), "b.wav", 120.0);

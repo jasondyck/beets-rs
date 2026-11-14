@@ -104,9 +104,11 @@ pub fn syspath_of(p: &Path, windows: bool) -> PathBuf {
     if !windows {
         return p.to_path_buf();
     }
-    let s = p.to_string_lossy();
+    // Separators are `/` in library paths (beets' internal bytestrings) and
+    // in templates; a verbatim (`\\?\`) path must not contain any.
+    let s = p.to_string_lossy().replace('/', "\\");
     if s.starts_with(MAGIC_PREFIX) {
-        return p.to_path_buf();
+        return s.into();
     }
     let s = if s.starts_with(r"\\") {
         format!("{MAGIC_PREFIX}UNC{}", &s[1..])
@@ -438,8 +440,14 @@ mod tests {
             win(r"\\server\share\x"),
             PathBuf::from(r"\\?\UNC\server\share\x")
         );
-        // An already-prefixed path is left alone.
+        // An already-prefixed path keeps its prefix.
         assert_eq!(win(r"\\?\C:\a"), PathBuf::from(r"\\?\C:\a"));
+        // Library paths use `/`; a verbatim path must use `\` only.
+        assert_eq!(win("C:/a/b"), PathBuf::from(r"\\?\C:\a\b"));
+        assert_eq!(
+            win("//server/share/x"),
+            PathBuf::from(r"\\?\UNC\server\share\x")
+        );
     }
 
     #[test]

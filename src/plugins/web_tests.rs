@@ -10,7 +10,10 @@ use tempfile::TempDir;
 
 /// beets' `_common.RSRC / "full.mp3"` (title "full").
 fn rsrc_full_mp3() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/web/full.mp3")
+    // `CARGO_MANIFEST_DIR` can use `/` on Windows; the tests compare paths
+    // with the OS's separators.
+    let p = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/web/full.mp3");
+    p.components().collect()
 }
 
 struct Env {
@@ -33,7 +36,7 @@ impl Env {
         cfg.set("plugins", serde_yaml::from_str("[web]").unwrap());
         crate::query::configure(&cfg);
         let lib = Library::open_with(&dir.path().join("l.db"), Some(&music), false).unwrap();
-        let item = |title: &str, path: &str, album_id: i64, flex: &[(&str, &str)]| {
+        let item = |title: &str, path: &Path, album_id: i64, flex: &[(&str, &str)]| {
             let mut i = Item::new_item();
             i.set_str("title", title);
             i.set_path(path);
@@ -43,23 +46,28 @@ impl Env {
             }
             i
         };
-        let path1 = PathBuf::from("/path_1");
-        let mut i1 = item("title", "/path_1", 2, &[("artist", "AAA Singers")]);
+        let path1 = music.join("path_1");
+        let mut i1 = item("title", &path1, 2, &[("artist", "AAA Singers")]);
         lib.add(&mut i1).unwrap();
         let mut i2 = item(
             "another title",
-            "/somewhere/a",
+            &music.join("somewhere/a"),
             0,
             &[("artist", "AAA Singers")],
         );
         lib.add(&mut i2).unwrap();
-        let mut i3 = item("and a third", "/somewhere/abc", 2, &[("testattr", "ABC")]);
+        let mut i3 = item(
+            "and a third",
+            &music.join("somewhere/abc"),
+            2,
+            &[("testattr", "ABC")],
+        );
         lib.add(&mut i3).unwrap();
         let mut a1 = Album::new_album();
         a1.set_str("album", "album");
         a1.set_str("albumtest", "xyz");
         lib.add(&mut a1).unwrap();
-        let path4 = PathBuf::from("/somewhere2/art_path_2");
+        let path4 = music.join("somewhere2/art_path_2");
         let mut a2 = Album::new_album();
         a2.set_str("album", "other album");
         a2.set("artpath", Value::Path(path4.clone()));
@@ -306,7 +314,10 @@ fn query_item_regex_backslash() {
 fn query_item_path() {
     // Path queries match from the root to a directory or file, so this is
     // one item; separators in the query are `\`.
-    let (status, j) = Env::new().get_json("/item/query/path:\\somewhere\\a");
+    let env = Env::new();
+    let item_path = env.cfg.directory().join("somewhere/a");
+    let q = item_path.display().to_string().replace('/', "\\");
+    let (status, j) = env.get_json(&format!("/item/query/path:{q}"));
     assert_eq!(status, 200);
     assert_eq!(j["results"].as_array().unwrap().len(), 1);
     assert_eq!(j["results"][0]["title"], json!("another title"));
@@ -762,7 +773,8 @@ fn item_json_has_typed_values_album_fields_and_size() {
     assert_eq!(j["initial_key"], J::Null);
     // The album's fields the item lacks (beets' `Item.keys()`), its art
     // path as base64 bytes, as `_rep` leaves it.
-    assert_eq!(j["artpath"], json!("L3NvbWV3aGVyZTIvYXJ0X3BhdGhfMg=="));
+    let art = env.path4.display().to_string();
+    assert_eq!(j["artpath"], json!(b64encode(art.as_bytes())));
     assert_eq!(j["size"], json!(0));
     // A singleton: no album, so a null `album_id` and no album fields.
     let (_, j) = env.get_json("/item/2");
@@ -906,6 +918,8 @@ fn deleting_an_album_removes_its_items() {
     assert_eq!(env.lib.counts().unwrap(), (1, 1));
 }
 
+// The names include `"`, which Windows file names cannot hold.
+#[cfg(unix)]
 #[test]
 fn file_names_and_ranges() {
     let env = Env::new();

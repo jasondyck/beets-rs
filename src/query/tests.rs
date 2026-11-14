@@ -536,10 +536,12 @@ fn related_queries_as_beets() {
 
 // ------------------------------------------------------------- path queries
 
+#[cfg(unix)]
 fn path_lib() -> Library {
     path_lib_in(Library::in_memory().unwrap())
 }
 
+#[cfg(unix)]
 fn path_lib_in(lib: Library) -> Library {
     for (p, t) in [
         ("/aaa/bb/c.mp3", "path item"),
@@ -554,7 +556,30 @@ fn path_lib_in(lib: Library) -> Library {
     lib
 }
 
+/// Windows: `path:` queries are case-insensitive and compare the stored,
+/// `/`-separated relative form.
+#[cfg(windows)]
 #[test]
+fn path_queries_are_case_insensitive_on_windows() {
+    let d = tempfile::tempdir().unwrap();
+    let music = d.path().join("lib");
+    std::fs::create_dir_all(music.join("Caps")).unwrap();
+    set_ctx(Some(&music), true);
+    let lib = Library::in_memory_at(&music).unwrap();
+    lib.add(&mut item(&[
+        ("path", music.join("Caps/Song.mp3").to_str().unwrap()),
+        ("title", "caps"),
+    ]))
+    .unwrap();
+    assert_eq!(titles(&lib, "path:caps/song.mp3"), set(&["caps"]));
+    assert_eq!(titles(&lib, "path:relative"), set(&[]));
+    // A drive letter makes an absolute path an implicit field, as beets.
+    let abs = music.join("Caps/Song.mp3").display().to_string();
+    assert!(!is_path_query(&abs));
+}
+
+#[test]
+#[cfg(unix)]
 fn explicit_path_queries_as_beets() {
     set_ctx(None, true);
     let lib = path_lib();
@@ -595,6 +620,7 @@ fn explicit_path_queries_as_beets() {
 }
 
 #[test]
+#[cfg(unix)]
 fn path_queries_are_relative_to_the_library_and_follow_case_sensitivity() {
     let d = tempfile::tempdir().unwrap();
     let music = d.path().join("lib");
@@ -642,6 +668,7 @@ fn path_queries_are_relative_to_the_library_and_follow_case_sensitivity() {
 }
 
 #[test]
+#[cfg(unix)]
 fn case_sensitivity_is_read_from_the_filesystem() {
     let d = tempfile::tempdir().unwrap();
     std::fs::create_dir(d.path().join("Mixed")).unwrap();
@@ -651,6 +678,7 @@ fn case_sensitivity_is_read_from_the_filesystem() {
 }
 
 #[test]
+#[cfg(unix)]
 fn implicit_path_queries_as_beets() {
     let d = tempfile::tempdir().unwrap();
     std::fs::create_dir_all(d.path().join("foo/bar")).unwrap();

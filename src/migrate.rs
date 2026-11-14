@@ -306,6 +306,8 @@ mod tests {
         let db = e.d.path().join("old.db");
         let music = e.cfg.directory();
         let m = music.display();
+        let outside = e.d.path().join("elsewhere");
+        let elsewhere = outside.display();
         Connection::open(&db)
             .unwrap()
             .execute_batch(&format!(
@@ -319,7 +321,7 @@ mod tests {
                  INSERT INTO albums VALUES (4, 'Al', CAST('{m}/Al/cover.jpg' AS BLOB), 'Rock, Pop');
                  INSERT INTO items VALUES
                      (7, '{m}/Al/1.mp3', 4, 'One', 'Rock, Pop', 'la\n\nSource: https://genius.com/x', 1.5),
-                     (9, CAST('/elsewhere/2.mp3' AS BLOB), NULL, 'Two', '', '', 2.5);
+                     (9, '{elsewhere}/2.mp3', NULL, 'Two', '', '', 2.5);
                  INSERT INTO item_attributes (entity_id, key, value) VALUES
                      (7, 'artpath', '/x.jpg'), (7, 'mood', 'calm'), (8, 'gone', 'x');"
             ))
@@ -337,7 +339,7 @@ mod tests {
         assert_eq!(one.str("mood"), "calm");
         assert!(!one.flex.contains_key("artpath"));
         let two = its.iter().find(|i| i.id == Some(9)).unwrap();
-        assert_eq!(two.path(), Path::new("/elsewhere/2.mp3"));
+        assert_eq!(two.path(), outside.join("2.mp3"));
         let al = e.lib.get_album(4).unwrap().unwrap();
         assert_eq!(al.list("genres"), ["Rock", "Pop"]);
         assert_eq!(al.path_field("artpath"), music.join("Al/cover.jpg"));
@@ -377,7 +379,10 @@ mod tests {
         std::fs::write(&c, "directory: music\nlibrary: x.db\n").unwrap();
         assert_eq!(beets_directory(&c).unwrap(), d.path().join("music"));
         std::fs::write(&c, "directory: /m/../music/\n").unwrap();
-        assert_eq!(beets_directory(&c).unwrap(), Path::new("/music"));
+        assert_eq!(
+            beets_directory(&c).unwrap(),
+            crate::query::normpath(Path::new("/music"))
+        );
         std::fs::write(&c, "plugins: []\n").unwrap();
         assert_eq!(
             beets_directory(&c).unwrap(),

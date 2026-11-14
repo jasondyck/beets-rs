@@ -346,16 +346,29 @@ mod tests {
         it
     }
 
+    /// The destinations are compared with `/` separators and without the
+    /// drive a Windows cwd adds to a rooted `/lib` (the config directory is
+    /// normalized to an absolute path).
+    fn posix(s: &str) -> String {
+        let s = s.replace('\\', "/");
+        let b = s.as_bytes();
+        if b.len() > 2 && b[1] == b':' && b[0].is_ascii_alphabetic() {
+            s[2..].to_string()
+        } else {
+            s
+        }
+    }
+
     fn dest(f: &PathFormatter, it: &Item) -> String {
-        f.destination(it, None, None).to_string_lossy().into_owned()
+        posix(&f.destination(it, None, None).to_string_lossy())
     }
 
     #[test]
     fn default_path() {
         let p = fmt("").destination(&item(), None, None);
         assert_eq!(
-            p,
-            PathBuf::from("/lib/AC_DC/Back in Black/01 Hells Bells_.mp3")
+            posix(&p.to_string_lossy()),
+            "/lib/AC_DC/Back in Black/01 Hells Bells_.mp3"
         );
     }
 
@@ -495,7 +508,7 @@ mod tests {
             ("ab🎹/a.ext", "ab/a.ext"),
             ("f.a.e", "f.a.e"),
         ] {
-            assert_eq!(truncate_path(path, 5), want);
+            assert_eq!(posix(&truncate_path(path, 5)), want);
         }
     }
 
@@ -609,10 +622,7 @@ mod tests {
     }
 
     fn at(t: &str, it: &Item, lib: Option<&Library>) -> String {
-        let p = base(t)
-            .destination(it, None, lib)
-            .to_string_lossy()
-            .into_owned();
+        let p = posix(&base(t).destination(it, None, lib).to_string_lossy());
         p.strip_suffix(".mp3").unwrap_or(&p).to_string()
     }
 

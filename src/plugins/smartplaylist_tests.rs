@@ -6,6 +6,7 @@
 //! fires (see the module docs), and it isn't wired up here.
 
 use super::*;
+#[cfg(unix)]
 use crate::model::Value;
 use tempfile::TempDir;
 
@@ -35,6 +36,7 @@ impl Env {
         Env { dir, cfg, lib }
     }
 
+    #[cfg(unix)]
     fn set(&mut self, key: &str, yaml: &str) {
         self.cfg.set(
             &format!("smartplaylist.{key}"),
@@ -149,6 +151,7 @@ fn build_queries_with_sorts() {
 }
 
 #[test]
+#[cfg(unix)]
 fn playlist_update() {
     let env = Env::new("[{name: '$title-my<playlist>.m3u', query: ''}]");
     env.add("/tagada.mp3", &[("title", "ta:ga:da")]);
@@ -161,6 +164,7 @@ fn playlist_update() {
 }
 
 #[test]
+#[cfg(unix)]
 fn playlist_update_output_extm3u() {
     let mut env = Env::new("[{name: '$title-my<playlist>.m3u', query: ''}]");
     env.set("output", "extm3u");
@@ -179,6 +183,7 @@ fn playlist_update_output_extm3u() {
 }
 
 #[test]
+#[cfg(unix)]
 fn playlist_update_output_extm3u_fields() {
     let mut env = Env::new("[{name: 'my.m3u', query: ''}]");
     env.set("output", "extm3u");
@@ -223,6 +228,7 @@ fn get_playlist_items_test() {
 }
 
 #[test]
+#[cfg(unix)]
 fn get_item_uri() {
     let mut env = Env::new("[]");
     env.set("prefix", "http://beets:8337/files");
@@ -248,6 +254,20 @@ fn get_item_uri() {
     assert_eq!(uri(&env), "http://beets:8337/item/1/file");
 }
 
+/// Windows: the playlist holds the item's native path.
+#[cfg(windows)]
+#[test]
+fn playlist_writes_native_paths() {
+    let env = Env::new("[{name: all.m3u, query: ''}]");
+    let path = env.dir.path().join("music/A b.mp3");
+    env.add(path.to_string_lossy().as_ref(), &[("title", "A b")]);
+    env.run(&CmdOpts::default()).0.unwrap();
+    assert_eq!(
+        env.playlist("all.m3u").unwrap(),
+        format!("{}\n", path.display()).into_bytes()
+    );
+}
+
 /// `SmartPlaylistCLITest`'s setup.
 fn cli_env() -> (Env, Item) {
     let env = Env::new("[{name: my_playlist.m3u, query: 'the title'}, {name: all.m3u, query: ''}]");
@@ -259,6 +279,7 @@ fn cli_env() -> (Env, Item) {
 }
 
 #[test]
+#[cfg(unix)]
 fn splupdate() {
     let (env, it) = cli_env();
     let path = format!("{}\n", it.path().display()).into_bytes();
@@ -357,6 +378,7 @@ fn python_helpers() {
 }
 
 #[test]
+#[cfg(unix)]
 fn a_missing_field_stops_the_file_where_beets_does() {
     let mut env = Env::new("[{name: all.m3u, query: 'id+'}]");
     env.set("output", "extm3u");
@@ -372,6 +394,7 @@ fn a_missing_field_stops_the_file_where_beets_does() {
 }
 
 #[test]
+#[cfg(unix)]
 fn urlencode_and_relative_to() {
     let mut env = Env::new("[{name: all.m3u, query: ''}]");
     env.set("urlencode", "yes");

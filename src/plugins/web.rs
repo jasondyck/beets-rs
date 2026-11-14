@@ -1009,7 +1009,8 @@ impl App<'_> {
     /// `index.html`, with `url_for('static', ...)` filled in (Jinja drops
     /// the template's final newline).
     fn home(ctx: &Ctx) -> Response {
-        let mut html = INDEX_HTML.to_string();
+        // A Windows checkout can give the template CRLF line endings.
+        let mut html = INDEX_HTML.replace("\r\n", "\n");
         for (name, _) in STATIC_FILES {
             html = html.replace(
                 &format!("{{{{ url_for('static', filename='{name}') }}}}"),

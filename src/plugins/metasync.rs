@@ -139,14 +139,22 @@ impl Plist {
     }
 }
 
-fn normalise_itunes_path(raw: &str) -> String {
+fn normalise_itunes_path(raw: &str) -> PathBuf {
     let rest = raw.strip_prefix("file://").unwrap_or(raw);
     let rest = rest.strip_prefix("localhost/").map(|r| format!("/{r}")).unwrap_or(rest.to_string());
     let decoded = percent_decode(&rest);
     let trimmed = decoded.trim_start_matches('\\');
-    let mut path = PathBuf::from(trimmed);
-    path = crate::library::lexical_normpath(&path);
-    path.to_string_lossy().to_lowercase()
+    crate::library::lexical_normpath(&PathBuf::from(trimmed))
+}
+
+/// beets' iTunes key: the component-wise path (so `/` and `\` agree on
+/// Windows) with every component lower-cased (beets' `bytestring_path(...)
+/// .lower()`, on every platform).
+fn path_key(p: &Path) -> Vec<Vec<u8>> {
+    crate::osutil::path_components_key(p)
+        .into_iter()
+        .map(|c| String::from_utf8_lossy(&c).to_lowercase().into_bytes())
+        .collect()
 }
 
 fn percent_decode(s: &str) -> String {
@@ -168,7 +176,9 @@ fn percent_decode(s: &str) -> String {
 }
 
 pub(crate) struct Itunes {
-    collection: HashMap<String, Plist>,
+    /// The iTunes library's tracks, by lower-cased path components (beets
+    /// keys it by the lower-cased bytestring path).
+    collection: HashMap<Vec<Vec<u8>>, Plist>,
     log: PluginLog,
     format_item: String,
 }
@@ -212,7 +222,8 @@ impl Itunes {
         }) {
             for track in tracks.values() {
                 if let Some(loc) = track.get("Location").and_then(Plist::as_str) {
-                    collection.insert(normalise_itunes_path(loc), track.clone());
+                    let key = path_key(&normalise_itunes_path(loc));
+                    collection.insert(key, track.clone());
                 }
             }
         }
@@ -224,7 +235,7 @@ impl Itunes {
     }
 
     pub(crate) fn sync(&self, item: &mut Item) {
-        let key = item.path().to_string_lossy().to_lowercase();
+        let key = path_key(item.path());
         let Some(t) = self.collection.get(&key) else {
             // beets: "no iTunes match found for {}", item (format_item).
             let label = crate::commands::format_record(

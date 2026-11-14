@@ -457,7 +457,12 @@ fn apply_spec(s: &str, spec: &str) -> String {
 /// Python's `str(OSError)` for a failed `subprocess` start:
 /// `[Errno 2] No such file or directory: 'cmd'`.
 fn python_oserror(e: &std::io::Error, prog: &str) -> String {
-    match e.raw_os_error() {
+    // Windows' "program not found" has no errno: map it to ENOENT, as
+    // Python's `OSError` carries.
+    let raw = e
+        .raw_os_error()
+        .or_else(|| (e.kind() == std::io::ErrorKind::NotFound).then_some(2));
+    match raw {
         Some(n) => {
             let msg = std::io::Error::from_raw_os_error(n).to_string();
             let msg = msg.split(" (os error").next().unwrap_or(&msg).to_string();

@@ -1591,7 +1591,11 @@ pub fn now() -> f64 {
 pub(crate) fn make_beets_fixture(path: &Path) {
     Connection::open(path)
         .unwrap()
-        .execute_batch(include_str!("../tests/fixtures/beets-2.14-library.sql"))
+        // A Windows checkout can give the fixture CRLF line endings; the
+        // schema SQL is compared statement for statement.
+        .execute_batch(
+            &include_str!("../tests/fixtures/beets-2.14-library.sql").replace("\r\n", "\n"),
+        )
         .unwrap();
 }
 
@@ -1701,13 +1705,10 @@ mod tests {
             lib.add(&mut it).unwrap()
         };
         let a = add(music.join("a.mp3"));
-        let b1 = add(PathBuf::from("/out/b.mp3"));
-        let b2 = add(PathBuf::from("/out/b.mp3"));
-        let (pa, pb, pc) = (
-            music.join("a.mp3"),
-            PathBuf::from("/out/b.mp3"),
-            music.join("c.mp3"),
-        );
+        let out = d.path().join("out/b.mp3");
+        let b1 = add(out.clone());
+        let b2 = add(out.clone());
+        let (pa, pb, pc) = (music.join("a.mp3"), out, music.join("c.mp3"));
         let got = lib
             .items_with_paths(&[pb.as_path(), pc.as_path(), pa.as_path()])
             .unwrap();
@@ -1724,6 +1725,7 @@ mod tests {
         assert_eq!(got[1200].len(), 1);
     }
 
+    #[cfg(unix)]
     #[test]
     fn db_paths_as_beets() {
         let m = Some(Path::new("/music"));

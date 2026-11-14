@@ -133,7 +133,7 @@ fn search_env() -> Env {
         ("TEST_TITLE_2", FINGERPRINT_2),
     ] {
         env.add(
-            Path::new("/file"),
+            &env.dir.path().join("music/file"),
             &[
                 ("length", "30"),
                 ("title", title),
@@ -199,7 +199,13 @@ fn chroma_search_options() {
         ..Default::default()
     })
     .unwrap();
-    assert_eq!(out, ["[100.0%] /file"]);
+    assert_eq!(
+        out,
+        [format!(
+            "[100.0%] {}",
+            env.dir.path().join("music/file").display()
+        )]
+    );
 }
 
 #[test]

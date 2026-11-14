@@ -33,6 +33,31 @@ fn itunes_library_syncs_fields() {
     assert!(item.get("itunes_lastplayed").is_none());
 }
 
+/// beets lower-cases the key on every platform (`bytestring_path(...).lower()`),
+/// so a Location differing only in case still matches.
+#[test]
+fn itunes_paths_match_case_insensitively() {
+    let mut c = Config::defaults();
+    let fixture = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures/metasync/itunes_library_unix.xml");
+    c.set(
+        "metasync.itunes.library",
+        fixture.to_string_lossy().into_owned().into(),
+    );
+    c.set("plugins", serde_yaml::from_str("[metasync]").unwrap());
+    crate::plugins::types::configure(&c).unwrap();
+    let it = Itunes::new(&c).unwrap();
+    let mut item = Item::new_item();
+    // The fixture's Location is `/Music/Alt-J/An Awesome Wave/03 Tessellate.mp3`.
+    item.set(
+        "path",
+        Value::Path("/music/alt-j/an awesome wave/03 tessellate.mp3".into()),
+    );
+    it.sync(&mut item);
+    assert_eq!(item.get("itunes_rating"), Some(Value::Int(80)));
+    assert_eq!(item.get("itunes_skipcount"), Some(Value::Int(3)));
+}
+
 #[test]
 fn itunes_windows_paths_match() {
     let mut c = Config::defaults();

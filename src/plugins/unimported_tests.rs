@@ -25,7 +25,8 @@ fn make_file(libdir: &Path, rel: &str) -> PathBuf {
     let p = libdir.join(rel);
     std::fs::create_dir_all(p.parent().unwrap()).unwrap();
     std::fs::write(&p, b"").unwrap();
-    p
+    // `rel` uses `/`; the reported paths use the platform's separators.
+    p.components().collect()
 }
 
 fn add_item(lib: &Library, libdir: &Path) -> Item {
