@@ -71,14 +71,34 @@ fn itunes_windows_paths_match() {
     crate::plugins::types::configure(&c).unwrap();
     let it = Itunes::new(&c).unwrap();
     let mut item = Item::new_item();
-    // `file://localhost/G:/Music/...` is stored posix-style, lowercased.
+    // As beets' test: the Windows fixture's `file://localhost/G:/Music/...`
+    // Location is matched by a native path on Windows, the posix form
+    // elsewhere (beets strips the leading separator only when normpath
+    // makes one).
     item.set(
         "path",
-        Value::Path("/G:/Music/Alt-J/An Awesome Wave/03 Tessellate.mp3".into()),
+        Value::Path(if cfg!(windows) {
+            r"G:\Music\Alt-J\An Awesome Wave\03 Tessellate.mp3".into()
+        } else {
+            "/G:/Music/Alt-J/An Awesome Wave/03 Tessellate.mp3".into()
+        }),
     );
     it.sync(&mut item);
     assert_eq!(item.get("itunes_rating"), Some(Value::Int(80)));
     assert_eq!(item.get("itunes_skipcount"), Some(Value::Int(3)));
+}
+
+/// beets' `_norm_itunes_path` ends with `os.path.normpath(...).lstrip("\\")`:
+/// the URL path's leading separator before the drive is dropped.
+#[cfg(windows)]
+#[test]
+fn itunes_norm_path_strips_the_separator_before_the_drive() {
+    assert_eq!(
+        normalise_itunes_path(
+            "file://localhost/G:/Music/Alt-J/An%20Awesome%20Wave/03%20Tessellate.mp3"
+        ),
+        std::path::Path::new(r"G:\Music\Alt-J\An Awesome Wave\03 Tessellate.mp3")
+    );
 }
 
 // ---------------------------------------------------------------- amarok

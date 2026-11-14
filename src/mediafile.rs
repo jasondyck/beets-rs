@@ -1410,6 +1410,10 @@ fn unescape_paren(value: &str) -> &str {
 // -------------------------------------------------------------------- tags
 
 /// The file's tag of the kind MediaFile uses for its format.
+// The variants' sizes differ by target (the ID3 tag's layout makes this a
+// `large_enum_variant` on the Windows build); they are short-lived and used
+// in place, so boxing would only add allocations.
+#[allow(clippy::large_enum_variant)]
 enum Tags {
     Id3 {
         tag: Id3v2Tag,

@@ -144,7 +144,11 @@ fn normalise_itunes_path(raw: &str) -> PathBuf {
     let rest = rest.strip_prefix("localhost/").map(|r| format!("/{r}")).unwrap_or(rest.to_string());
     let decoded = percent_decode(&rest);
     let trimmed = decoded.trim_start_matches('\\');
-    crate::library::lexical_normpath(&PathBuf::from(trimmed))
+    let path = crate::library::lexical_normpath(&PathBuf::from(trimmed));
+    // beets' `os.path.normpath(...).lstrip("\\")`: on Windows the URL path
+    // has a leading separator before the drive (`/G:/Music` -> `G:\Music`).
+    let s = path.to_string_lossy();
+    PathBuf::from(s.trim_start_matches('\\'))
 }
 
 /// beets' iTunes key: the component-wise path (so `/` and `\` agree on
