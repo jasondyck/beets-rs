@@ -28,7 +28,7 @@ use lofty::id3::v2::{
 use lofty::mp4::{Atom, AtomData, AtomIdent, DataType, Ilst};
 use lofty::ogg::OggPictureStorage;
 use lofty::ogg::tag::VorbisComments;
-use lofty::picture::{Picture, PictureType};
+use lofty::picture::{MimeType, Picture, PictureType};
 use lofty::properties::FileProperties;
 use lofty::tag::{Accessor, ItemValue, TagExt};
 use std::borrow::Cow;
@@ -74,6 +74,8 @@ enum K {
     Mp4Sc(usize),
     // Vorbis comments and APEv2 (MediaFile's plain `StorageStyle`).
     Key(&'static str),
+    /// `ASFStorageStyle`: an ASF attribute name (`WM/AlbumTitle`, ...).
+    Asf(&'static str),
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -81,6 +83,7 @@ enum Family {
     Id3,
     Mp4,
     Plain,
+    Asf,
 }
 
 impl K {
@@ -98,6 +101,7 @@ impl K {
             | K::Id3Sc(_) => Family::Id3,
             K::Atom(_) | K::Tuple(..) | K::Mp4Bool(_) | K::Mp4Int(_) | K::Mp4Sc(_) => Family::Mp4,
             K::Key(_) => Family::Plain,
+            K::Asf(_) => Family::Asf,
         }
     }
 
@@ -675,6 +679,120 @@ const EXTRA_FIELDS: &[Field] = &[
     f("lyricist", Str, LYRICISTS),
     f("url", Str, &[s(Wxxx), s(Atom("\u{a9}url")), s(Key("URL"))]),
 ];
+
+/// MediaFile's ASF styles, by field name: the attribute names in the
+/// Windows Media (ASF) files, the read-only alternative names included.
+/// The five names of the Content Description Object (`Title`, `Author`,
+/// `Copyright`, `Description`, `Rating`) are stored in that object;
+/// every other attribute goes to the Extended Content Description
+/// Object, with a list's further values in the Metadata Library Object
+/// (see `asf.rs`).
+const ASF_STYLES: &[(&str, &[S])] = &[
+    ("acoustid_fingerprint", &[s(Asf("Acoustid/Fingerprint"))]),
+    ("acoustid_id", &[s(Asf("Acoustid/Id"))]),
+    ("album", &[s(Asf("WM/AlbumTitle"))]),
+    ("albumartist", &[s(Asf("WM/AlbumArtist"))]),
+    ("albumartist_credit", &[s(Asf("beets/Album Artist Credit"))]),
+    ("albumartist_sort", &[s(Asf("WM/AlbumArtistSortOrder"))]),
+    ("albumartists", &[s(Asf("WM/AlbumArtists"))]),
+    ("albumartists_credit", &[s(Asf("beets/AlbumArtistsCredit"))]),
+    ("albumartists_sort", &[s(Asf("beets/AlbumArtistsSort"))]),
+    ("albumdisambig", &[s(Asf("MusicBrainz/Album Comment"))]),
+    ("albumstatus", &[s(Asf("MusicBrainz/Album Status"))]),
+    ("albumtype", &[s(Asf("MusicBrainz/Album Type"))]),
+    ("albumtypes", &[s(Asf("MusicBrainz/Album Type"))]),
+    ("arranger", &[s(Asf("beets/Arranger"))]),
+    ("arrangers", &[s(Asf("beets/Arranger"))]),
+    ("artist", &[s(Asf("Author"))]),
+    ("artist_credit", &[s(Asf("beets/Artist Credit"))]),
+    ("artist_sort", &[s(Asf("WM/ArtistSortOrder"))]),
+    ("artists", &[s(Asf("WM/ARTISTS"))]),
+    ("artists_credit", &[s(Asf("beets/ArtistsCredit"))]),
+    ("artists_sort", &[s(Asf("beets/ArtistsSort"))]),
+    ("asin", &[s(Asf("MusicBrainz/ASIN"))]),
+    ("barcode", &[s(Asf("WM/Barcode"))]),
+    ("bpm", &[s(Asf("WM/BeatsPerMinute"))]),
+    (
+        "catalognum",
+        &[
+            s(Asf("WM/CatalogNo")),
+            ro(Asf("CATALOGID")),
+            ro(Asf("DISCOGS_CATALOG")),
+        ],
+    ),
+    (
+        "catalognums",
+        &[
+            s(Asf("WM/CatalogNo")),
+            ro(Asf("CATALOGID")),
+            ro(Asf("DISCOGS_CATALOG")),
+        ],
+    ),
+    ("comments", &[s(Asf("WM/Comments")), s(Asf("Description"))]),
+    ("comp", &[s(Asf("WM/IsCompilation"))]),
+    ("composer", &[s(Asf("WM/Composer"))]),
+    ("composer_sort", &[s(Asf("WM/Composersortorder"))]),
+    ("composers", &[s(Asf("WM/Composer"))]),
+    ("copyright", &[s(Asf("Copyright"))]),
+    ("country", &[s(Asf("MusicBrainz/Album Release Country"))]),
+    ("date", &[s(Asf("WM/Year"))]),
+    ("disc", &[s(Asf("WM/PartOfSet"))]),
+    ("disctitle", &[s(Asf("WM/SetSubTitle"))]),
+    ("disctotal", &[s(Asf("TotalDiscs"))]),
+    ("encoder", &[s(Asf("WM/EncodedBy"))]),
+    ("genre", &[s(Asf("WM/Genre"))]),
+    ("genres", &[s(Asf("WM/Genre"))]),
+    ("grouping", &[s(Asf("WM/ContentGroupDescription"))]),
+    ("initial_key", &[s(Asf("INITIALKEY"))]),
+    ("isrc", &[s(Asf("WM/ISRC"))]),
+    ("label", &[s(Asf("WM/Publisher"))]),
+    ("language", &[s(Asf("WM/Language"))]),
+    ("languages", &[s(Asf("WM/Language"))]),
+    ("lyricist", &[s(Asf("WM/Writer"))]),
+    ("lyricists", &[s(Asf("WM/Writer"))]),
+    ("lyrics", &[s(Asf("WM/Lyrics"))]),
+    ("mb_albumartistid", &[s(Asf("MusicBrainz/Album Artist Id"))]),
+    (
+        "mb_albumartistids",
+        &[s(Asf("MusicBrainz/Album Artist Id"))],
+    ),
+    ("mb_albumid", &[s(Asf("MusicBrainz/Album Id"))]),
+    ("mb_artistid", &[s(Asf("MusicBrainz/Artist Id"))]),
+    ("mb_artistids", &[s(Asf("MusicBrainz/Artist Id"))]),
+    (
+        "mb_releasegroupid",
+        &[s(Asf("MusicBrainz/Release Group Id"))],
+    ),
+    (
+        "mb_releasetrackid",
+        &[s(Asf("MusicBrainz/Release Track Id"))],
+    ),
+    ("mb_trackid", &[s(Asf("MusicBrainz/Track Id"))]),
+    ("mb_workid", &[s(Asf("MusicBrainz/Work Id"))]),
+    ("media", &[s(Asf("WM/Media"))]),
+    ("original_date", &[s(Asf("WM/OriginalReleaseYear"))]),
+    ("r128_album_gain", &[s(Asf("R128_ALBUM_GAIN"))]),
+    ("r128_track_gain", &[s(Asf("R128_TRACK_GAIN"))]),
+    ("remixers", &[s(Asf("WM/REMIXERS"))]),
+    ("rg_album_gain", &[gain(Asf("replaygain_album_gain"))]),
+    ("rg_album_peak", &[peak(Asf("replaygain_album_peak"))]),
+    ("rg_track_gain", &[gain(Asf("replaygain_track_gain"))]),
+    ("rg_track_peak", &[peak(Asf("replaygain_track_peak"))]),
+    ("script", &[s(Asf("WM/Script"))]),
+    ("subtitle", &[s(Asf("Subtitle"))]),
+    ("title", &[s(Asf("Title"))]),
+    ("track", &[s(Asf("WM/TrackNumber"))]),
+    ("tracktotal", &[s(Asf("TotalTracks"))]),
+    ("url", &[s(Asf("WM/URL"))]),
+];
+
+/// A field's ASF styles (none for the fields Windows Media can't hold).
+fn asf_styles(name: &str) -> &'static [S] {
+    ASF_STYLES
+        .iter()
+        .find(|(n, _)| *n == name)
+        .map_or(&[], |(_, s)| s)
+}
 
 /// The names of [`EXTRA_FIELDS`].
 pub fn extra_field_names() -> impl Iterator<Item = &'static str> {
@@ -1304,6 +1422,7 @@ enum Tags {
     Mp4(Ilst),
     Vorbis(VorbisComments),
     Ape(ApeTag),
+    Asf(crate::asf::Asf),
 }
 
 fn fid(id: &str) -> FrameId<'static> {
@@ -1335,6 +1454,91 @@ fn mp4_ident(key: &str) -> AtomIdent<'static> {
             AtomIdent::Fourcc(b)
         }
     }
+}
+
+/// An ASF attribute as MediaFile's `ASFStorageStyle` deserializes it
+/// (`attribute.value`, with bytes decoded for text fields).
+fn asf_raw(v: &crate::asf::Value) -> Raw {
+    match v {
+        crate::asf::Value::Bool(b) => Raw::B(*b),
+        crate::asf::Value::DWord(v) => Raw::I(i64::from(*v)),
+        crate::asf::Value::QWord(v) => Raw::I(i64::try_from(*v).unwrap_or(i64::MAX)),
+        crate::asf::Value::Word(v) => Raw::I(i64::from(*v)),
+        other => Raw::S(other.as_text()),
+    }
+}
+
+/// MediaFile's `_unpack_asf_image`: a `WM/Picture` attribute as
+/// (mime, data, type index, description).
+fn unpack_asf_picture(v: &crate::asf::Value) -> Option<Picture> {
+    let crate::asf::Value::Bytes(d) = v else {
+        return None;
+    };
+    let type_index = *d.first()?;
+    let size = u32::from_le_bytes(d.get(1..5)?.try_into().ok()?) as usize;
+    let mut at = 5usize;
+    let read_string = |at: &mut usize| -> Option<String> {
+        let mut out: Vec<u8> = Vec::new();
+        loop {
+            let unit = d.get(*at..*at + 2)?;
+            *at += 2;
+            if unit == [0, 0] {
+                return Some(String::from_utf16_lossy(
+                    &out.as_chunks::<2>()
+                        .0
+                        .iter()
+                        .map(|c| u16::from_le_bytes(*c))
+                        .collect::<Vec<_>>(),
+                ));
+            }
+            out.extend_from_slice(unit);
+        }
+    };
+    let mime = read_string(&mut at)?;
+    let desc = read_string(&mut at)?;
+    let end = at.checked_add(size)?.min(d.len());
+    let data = d.get(at..end)?.to_vec();
+    let pic_type = PictureType::from_u8(type_index);
+    let mime = if mime.is_empty() {
+        sniff_mime(&data)
+    } else {
+        MimeType::from_str(&mime)
+    };
+    Some(
+        Picture::unchecked(data)
+            .pic_type(pic_type)
+            .mime_type(mime)
+            .description(desc)
+            .build(),
+    )
+}
+
+/// The image MIME type from its first bytes (MediaFile's `Image.mime_type`
+/// guesses from the data, ignoring the tag's own type).
+fn sniff_mime(data: &[u8]) -> MimeType {
+    match data {
+        [0xff, 0xd8, ..] => MimeType::Jpeg,
+        [0x89, b'P', b'N', b'G', ..] => MimeType::Png,
+        [b'G', b'I', b'F', ..] => MimeType::Gif,
+        [b'B', b'M', ..] => MimeType::Bmp,
+        [b'I', b'I', 0x2a, 0x00, ..] | [b'M', b'M', 0x00, 0x2a, ..] => MimeType::Tiff,
+        _ => MimeType::Unknown(String::new()),
+    }
+}
+
+/// MediaFile's `_pack_asf_image`: type index, image size, MIME type and
+/// description as UTF-16LE strings, then the image bytes.
+fn pack_asf_picture(pic: &Picture) -> crate::asf::Value {
+    let mime = pic.mime_type().map_or("", MimeType::as_str);
+    let mut data = Vec::new();
+    data.extend_from_slice(&pic.pic_type().as_u8().to_le_bytes());
+    data.extend_from_slice(&u32::try_from(pic.data().len()).unwrap_or(0).to_le_bytes());
+    for s in [mime, pic.description().unwrap_or("")] {
+        data.extend(s.encode_utf16().flat_map(u16::to_le_bytes));
+        data.extend_from_slice(&[0, 0]);
+    }
+    data.extend_from_slice(pic.data());
+    crate::asf::Value::Bytes(data)
 }
 
 fn mp4_raw(d: &AtomData) -> Option<Raw> {
@@ -1371,6 +1575,7 @@ impl Tags {
             Tags::Id3 { .. } => Family::Id3,
             Tags::Mp4(_) => Family::Mp4,
             Tags::Vorbis(_) | Tags::Ape(_) => Family::Plain,
+            Tags::Asf(_) => Family::Asf,
         }
     }
 
@@ -1827,6 +2032,7 @@ impl Tags {
                 .get(&mp4_ident(key))
                 .map(|a| a.data().filter_map(mp4_int).map(Raw::I).collect::<Vec<_>>()),
             Key(key) => self.plain_values(key).map(strs),
+            Asf(name) => Some(self.asf_values(name).iter().map(asf_raw).collect()),
             SlashPack(..) | Tuple(..) | Mp4Bool(_) | Id3Sc(_) | Mp4Sc(_) => {
                 return self.get(st).map(|r| vec![r]);
             }
@@ -1872,6 +2078,26 @@ impl Tags {
             }
             _ => self.get_list(st)?.into_iter().next(),
         }
+    }
+
+    // ---- ASF helpers
+
+    fn asf(&self) -> Option<&crate::asf::Asf> {
+        match self {
+            Tags::Asf(a) => Some(a),
+            _ => None,
+        }
+    }
+
+    fn asf_mut(&mut self) -> Option<&mut crate::asf::Asf> {
+        match self {
+            Tags::Asf(a) => Some(a),
+            _ => None,
+        }
+    }
+
+    fn asf_values(&self, name: &str) -> Vec<crate::asf::Value> {
+        self.asf().map(|a| a.values(name)).unwrap_or_default()
     }
 
     /// A style's `set` (one value).
@@ -1960,6 +2186,15 @@ impl Tags {
             // Only in EXTRA_FIELDS, which are never written.
             Wxxx => {}
             Ufid(owner) => self.id3_set_ufid(owner, Some(&v.serialize(st))),
+            Asf(name) => {
+                let value = match v {
+                    In::B(b) => crate::asf::Value::Bool(*b),
+                    _ => crate::asf::Value::Unicode(v.serialize(st)),
+                };
+                if let Some(a) = self.asf_mut() {
+                    a.set(name, vec![value]);
+                }
+            }
             // `set_list` adds the suffix.
             Frame(_) | TxxxList(..) | People(..) | Atom(_) | Key(_) => {
                 self.set_list(st, &[v.bare(st)]);
@@ -1976,6 +2211,12 @@ impl Tags {
             People(frame, inv) => self.id3_store_people(frame, inv, &values),
             Atom(key) => self.mp4_set_strings(key, &values),
             Key(key) => self.plain_set(key, &values),
+            Asf(name) => {
+                let values = values.into_iter().map(crate::asf::Value::Unicode).collect();
+                if let Some(a) = self.asf_mut() {
+                    a.set(name, values);
+                }
+            }
             _ => {
                 if let Some(v) = values.into_iter().next() {
                     self.set(st, &In::S(v));
@@ -2022,6 +2263,11 @@ impl Tags {
             Atom(key) | Mp4Bool(key) | Mp4Int(key) => self.mp4_delete(key),
             Mp4Sc(_) => self.mp4_delete(&format!("{ITUNES}iTunNORM")),
             Key(key) => self.plain_set(key, &[]),
+            Asf(name) => {
+                if let Some(a) = self.asf_mut() {
+                    a.remove(name);
+                }
+            }
         }
     }
 }
@@ -2031,10 +2277,18 @@ impl Tags {
 /// A file's tags, as MediaFile sees them.
 pub struct MediaFile {
     path: PathBuf,
-    ft: FileType,
+    kind: Kind,
     tags: Tags,
     /// A new `synced_lyrics` value (None: unchanged), stored when saving.
     sylt: Option<Vec<(String, u32)>>,
+}
+
+/// The container a file uses: lofty's formats, or ASF (Windows Media),
+/// which lofty doesn't know.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Kind {
+    Lofty(FileType),
+    Asf,
 }
 
 /// A field's value as MediaFile returns it (`None` where it returns None).
@@ -2074,6 +2328,20 @@ impl MediaFile {
     }
 
     fn open_impl(path: &Path, read_properties: bool) -> Result<(MediaFile, FileProperties)> {
+        // ASF (Windows Media) is outside lofty: read its own header.
+        if crate::asf::is_asf(path) {
+            let a = crate::asf::Asf::open(path)?;
+            let properties = a.properties();
+            return Ok((
+                MediaFile {
+                    path: path.to_path_buf(),
+                    kind: Kind::Asf,
+                    tags: Tags::Asf(a),
+                    sylt: None,
+                },
+                properties,
+            ));
+        }
         let ft = lofty::probe::Probe::open(path)
             .with_context(|| format!("reading {}", path.display()))?
             .guess_file_type()?
@@ -2180,7 +2448,7 @@ impl MediaFile {
         Ok((
             MediaFile {
                 path: path.to_path_buf(),
-                ft,
+                kind: Kind::Lofty(ft),
                 tags,
                 sylt: None,
             },
@@ -2189,8 +2457,9 @@ impl MediaFile {
     }
 
     /// The file's type.
-    pub fn file_type(&self) -> FileType {
-        self.ft
+    /// The file's container: lofty's format, or ASF.
+    pub fn kind(&self) -> Kind {
+        self.kind
     }
 
     fn id3(tag: Option<Id3v2Tag>, v1: Option<Id3v1Tag>) -> Tags {
@@ -2206,7 +2475,11 @@ impl MediaFile {
 
     fn styles(&self, field: &Field) -> impl Iterator<Item = &'static S> {
         let fam = self.tags.family();
-        field.styles.iter().filter(move |s| s.k.family() == fam)
+        let all: &'static [S] = match fam {
+            Family::Asf => asf_styles(field.name),
+            _ => field.styles,
+        };
+        all.iter().filter(move |s| s.k.family() == fam)
     }
 
     /// `MediaField.__get__`: the first style with a (truthy) value.
@@ -2485,6 +2758,11 @@ impl MediaFile {
                     _ => None,
                 })
                 .collect(),
+            Tags::Asf(a) => a
+                .values("WM/Picture")
+                .iter()
+                .filter_map(unpack_asf_picture)
+                .collect(),
         }
     }
 
@@ -2513,6 +2791,17 @@ impl MediaFile {
                     ape.insert(item);
                 }
             }
+            Tags::Asf(a) => {
+                let mut pictures: Vec<Picture> = a
+                    .values("WM/Picture")
+                    .iter()
+                    .filter_map(unpack_asf_picture)
+                    .filter(|p| p.pic_type() != PictureType::CoverFront)
+                    .collect();
+                pictures.push(pic);
+                let values = pictures.iter().map(pack_asf_picture).collect();
+                a.set("WM/Picture", values);
+            }
         }
     }
 
@@ -2520,6 +2809,11 @@ impl MediaFile {
     /// their types kept.
     pub fn set_pictures(&mut self, pictures: &[Picture]) {
         self.clear_pictures();
+        if let Tags::Asf(a) = &mut self.tags {
+            let values = pictures.iter().map(pack_asf_picture).collect();
+            a.set("WM/Picture", values);
+            return;
+        }
         for pic in pictures.iter().cloned() {
             match &mut self.tags {
                 Tags::Id3 { tag, .. } => {
@@ -2540,6 +2834,8 @@ impl MediaFile {
                         ape.insert(item);
                     }
                 }
+                // Handled above, before the loop.
+                Tags::Asf(_) => {}
             };
         }
     }
@@ -2559,6 +2855,11 @@ impl MediaFile {
                 had
             }
             Tags::Vorbis(vc) => !vc.remove_pictures().is_empty(),
+            Tags::Asf(a) => {
+                let had = !a.values("WM/Picture").is_empty();
+                a.remove("WM/Picture");
+                had
+            }
             Tags::Ape(ape) => {
                 let keys: Vec<String> = (&*ape)
                     .into_iter()
@@ -2603,7 +2904,7 @@ impl MediaFile {
         let ctx = || format!("writing tags to {}", path.display());
         match self.tags {
             Tags::Id3 { mut tag, v1, .. } => {
-                let v23 = id3v23 && self.ft == FileType::Mpeg;
+                let v23 = id3v23 && self.kind == Kind::Lofty(FileType::Mpeg);
                 let mut opts = WriteOptions::default();
                 if v23 {
                     to_v23(&mut tag);
@@ -2632,6 +2933,7 @@ impl MediaFile {
             Tags::Ape(t) => t
                 .save_to_path(path, WriteOptions::default())
                 .with_context(ctx)?,
+            Tags::Asf(a) => a.save().with_context(ctx)?,
         }
         Ok(())
     }
@@ -2944,7 +3246,7 @@ mod tests {
             let (mf, props) = MediaFile::open_with_properties(&p).unwrap();
             assert_eq!(props, want, "{ext}");
             assert_eq!(mf.get("title"), MediaFile::open(&p).unwrap().get("title"));
-            assert_eq!(mf.file_type(), file.file_type());
+            assert_eq!(mf.kind(), Kind::Lofty(file.file_type()));
         }
     }
 
@@ -2986,6 +3288,31 @@ mod tests {
             for f in TAG_FIELDS {
                 assert_eq!(back.get(f), empty.get(f), "{ext}: cleared {f}");
             }
+        }
+        // ASF (Windows Media), whose tags aren't lofty's.
+        let Some(p) = make(d.path(), "t.wma", &["-c:a", "wmav2"]) else {
+            return;
+        };
+        let it = full_item(&p);
+        crate::media::write(&it).unwrap();
+        let back = read(&p);
+        for f in TAG_FIELDS {
+            let want = match *f {
+                "albumtype" => "albumtypes1".to_string(),
+                "mb_artistid" => "mb_artistids1".to_string(),
+                "mb_albumartistid" => "mb_albumartistids1".to_string(),
+                _ => it.formatted(f).unwrap(),
+            };
+            assert_eq!(back.formatted(f).unwrap(), want, "wma: {f}");
+        }
+        assert_eq!(back.str("initial_key"), "D#m");
+        assert_eq!(back.float("r128_track_gain"), -2.25, "wma");
+        let mut empty = Item::new_item();
+        empty.set_path(&p);
+        crate::media::write(&empty).unwrap();
+        let back = read(&p);
+        for f in TAG_FIELDS {
+            assert_eq!(back.get(f), empty.get(f), "wma: cleared {f}");
         }
     }
 
@@ -3040,8 +3367,13 @@ mod tests {
             0x3D, 0x1D, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4E, 0x44, 0xAE, 0x42, 0x60, 0x82,
         ];
         let d = tempfile::tempdir().unwrap();
-        for ext in ["mp3", "m4a", "flac", "ogg", "wv"] {
-            let Some(p) = make(d.path(), &format!("t.{ext}"), &[]) else {
+        for ext in ["mp3", "m4a", "flac", "ogg", "wv", "wma"] {
+            let args: &[&str] = if ext == "wma" {
+                &["-c:a", "wmav2"]
+            } else {
+                &[]
+            };
+            let Some(p) = make(d.path(), &format!("t.{ext}"), args) else {
                 return;
             };
             let it = full_item(&p);

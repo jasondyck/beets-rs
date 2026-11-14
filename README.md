@@ -66,7 +66,7 @@ which external programs some plugins use.
 beets-rs aims to behave exactly like beets 2.14. Where it doesn't, on
 purpose or not yet, [docs/DIFFERENCES.md](docs/DIFFERENCES.md) lists it.
 The main gaps: Python `pluginpath` plugins (beets' Python plugin API), the
-`replace` plugin, `lyrics` language detection, and ASF/WMA tags.
+`replace` plugin, and `lyrics` language detection.
 
 ## What's included
 
@@ -77,7 +77,7 @@ The main gaps: Python `pluginpath` plugins (beets' Python plugin API), the
   dates, sorting), path templates and template functions, multi-valued
   fields, flexible attributes.
 - **Tags**: MP3, FLAC, M4A/ALAC, Ogg Vorbis/Opus/Speex, WavPack, APE,
-  Musepack, AIFF and WAV, with beets' field mapping.
+  Musepack, AIFF, WAV and ASF/WMA, with beets' field mapping.
 - **Commands**: `import`, `list`, `modify`, `update`, `write`, `move`,
   `remove`, `stats`, `config`, `fields`, `version`, `migrate-beets` and every
   plugin's commands.

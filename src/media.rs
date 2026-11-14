@@ -1,6 +1,6 @@
 //! Reading and writing tags in audio files (via lofty).
 
-use crate::mediafile::{Got, MediaFile};
+use crate::mediafile::{Got, Kind, MediaFile};
 use crate::model::{Item, Value};
 use anyhow::Result;
 use lofty::file::FileType;
@@ -14,7 +14,7 @@ use std::path::Path;
 
 pub const AUDIO_EXTENSIONS: &[&str] = &[
     "mp3", "flac", "m4a", "mp4", "aac", "alac", "ogg", "oga", "opus", "wv", "ape", "mpc", "aif",
-    "aiff", "wav", "spx",
+    "aiff", "wav", "spx", "wma", "asf", "wmv",
 ];
 
 pub fn is_audio(path: &Path) -> bool {
@@ -23,7 +23,14 @@ pub fn is_audio(path: &Path) -> bool {
         .is_some_and(|e| AUDIO_EXTENSIONS.contains(&e.to_ascii_lowercase().as_str()))
 }
 
-fn format_name(ft: FileType) -> &'static str {
+fn format_name(kind: Kind) -> &'static str {
+    match kind {
+        Kind::Asf => "Windows Media",
+        Kind::Lofty(ft) => format_name_lofty(ft),
+    }
+}
+
+fn format_name_lofty(ft: FileType) -> &'static str {
     match ft {
         FileType::Aac => "AAC",
         FileType::Aiff => "AIFF",
@@ -165,62 +172,65 @@ pub fn read(path: &Path) -> Result<Item> {
     item.set_path(path);
     // beets' exact per-format values from the stream headers; lofty's
     // (rounded to ms and kbps) for formats the parsers don't cover.
-    let (length, bitrate, enc) =
-        crate::audioprops::read(path, mf.file_type()).unwrap_or_else(|| {
-            (
-                props.duration().as_secs_f64(),
-                i64::from(
-                    props
-                        .audio_bitrate()
-                        .or(props.overall_bitrate())
-                        .unwrap_or(0),
-                ) * 1000,
-                crate::audioprops::Encoder::default(),
-            )
-        });
+    let parsed = match mf.kind() {
+        Kind::Lofty(ft) => crate::audioprops::read(path, ft),
+        Kind::Asf => crate::audioprops::read_asf(path),
+    };
+    let (length, bitrate, enc) = parsed.unwrap_or_else(|| {
+        (
+            props.duration().as_secs_f64(),
+            i64::from(
+                props
+                    .audio_bitrate()
+                    .or(props.overall_bitrate())
+                    .unwrap_or(0),
+            ) * 1000,
+            crate::audioprops::Encoder::default(),
+        )
+    });
     item.set_str("bitrate_mode", enc.bitrate_mode);
     item.set_str("encoder_info", enc.info);
     item.set_str("encoder_settings", enc.settings);
     item.set("length", Value::Float(length));
     item.set_int("bitrate", bitrate);
-    let mp4 = match mf.file_type() {
-        FileType::Mp4 => mp4_sample_entry(path),
+    let mp4 = match mf.kind() {
+        Kind::Lofty(FileType::Mp4) => mp4_sample_entry(path),
         _ => None,
     };
     // Opus always decodes at 48 kHz (RFC 7845), whatever input rate the
     // header records; MP4 takes the sample entry's values.
-    let samplerate = match mf.file_type() {
-        FileType::Opus => Some(48_000),
-        FileType::Mp4 => mp4.map(|(_, _, rate)| rate).filter(|&r| r > 0),
+    let samplerate = match mf.kind() {
+        Kind::Lofty(FileType::Opus) => Some(48_000),
+        Kind::Lofty(FileType::Mp4) => mp4.map(|(_, _, rate)| rate).filter(|&r| r > 0),
         _ => None,
     }
     .or_else(|| props.sample_rate().map(i64::from))
     .unwrap_or(0);
     item.set_int("samplerate", samplerate);
-    let bitdepth = match mf.file_type() {
+    let bitdepth = match mf.kind() {
         // The MP4 sample entry's sample size; ALAC falls back to lofty's
         // bit depth if the entry has none.
-        FileType::Mp4 => mp4
+        Kind::Lofty(FileType::Mp4) => mp4
             .map(|(_, size, _)| size)
             .filter(|&s| s > 0)
             .or_else(|| props.bit_depth().map(i64::from)),
         // Monkey's Audio before 3.98 has no bit-depth field: beets reads 0.
-        FileType::Ape if ape_legacy_header(path) => Some(0),
+        Kind::Lofty(FileType::Ape) if ape_legacy_header(path) => Some(0),
         _ => props.bit_depth().map(i64::from),
     };
     item.set_int("bitdepth", bitdepth.unwrap_or(0));
-    let channels = match mf.file_type() {
-        FileType::Mp4 => mp4.map_or(0, |(channels, _, _)| channels),
+    let channels = match mf.kind() {
+        Kind::Lofty(FileType::Mp4) => mp4.map_or(0, |(channels, _, _)| channels),
         _ => i64::from(props.channels().unwrap_or(0)),
     };
     item.set_int("channels", channels);
-    let format = match (mf.file_type(), path.extension().and_then(|e| e.to_str())) {
-        (FileType::Mp4, Some(e))
+    let format = match (mf.kind(), path.extension().and_then(|e| e.to_str())) {
+        (Kind::Lofty(FileType::Mp4), Some(e))
             if e.eq_ignore_ascii_case("m4a") && props.bit_depth().is_some() =>
         {
             "ALAC"
         }
-        (ft, _) => format_name(ft),
+        (kind, _) => format_name(kind),
     };
     item.set_str("format", format);
     for f in TAG_FIELDS {

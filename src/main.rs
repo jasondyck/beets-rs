@@ -5,6 +5,7 @@
 //! plugins and library, and dispatch to [`commands`].
 
 mod artresizer;
+mod asf;
 mod audioprops;
 mod autotag;
 mod cli;
