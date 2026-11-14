@@ -1,6 +1,6 @@
 //! Audio stream properties exactly as beets stores them: the length in
-//! seconds and the bitrate in bits per second that mutagen's per-format
-//! readers report, plus the MP3 encoder details.
+//! seconds and the bitrate in bits per second that beets reports for each
+//! format, plus the MP3 encoder details.
 //!
 //! These are read from the container headers instead of lofty, which
 //! rounds lengths to milliseconds and bitrates to kbps. Formats whose

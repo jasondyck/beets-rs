@@ -667,7 +667,7 @@ pub fn id3v23() -> bool {
 mod tests {
     use super::*;
 
-    // mutagen's `bits_per_sample` for AAC: the sample entry's sample size.
+    // beets' AAC `bitdepth`: the audio sample entry's sample size (ISO/IEC 14496-12).
     #[test]
     fn mp4_aac_bit_depth() {
         let d = tempfile::tempdir().unwrap();
@@ -709,7 +709,7 @@ mod roundtrip {
         ok.then_some((d, p))
     }
 
-    /// Length and bitrate are mutagen's exact values, not lofty's ms and
+    /// Length and bitrate are the exact values beets stores, not lofty's ms and
     /// kbps: lossless lengths are samples over the rate (1.37 s exactly),
     /// PCM bitrates channels x bits x rate, MP3 lengths whole frames over
     /// the rate, FLAC's bitrate from the audio after the metadata.

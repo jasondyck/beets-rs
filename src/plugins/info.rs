@@ -163,7 +163,7 @@ pub(crate) fn tag_entry(path: &Path, keys: Option<&[String]>) -> Result<Entry> {
             "art" => Some(PyVal::Bool(!mf.pictures().is_empty())),
             "date" | "original_date" => mf.date(field).map(PyVal::Str),
             "synced_lyrics" => mf.synced_lyrics().map(PyVal::Tuples),
-            // mutagen's WavPack: `channels = bool(flags & MONO) or 2`.
+            // WavPack block header: the MONO flag means 1 channel, else 2.
             "channels" if item.str("format") == "WavPack" && item.int("channels") == 1 => {
                 Some(PyVal::Bool(true))
             }

@@ -196,7 +196,7 @@ impl Library {
     }
 }
 
-// beets stores/reads these as mutagen/Python numbers; the casts mirror that.
+// beets stores/reads these as Python numbers; the casts mirror that.
 #[allow(clippy::cast_possible_truncation, clippy::cast_precision_loss)]
 fn from_sql(v: SqlValue, ty: FieldType, music_dir: Option<&Path>) -> Value {
     match (ty, v) {
