@@ -5,6 +5,7 @@
 //! plugins and library, and dispatch to [`commands`].
 
 mod artresizer;
+mod audioprops;
 mod autotag;
 mod cli;
 mod commands;
@@ -31,7 +32,6 @@ mod paths;
 mod pipeline;
 mod plugin_registry;
 mod plugins;
-mod props;
 mod pyyaml;
 mod query;
 mod state;

@@ -62,10 +62,24 @@ pub fn media_fields() -> impl Iterator<Item = &'static str> {
     TAG_FIELDS.iter().chain(PROPERTY_FIELDS).copied()
 }
 
-/// An MP4 file's audio sample entry `samplesize` (mutagen's
-/// `bits_per_sample`; 16 in AAC files, where lofty has no bit depth): the
-/// first entry of the first sound track's `stsd`.
-fn mp4_sample_size(path: &Path) -> Option<i64> {
+/// Whether this is a Monkey's Audio file from before the 3.98 header
+/// revision (which first recorded the sample size).
+fn ape_legacy_header(path: &Path) -> bool {
+    use std::io::Read;
+    let mut magic = [0u8; 6];
+    match std::fs::File::open(path).and_then(|mut f| f.read_exact(&mut magic)) {
+        Ok(()) => &magic[..4] == b"MAC " && u16::from_le_bytes([magic[4], magic[5]]) < 3980,
+        Err(_) => false,
+    }
+}
+
+/// An MP4 audio sample entry's channel count, sample size and sample
+/// rate: the first entry of the first sound track's `stsd` (ISO/IEC
+/// 14496-12; audio sample entries are 36 bytes before their codec boxes,
+/// with the rate as a 16.16 fixed-point number). These are the values
+/// beets reports even when the encoded stream differs, as AAC files
+/// often do for the channel count.
+fn mp4_sample_entry(path: &Path) -> Option<(i64, i64, i64)> {
     use std::io::{Read, Seek, SeekFrom};
     type Boxes = Vec<([u8; 4], u64, u64)>;
     // The child boxes of the box spanning `start..end`: (type, body start, end).
@@ -127,14 +141,18 @@ fn mp4_sample_size(path: &Path) -> Option<i64> {
         let (ds, _) = find(&stbl, b"stsd")?;
         // stsd: version/flags (4), entry count (4), then the first entry's
         // box header (8), reserved (6), data ref index (2), reserved (8),
-        // channel count (2), sample size (2).
-        let mut buf = [0u8; 36];
+        // channel count (2), sample size (2), pre-defined and reserved
+        // (2 + 2), sample rate as 16.16 fixed point (4).
+        let mut buf = [0u8; 44];
         f.seek(SeekFrom::Start(ds)).ok()?;
         f.read_exact(&mut buf).ok()?;
         if u32::from_be_bytes(buf[4..8].try_into().ok()?) == 0 {
             return None;
         }
-        return Some(i64::from(u16::from_be_bytes(buf[34..36].try_into().ok()?)));
+        let channels = i64::from(u16::from_be_bytes(buf[32..34].try_into().ok()?));
+        let sample_size = i64::from(u16::from_be_bytes(buf[34..36].try_into().ok()?));
+        let sample_rate = i64::from(u32::from_be_bytes(buf[40..44].try_into().ok()?) >> 16);
+        return Some((channels, sample_size, sample_rate));
     }
     None
 }
@@ -145,35 +163,57 @@ pub fn read(path: &Path) -> Result<Item> {
     let (mf, props) = MediaFile::open_with_properties(path)?;
     let mut item = Item::new_item();
     item.set_path(path);
-    // beets' exact values (mutagen's, per format); lofty's (rounded to ms
-    // and kbps) for formats `props` doesn't cover.
-    let (length, bitrate, enc) = crate::props::read(path, mf.file_type()).unwrap_or_else(|| {
-        (
-            props.duration().as_secs_f64(),
-            i64::from(
-                props
-                    .audio_bitrate()
-                    .or(props.overall_bitrate())
-                    .unwrap_or(0),
-            ) * 1000,
-            crate::props::Encoder::default(),
-        )
-    });
+    // beets' exact per-format values from the stream headers; lofty's
+    // (rounded to ms and kbps) for formats the parsers don't cover.
+    let (length, bitrate, enc) =
+        crate::audioprops::read(path, mf.file_type()).unwrap_or_else(|| {
+            (
+                props.duration().as_secs_f64(),
+                i64::from(
+                    props
+                        .audio_bitrate()
+                        .or(props.overall_bitrate())
+                        .unwrap_or(0),
+                ) * 1000,
+                crate::audioprops::Encoder::default(),
+            )
+        });
     item.set_str("bitrate_mode", enc.bitrate_mode);
     item.set_str("encoder_info", enc.info);
     item.set_str("encoder_settings", enc.settings);
     item.set("length", Value::Float(length));
     item.set_int("bitrate", bitrate);
-    item.set_int("samplerate", i64::from(props.sample_rate().unwrap_or(0)));
-    let bitdepth = props
-        .bit_depth()
-        .map(i64::from)
-        .or_else(|| match mf.file_type() {
-            FileType::Mp4 => mp4_sample_size(path),
-            _ => None,
-        });
+    let mp4 = match mf.file_type() {
+        FileType::Mp4 => mp4_sample_entry(path),
+        _ => None,
+    };
+    // Opus always decodes at 48 kHz (RFC 7845), whatever input rate the
+    // header records; MP4 takes the sample entry's values.
+    let samplerate = match mf.file_type() {
+        FileType::Opus => Some(48_000),
+        FileType::Mp4 => mp4.map(|(_, _, rate)| rate).filter(|&r| r > 0),
+        _ => None,
+    }
+    .or_else(|| props.sample_rate().map(i64::from))
+    .unwrap_or(0);
+    item.set_int("samplerate", samplerate);
+    let bitdepth = match mf.file_type() {
+        // The MP4 sample entry's sample size; ALAC falls back to lofty's
+        // bit depth if the entry has none.
+        FileType::Mp4 => mp4
+            .map(|(_, size, _)| size)
+            .filter(|&s| s > 0)
+            .or_else(|| props.bit_depth().map(i64::from)),
+        // Monkey's Audio before 3.98 has no bit-depth field: beets reads 0.
+        FileType::Ape if ape_legacy_header(path) => Some(0),
+        _ => props.bit_depth().map(i64::from),
+    };
     item.set_int("bitdepth", bitdepth.unwrap_or(0));
-    item.set_int("channels", i64::from(props.channels().unwrap_or(0)));
+    let channels = match mf.file_type() {
+        FileType::Mp4 => mp4.map_or(0, |(channels, _, _)| channels),
+        _ => i64::from(props.channels().unwrap_or(0)),
+    };
+    item.set_int("channels", channels);
     let format = match (mf.file_type(), path.extension().and_then(|e| e.to_str())) {
         (FileType::Mp4, Some(e))
             if e.eq_ignore_ascii_case("m4a") && props.bit_depth().is_some() =>
