@@ -313,9 +313,9 @@ fn set_additional_lyrics_info() {
     assert_eq!(i.str("lyrics_url"), "https://lrclib.net/api/1");
     assert_eq!(i.str("lyrics_instrumental"), "0");
     assert_eq!(i.str("lyrics_backend"), "lrclib");
-    // No language detection (as beets without langdetect), and the old
-    // translation language is cleared.
-    assert!(!i.flex.contains_key("lyrics_language"));
+    // beets' langdetect sets the language; the old translation language of
+    // the old lyrics is cleared.
+    assert_eq!(i.str("lyrics_language"), "EN");
     assert!(!i.flex.contains_key("lyrics_translation_language"));
 }
 
@@ -929,8 +929,6 @@ fn dedent(s: &str) -> String {
 fn translate() {
     let s = bing_server();
     let p = plugin("{}", Some(&s.base));
-    // beets' test needs langdetect (to know the lyrics are English); with
-    // no `from_languages` the language needn't be known.
     let bing = Translator::new("123", "fr", &[]);
     let cases = [
         (
@@ -983,15 +981,17 @@ fn translate() {
     assert_eq!(req.method, "POST");
     assert_eq!(req.target, "/translate?api-version=3.0&to=FR");
     assert_eq!(req.header("Ocp-Apim-Subscription-Key"), Some("123"));
-    // With `from_languages`, the (undetected) language must be listed.
-    let bing = Translator::new("123", "fr", &["en".to_string()]);
+    // With `from_languages`, the detected language must be listed (beets'
+    // langdetect finds English here).
+    let bing = Translator::new("123", "fr", &["de".to_string()]);
+    let lyrics = "sing in the rain every hour of the day";
     let (out, log) = crate::logging::capture(|| {
-        bing.translate(&p, Lyrics::new("Hello", None, None), &Lyrics::default())
+        bing.translate(&p, Lyrics::new(lyrics, None, None), &Lyrics::default())
     });
-    assert_eq!(out.full_text(), "Hello");
+    assert_eq!(out.full_text(), lyrics);
     assert_eq!(
         log,
-        ["lyrics: Translator: 🔵 Configuration ['EN'] does not permit translating from None"]
+        ["lyrics: Translator: 🔵 Configuration ['DE'] does not permit translating from EN"]
     );
 }
 

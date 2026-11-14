@@ -284,6 +284,7 @@ dependencies = [
  "deunicode",
  "dirs",
  "fancy-regex",
+ "flate2",
  "getrandom 0.4.3",
  "glob",
  "hex",

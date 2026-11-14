@@ -59,6 +59,7 @@ from cases import (  # noqa: E402
 )
 import importphase  # noqa: E402
 import artphase  # noqa: E402
+import lyricsphase  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Corpus generation
@@ -488,6 +489,15 @@ def main():
             ]
             seen.update(r[0] for r in art_results)
             results += art_results
+
+        if not opts.only or any(o.startswith("lyrics") or o in "lyrics:" for o in opts.only):
+            print("lyrics phase...", flush=True)
+            lyrics_results = [
+                r for r in lyricsphase.run_lyrics_phase(work, ref, rs, opts, ffmpeg, normalise)
+                if not opts.only or any(o in r[0] for o in opts.only)
+            ]
+            seen.update(r[0] for r in lyrics_results)
+            results += lyrics_results
 
         counts = {"PASS": 0, "DIFF": 0, "EXPECTED": 0, "FIXED?": 0}
         for cid, args, r, s in results:

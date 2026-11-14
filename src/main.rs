@@ -19,6 +19,7 @@ mod formatted;
 mod hooks;
 mod importer;
 mod inline;
+mod langdetect;
 mod layout;
 mod library;
 mod logging;

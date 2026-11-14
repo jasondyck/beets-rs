@@ -66,7 +66,7 @@ which external programs some plugins use.
 beets-rs aims to behave exactly like beets 2.14. Where it doesn't, on
 purpose or not yet, [docs/DIFFERENCES.md](docs/DIFFERENCES.md) lists it.
 The main gaps: Python `pluginpath` plugins (beets' Python plugin API), the
-`replace` plugin, `lyrics` language detection, and ASF/WMA tags.
+`replace` plugin, and ASF/WMA tags.
 
 ## What's included
 

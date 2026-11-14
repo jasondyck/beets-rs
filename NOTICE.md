@@ -117,6 +117,7 @@ is used at build or run time.
 | librosa 1.x | ISC | `src/plugins/autobpm/librosa.rs` | `load`, `onset_strength`, `power_to_db`, `melspectrogram` and `beat_track`'s tempo estimate |
 | resampy 0.4 | ISC | `src/plugins/autobpm/librosa.rs` | the `kaiser_fast` resampling filter |
 | Python 3 `difflib` | PSF-2.0 | `src/diff.rs` | `SequenceMatcher`/`get_opcodes` (and the `colordiff` usage of beets) |
+| langdetect 1.0.9 | Apache-2.0 | `src/langdetect/` | `Detector`/`DetectorFactory` (`detector.py`, `detector_factory.py`), n-gram extraction and normalization incl. the CJK clusters (`utils/ngram.py`, `messages.properties`), the language profiles (`profiles.bin.z`, generated from `profiles/` by `tools/gen-langdetect-profiles.py`), and the CPython `random.Random` stream it draws from |
 | ImageMagick | ImageMagick License | `src/artresizer.rs` | the `PHASH` similarity metric (re-implemented in Rust; see "Attribution-only" below) |
 | jQuery 1.7.1 + Sizzle | MIT (or GPL-2.0, MIT chosen) | `src/plugins/web/static/jquery.js` | as bundled with beets |
 | Underscore.js 1.2.2 | MIT | `src/plugins/web/static/underscore.js` | as bundled with beets |
@@ -135,8 +136,8 @@ librosa's functions (our `autobpm` uses `rustfft`).
 
 Not embedded and not ported: beets' optional `audiotools` (GPL-3.0) and
 `gstreamer` replaygain backends (beets-rs' replaygain plugin uses ffmpeg, a
-command, or metaflac), `langdetect` (lyrics language detection), and PIL (our
-`artresizer` follows ImageMagick, see above). External programs that beets and
+command, or metaflac), and PIL (our `artresizer` follows ImageMagick, see
+above). External programs that beets and
 beets-rs *invoke* at run time — `ffmpeg`, `fpcalc`, `mp3gain`, `metaflac`,
 `keyfinder`, `mp3val`, `flac` — are not part of this tree; they are the
 user's (or a binary distributor's) own dependencies.
@@ -565,11 +566,15 @@ of the authors and should not be interpreted as representing official policies,
 either expressed or implied, of Discogs.
 ```
 
-### pylast and requests — Apache-2.0
+### pylast, requests and langdetect — Apache-2.0
 
 `src/plugins/lastgenre/client.rs`, `src/plugins/lastimport.rs` follow pylast
-(Apache-2.0), and `src/plugins/requests.rs` follows `requests`
-(Apache-2.0) semantics. Full licence:
+(Apache-2.0), `src/plugins/requests.rs` follows `requests` (Apache-2.0)
+semantics, and `src/langdetect/` ports langdetect 1.0.9 (Apache-2.0,
+Copyright 2014-2015 Michal "Mimino" Danilak; see
+<https://github.com/Mimino666/langdetect>), including its language profile
+data (`src/langdetect/profiles.bin.z`) and `messages.properties`. Full
+licence:
 
 ```
                                  Apache License
