@@ -9,7 +9,6 @@ use crate::plugins::PluginLog;
 use serde_yaml::Value as Y;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
-use std::rc::Rc;
 
 pub struct PermissionsPlugin;
 
@@ -27,7 +26,7 @@ struct Perms {
 pub fn load(cfg: &Config) -> PermissionsPlugin {
     let log = PluginLog::new("permissions");
     log.set_base_level(crate::plugins::WARNING);
-    crate::events::register(Rc::new(Perms {
+    crate::events::register(std::sync::Arc::new(Perms {
         cfg: cfg.clone(),
         log,
     }));

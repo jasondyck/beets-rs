@@ -381,8 +381,9 @@ fn image_documents_and_files() {
     assert_eq!(data["data"]["attributes"]["role"], "cover");
     assert_eq!(data["data"]["attributes"]["mimetype"], "image/jpeg");
     assert_eq!(data["data"]["attributes"]["size"], 8);
-    // No Pillow: no width/height.
+    // Not an image Pillow could open either: no width/height.
     assert!(data["data"]["attributes"].get("width").is_none());
+    assert!(data["data"]["attributes"].get("height").is_none());
     assert_eq!(
         data["data"]["relationships"]["albums"]["data"][0]["id"],
         album_id.to_string()
@@ -403,6 +404,19 @@ fn image_documents_and_files() {
     );
     let (_, content_type, _) = e.get("/aura/images/album-1-..%2Fcover.jpg");
     assert_eq!(content_type, "text/html; charset=utf-8");
+    // A real image gets Pillow's dimensions (from the header).
+    let png = e.cfg.directory().join("Artist/Album/cover.png");
+    crate::artresizer::tests::write_image(
+        &png,
+        &crate::artresizer::tests::picture(30, 20, 0),
+        0,
+    );
+    let mut album = e.lib.get_album(album_id).unwrap().unwrap();
+    album.set("artpath", crate::model::Value::Path(png));
+    e.lib.store(&album).unwrap();
+    let data = e.json(&format!("/aura/images/album-{album_id}-cover.png"));
+    assert_eq!(data["data"]["attributes"]["width"], 30);
+    assert_eq!(data["data"]["attributes"]["height"], 20);
 }
 
 #[test]

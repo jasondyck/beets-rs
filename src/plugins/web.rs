@@ -1224,14 +1224,31 @@ pub(crate) fn send_file(
         ));
     }
     headers.push(("Cache-Control".into(), "no-cache".into()));
+    // Werkzeug's ETag for `send_file`: mtime, size and the adler32 of the
+    // absolute path (`"{mtime}-{size}-{check}"`).
+    let mtime = meta
+        .modified()
+        .ok()
+        .and_then(|m| m.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|d| d.as_secs_f64());
+    let etag = mtime.map(|t| {
+        let abs = std::path::absolute(path).unwrap_or_else(|_| path.to_path_buf());
+        let check = adler32(abs.to_string_lossy().as_bytes());
+        format!("{}-{size}-{check}", crate::pyyaml::py_float_repr(t))
+    });
+    if let Some(etag) = &etag {
+        headers.push(("ETag".into(), format!("\"{etag}\"")));
+    }
     let mut status = 200;
     let mut len = size;
+    let mut ranged = false;
     if let Some(range) = req.header("Range") {
         match parse_range(range, size) {
             Some(Some((start, end))) => {
                 file.seek(SeekFrom::Start(start))?;
                 len = end - start + 1;
                 status = 206;
+                ranged = true;
                 headers.push((
                     "Content-Range".into(),
                     format!("bytes {start}-{end}/{size}"),
@@ -1247,10 +1264,56 @@ pub(crate) fn send_file(
             None => {}
         }
     }
+    // Werkzeug's `make_conditional`: a matching `If-None-Match` (which
+    // wins over `If-Modified-Since`) or an unchanged mtime is a 304 with no
+    // body (a successful range takes precedence).
+    let mtime_secs = mtime.map(|t| t as i64);
+    let mut unmodified = mtime_secs.is_some_and(|last_modified| {
+        req.header("If-Modified-Since")
+            .and_then(http_date)
+            .is_some_and(|since| last_modified <= since)
+    });
+    if let (Some(etag), Some(inm)) = (&etag, req.header("If-None-Match"))
+        && !inm.trim().is_empty()
+    {
+        unmodified = if_none_match(inm, etag);
+    }
+    if !ranged && (req.method == "GET" || req.method == "HEAD") && unmodified {
+        return Ok(Response {
+            status: 304,
+            headers,
+            body: Body::Bytes(vec![]),
+        });
+    }
     Ok(Response {
         status,
         headers,
         body: Body::File(file, len),
+    })
+}
+
+/// An HTTP date (`If-Modified-Since`), as a Unix timestamp.
+fn http_date(s: &str) -> Option<i64> {
+    chrono::DateTime::parse_from_rfc2822(s)
+        .ok()
+        .map(|d| d.timestamp())
+}
+
+/// zlib's adler32, as Python's `zlib.adler32`.
+fn adler32(data: &[u8]) -> u32 {
+    let (mut a, mut b) = (1u32, 0u32);
+    for &byte in data {
+        a = (a + u32::from(byte)) % 65521;
+        b = (b + a) % 65521;
+    }
+    (b << 16) | a
+}
+
+/// Werkzeug's weak `If-None-Match` comparison: `*`, or one of the
+/// comma-separated tags (a `W/` prefix ignored) equal to `etag`.
+fn if_none_match(header: &str, etag: &str) -> bool {
+    header.split(',').map(str::trim).any(|tag| {
+        tag == "*" || tag.strip_prefix("W/").unwrap_or(tag).trim_matches('"') == etag
     })
 }
 

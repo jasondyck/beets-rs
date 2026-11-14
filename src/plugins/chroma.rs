@@ -175,6 +175,17 @@ pub fn fingerprint_file(path: &Path) -> Result<(f64, String), String> {
 
 // --------------------------------------------------------------- web API
 
+/// gzip-compress `data` (pyacoustid's `_compress`).
+fn gzip(data: &[u8]) -> Vec<u8> {
+    use flate2::Compression;
+    use flate2::write::GzEncoder;
+    use std::io::Write as _;
+    let mut enc = GzEncoder::new(Vec::new(), Compression::default());
+    // Writing into a Vec can't fail.
+    enc.write_all(data).expect("gzip into a Vec");
+    enc.finish().expect("gzip into a Vec")
+}
+
 /// pyacoustid's `_api_request`: POST the form parameters and parse the
 /// JSON response (whatever the HTTP status), rate-limited to three
 /// requests a second. Errors are pyacoustid's `WebServiceError` messages.
@@ -193,18 +204,39 @@ fn api_request(url: &str, params: &[(&str, String)]) -> Result<J, String> {
         .user_agent(super::USER_AGENT)
         .timeout(TIMEOUT)
         .build();
-    let body = super::requests::urlencode(params);
+    // pyacoustid's `CompressedHTTPAdapter`: a gzip-compressed form body
+    // (with `Content-Encoding`), and it asks for a gzipped response.
+    let body = gzip(super::requests::urlencode(params).as_bytes());
     let resp = agent
         .post(url)
+        .set("Accept-Encoding", "gzip")
         .set("Content-Type", "application/x-www-form-urlencoded")
-        .send_string(&body);
+        .set("Content-Encoding", "gzip")
+        .send_bytes(&body);
     let resp = match resp {
         Ok(r) | Err(ureq::Error::Status(_, r)) => r,
         Err(ureq::Error::Transport(t)) => return Err(format!("HTTP request failed: {t}")),
     };
-    let text = resp
-        .into_string()
-        .map_err(|e| format!("HTTP request failed: {e}"))?;
+    let compressed = resp
+        .header("Content-Encoding")
+        .is_some_and(|e| e.eq_ignore_ascii_case("gzip"));
+    let bytes = if compressed {
+        let mut r = resp.into_reader();
+        let mut out = vec![];
+        if std::io::Read::read_to_end(&mut flate2::read::GzDecoder::new(&mut r), &mut out).is_err()
+        {
+            return Err("HTTP request failed: bad gzip response".into());
+        }
+        out
+    } else {
+        let mut out = vec![];
+        let mut r = resp.into_reader();
+        if let Err(e) = std::io::Read::read_to_end(&mut r, &mut out) {
+            return Err(format!("HTTP request failed: {e}"));
+        }
+        out
+    };
+    let text = String::from_utf8_lossy(&bytes);
     serde_json::from_str(&text).map_err(|_| "response is not valid JSON".to_string())
 }
 

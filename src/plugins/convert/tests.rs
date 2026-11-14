@@ -5,6 +5,7 @@
 
 use super::*;
 use crate::fileops::FileOp;
+use std::os::unix::fs::PermissionsExt as _;
 use std::path::PathBuf;
 use tempfile::TempDir;
 
@@ -967,4 +968,38 @@ fn replace_ext_and_relpath() {
         relpath(Path::new("/a/b.mp3"), Path::new("/a")),
         Path::new("b.mp3")
     );
+}
+
+// ------------------------------------------------- after_convert (5.23 c, f)
+
+#[test]
+fn after_convert_reaches_a_listener_on_a_worker_thread() {
+    if !ffmpeg_ok() {
+        return;
+    }
+    let mut e = Env::cli();
+    e.cfg.set("convert.threads", y("2"));
+    e.cfg.set("plugins", y("[convert, hook]"));
+    let log = e.dir.path().join("hook.log");
+    let script = e.dir.path().join("hook.sh");
+    std::fs::write(
+        &script,
+        format!("#!/bin/sh\necho \"$@\" >> {}\n", log.display()),
+    )
+    .unwrap();
+    std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+    e.cfg.set(
+        "hook.hooks",
+        serde_yaml::from_str(&format!(
+            "[{{event: after_convert, command: '{} {{item.title}} {{keepnew}} {{dest}}'}}]",
+            script.display()
+        ))
+        .unwrap(),
+    );
+    crate::plugins::hook::load(&e.cfg).unwrap();
+    e.run(&e.item(), Some("y"), yes());
+    let lines = std::fs::read_to_string(&log).unwrap();
+    let line = lines.lines().next().unwrap_or_default();
+    // The event's item, keepnew and destination, as beets sends them.
+    assert_eq!(line, format!("Tag Title False {}", e.converted_mp3().display()));
 }

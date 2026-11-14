@@ -654,6 +654,25 @@ impl Worker<'_> {
             log.debug(&format!("embedding album art from {}", art.display()));
             embed_item(&log, &item, &art, maxwidth, &converted, s.id3v23);
         }
+
+        // beets' `after_convert` (hook and other listeners see it). The
+        // transcode runs on a worker thread; the registry is global (as
+        // beets' is), so this reaches the listeners loaded on the main one.
+        let (event_dest, keepnew) = if keep_new {
+            (dest.as_path(), true)
+        } else {
+            (converted.as_path(), false)
+        };
+        if crate::events::listening("after_convert") {
+            crate::events::send(
+                "after_convert",
+                &[
+                    ("item", crate::events::Arg::Item(&item)),
+                    ("dest", crate::events::Arg::Path(event_dest)),
+                    ("keepnew", crate::events::Arg::Bool(keepnew)),
+                ],
+            );
+        }
         Ok(store)
     }
 }
@@ -908,12 +927,16 @@ impl<'a> Converter<'a> {
             base_level: self.log.base_level(),
         };
         let mut first_err = None;
+        // The workers send `write`/`after_convert`: give them the listeners
+        // this thread knows (the registry is global outside tests).
+        let listeners = crate::events::inherit();
         std::thread::scope(|scope| {
             let (tx, rx) = std::sync::mpsc::channel();
             for _ in 0..threads {
                 let tx = tx.clone();
-                let (queue, abort, worker) = (&queue, &abort, &worker);
+                let (queue, abort, worker, listeners) = (&queue, &abort, &worker, &listeners);
                 scope.spawn(move || {
+                    crate::events::install(listeners);
                     while !abort.load(Ordering::Relaxed) {
                         // The lock only covers the pop; the transcode runs
                         // without it, so the workers overlap.

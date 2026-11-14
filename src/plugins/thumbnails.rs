@@ -352,7 +352,7 @@ fn registry_make(cfg: &crate::config::Config) -> anyhow::Result<Box<dyn crate::p
     // beets' `__init__`: registers an `art_set` listener when `auto` is set
     // and the environment can make thumbnails.
     if p.auto && p.check() {
-        crate::events::register(std::rc::Rc::new(Thumbnails::new(cfg)));
+        crate::events::register(std::sync::Arc::new(Thumbnails::new(cfg)));
     }
     Ok(Box::new(p))
 }

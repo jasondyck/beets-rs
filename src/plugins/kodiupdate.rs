@@ -8,8 +8,6 @@ use crate::events::{Event, Listener};
 use crate::plugins::requests::{Request, Session};
 use crate::plugins::{PluginLog, USER_AGENT};
 use serde_json::{Value as J, json};
-use std::cell::Cell;
-use std::rc::Rc;
 
 pub struct KodiUpdate;
 
@@ -142,7 +140,7 @@ fn base64(data: &[u8]) -> String {
 
 struct State {
     cfg: Config,
-    registered: Cell<bool>,
+    registered: std::sync::atomic::AtomicBool,
 }
 
 impl Listener for State {
@@ -151,8 +149,8 @@ impl Listener for State {
     }
 
     fn on(&self, _ev: &Event) {
-        if !self.registered.replace(true) {
-            crate::events::register(Rc::new(ExitListener {
+        if !self.registered.swap(true, std::sync::atomic::Ordering::Relaxed) {
+            crate::events::register(std::sync::Arc::new(ExitListener {
                 cfg: self.cfg.clone(),
                 log: PluginLog::new("kodi"),
             }));
@@ -177,9 +175,9 @@ impl Listener for ExitListener {
 
 /// The plugin's `__init__`.
 pub fn load(cfg: &Config) -> KodiUpdate {
-    crate::events::register(Rc::new(State {
+    crate::events::register(std::sync::Arc::new(State {
         cfg: cfg.clone(),
-        registered: Cell::new(false),
+        registered: std::sync::atomic::AtomicBool::new(false),
     }));
     KodiUpdate
 }

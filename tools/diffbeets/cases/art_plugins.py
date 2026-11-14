@@ -460,6 +460,13 @@ ART_CASES += [
     ("convert-command-shortcut", "conv", {},
      _cv("command: 'ffmpeg -i $source -y -vn -acodec libvorbis \"$dest\"', extension: oga"),
      [_CV_IMP, ["convert", "-y", "-f", "flac"]]),
+    # 5.23 c/f: `after_convert` reaches a `hook` listener from a convert
+    # worker thread (its command's output is part of the step's stdout).
+    ("convert-after-convert-hook", "conv", {},
+     "{{plugins: [convert, hook], hook: {{hooks: [{{event: after_convert,"
+     " command: 'echo AFTER {{item.title}} {{keepnew}}'}}]}}, convert:"
+     " {{dest: '{root}/out', threads: 2, tmpdir: '{root}'}}}}",
+     [_CV_IMP, ["convert", "-y", "-f", "ogg", "title:Uno"], _CV_LS]),
     ("convert-errors", "conv", {},
      _cv("formats: {{bad: {{extension: x}}, fail: {{command: 'false $source $dest', "
          "extension: fl}}, gone: 'no-such-encoder-xyz $source $dest'}}"),

@@ -10,10 +10,9 @@ use crate::plugins::{ImportTask, Plugin, PluginCtx, PluginLog};
 use crate::query::Query;
 use crate::ui::{self, Choice};
 use anyhow::Result;
-use std::cell::RefCell;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
-use std::rc::Rc;
+use std::sync::Arc;
 
 pub struct ImportSourcePlugin;
 
@@ -51,16 +50,16 @@ struct State {
     cfg: Config,
     log: PluginLog,
     /// `mb_albumid`s whose removals we shouldn't suggest (a reimport).
-    stop: RefCell<HashSet<String>>,
+    stop: std::sync::Mutex<HashSet<String>>,
 }
 
 pub fn load(cfg: &Config) -> ImportSourcePlugin {
     let log = PluginLog::new("importsource");
     log.set_base_level(crate::plugins::WARNING);
-    let state = Rc::new(State {
+    let state = Arc::new(State {
         cfg: cfg.clone(),
         log,
-        stop: RefCell::default(),
+        stop: std::sync::Mutex::default(),
     });
     // As beets, the removal-suggestion listeners exist only when enabled.
     if cfg.bool("importsource.suggest_removal") {
@@ -91,7 +90,7 @@ impl State {
     /// `suggest_removal`: the prompt beets shows at `item_removed`.
     fn suggest_removal(&self, item: &Item) {
         let album_id = item.str("mb_albumid").to_string();
-        if self.stop.borrow().contains(&album_id) {
+        if self.stop.lock().unwrap_or_else(std::sync::PoisonError::into_inner).contains(&album_id) {
             return;
         }
         let Some(source) = source_path(item) else {
@@ -137,7 +136,7 @@ impl State {
             }
             Choice::Letter('r') => self.remove_directory(item, &source),
             Choice::Letter('s') => {
-                self.stop.borrow_mut().insert(album_id);
+                self.stop.lock().unwrap_or_else(std::sync::PoisonError::into_inner).insert(album_id);
             }
             _ => self.log.info("Doing nothing"),
         }
@@ -220,7 +219,7 @@ impl Listener for State {
                 for item in &task.items {
                     let id = item.str("mb_albumid");
                     if !id.is_empty() {
-                        self.stop.borrow_mut().insert(id.to_string());
+                        self.stop.lock().unwrap_or_else(std::sync::PoisonError::into_inner).insert(id.to_string());
                     }
                 }
             }
