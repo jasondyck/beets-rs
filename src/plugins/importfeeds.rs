@@ -7,7 +7,6 @@ use crate::model::Record;
 use crate::plugins::{Plugin, PluginLog};
 use anyhow::{Context, Result};
 use chrono::Local;
-use std::cell::RefCell;
 use std::io::Write;
 use std::path::{Component, Path, PathBuf};
 
@@ -19,7 +18,7 @@ pub struct ImportFeeds {
     relative_to: Option<PathBuf>,
     absolute: bool,
     /// The `m3u_session` file, made at `import_begin`.
-    session: RefCell<Option<PathBuf>>,
+    session: std::sync::Mutex<Option<PathBuf>>,
     log: PluginLog,
 }
 
@@ -52,7 +51,7 @@ impl ImportFeeds {
             dir,
             relative_to,
             absolute: cfg.bool("importfeeds.absolute_path"),
-            session: RefCell::new(None),
+            session: std::sync::Mutex::new(None),
             log,
         }
     }
@@ -80,10 +79,15 @@ impl ImportFeeds {
         if self.formats.iter().any(|f| f == "m3u") {
             write_m3u(&feeds.join(&self.m3u_name), &paths)?;
         }
-        if self.formats.iter().any(|f| f == "m3u_session")
-            && let Some(session) = self.session.borrow().as_ref()
-        {
-            write_m3u(session, &paths)?;
+        if self.formats.iter().any(|f| f == "m3u_session") {
+            let session = self
+                .session
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .clone();
+            if let Some(session) = session.as_ref() {
+                write_m3u(session, &paths)?;
+            }
         }
         if self.formats.iter().any(|f| f == "m3u_multi") {
             let date = Local::now().format("%Y%m%d_%Hh%M").to_string();
@@ -132,7 +136,10 @@ impl ImportFeeds {
             .strip_suffix(".m3u")
             .or_else(|| base.strip_suffix(".M3U"))
             .unwrap_or(&base);
-        *self.session.borrow_mut() = Some(self.feeds_dir().join(format!("{base}_{date}.m3u")));
+        *self
+            .session
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(self.feeds_dir().join(format!("{base}_{date}.m3u")));
     }
 }
 
@@ -282,6 +289,6 @@ inventory::submit! {
 
 fn registry_make(cfg: &crate::config::Config) -> anyhow::Result<Box<dyn crate::plugins::Plugin>> {
     // beets registers the listeners in the plugin's `__init__`.
-    crate::events::register(std::rc::Rc::new(ImportFeeds::new(cfg)));
+    crate::events::register(std::sync::Arc::new(ImportFeeds::new(cfg)));
     Ok(Box::new(ImportFeeds::new(cfg)))
 }

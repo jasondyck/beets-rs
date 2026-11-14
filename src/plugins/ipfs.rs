@@ -4,8 +4,8 @@
 //! libraries.
 //!
 //! Needs the `ipfs` command on `PATH` (or the test-only binary override).
-//! `-m/--play` needs beets' `play` plugin, which isn't ported (it logs an
-//! error).
+//! `-m/--play` plays from the joined remote library through the `play`
+//! plugin's own plan/run code, as beets constructs its `PlayPlugin`.
 
 use crate::config::Config;
 use crate::library::Library;
@@ -314,6 +314,7 @@ pub fn ipfs_added_albums(lib: &Library, path: &Path) -> Result<Library> {
 }
 
 /// `beet ipfs [-a] [-g] [-p] [-i] [-l] [-m] [--limit N] [QUERY]`.
+#[derive(Debug, Default)]
 pub struct CmdOpts {
     pub add: bool,
     pub get: bool,
@@ -354,9 +355,48 @@ pub fn command(cfg: &Config, lib: &Library, opts: &CmdOpts) -> Result<()> {
         ipfs_list(cfg, lib, &opts.query, opts.limit)?;
     }
     if opts.play {
-        bail!("the ipfs --play option needs beets' play plugin, which isn't ported");
+        ipfs_play(cfg, opts)?;
     }
     Ok(())
+}
+
+/// beets' `ipfs_play`: the joined remote library's albums, played by the
+/// `play` plugin, with `play.relative_to` unset (beets sets it to None).
+fn ipfs_play(cfg: &Config, opts: &CmdOpts) -> Result<()> {
+    let mut out = std::io::stdout();
+    let mut ask = || {
+        match crate::ui::options(
+            &["Continue", "Abort"],
+            None,
+            Some(crate::ui::Choice::Letter('c')),
+        ) {
+            Some(crate::ui::Choice::Letter(c)) => Some(c),
+            _ => None,
+        }
+    };
+    if let Some(plan) = ipfs_plan(cfg, opts, &mut out, &mut ask)? {
+        crate::plugins::play::play(&plan, &mut out)?;
+    }
+    Ok(())
+}
+
+/// The plan `ipfs_play` would run (the `play` plugin's, over the joined
+/// remote library).
+pub fn ipfs_plan(
+    cfg: &Config,
+    opts: &CmdOpts,
+    out: &mut impl std::io::Write,
+    ask: &mut dyn FnMut() -> Option<char>,
+) -> Result<Option<crate::plugins::play::Plan>> {
+    let mut cfg = cfg.clone();
+    cfg.set("play.relative_to", serde_yaml::Value::Null);
+    let rlib = remote_lib(&cfg)?;
+    let play_opts = crate::plugins::play::CmdOpts {
+        album: true,
+        limit: opts.limit,
+        ..Default::default()
+    };
+    crate::plugins::play::plan(&cfg, &rlib, &play_opts, out, ask)
 }
 
 // ---------------------------------------------------------------- command

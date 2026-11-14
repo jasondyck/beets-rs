@@ -36,9 +36,9 @@ fn fake_soap(status: u16, body: &'static str) -> u16 {
 
 // ------------------------------------------------------------ the plugin
 
-fn state(log: PluginLog, discover: Box<dyn Fn() -> Option<Device>>) -> State {
+fn state(log: PluginLog, discover: Box<dyn Fn() -> Option<Device> + Send + Sync>) -> State {
     State {
-        pending: Cell::new(false),
+        pending: std::sync::atomic::AtomicBool::new(false),
         log,
         discover,
     }
@@ -57,7 +57,7 @@ fn a_library_change_asks_for_an_update_on_exit() {
     let ((), lines) = crate::logging::capture(|| {
         // With -v, beets shows the listener's INFO lines.
         let log = PluginLog::new("sonosupdate");
-        crate::events::register(std::rc::Rc::new(state(
+        crate::events::register(std::sync::Arc::new(state(
             log,
             Box::new(move || Some(device.clone())),
         )));
@@ -76,7 +76,7 @@ fn a_library_change_asks_for_an_update_on_exit() {
 #[test]
 fn no_device_means_beets_warning() {
     let ((), lines) = crate::logging::capture(|| {
-        crate::events::register(std::rc::Rc::new(state(
+        crate::events::register(std::sync::Arc::new(state(
             warning_log(),
             Box::new(|| None),
         )));
@@ -96,7 +96,7 @@ fn a_failed_refresh_is_reported() {
     let port = fake_soap(500, SOAP_FAULT);
     let device = Device { ip: "127.0.0.1".into(), port };
     let ((), lines) = crate::logging::capture(|| {
-        crate::events::register(std::rc::Rc::new(state(
+        crate::events::register(std::sync::Arc::new(state(
             warning_log(),
             Box::new(move || Some(device.clone())),
         )));
@@ -116,7 +116,7 @@ fn no_change_means_no_update() {
     let calls = Arc::new(AtomicUsize::new(0));
     let calls2 = calls.clone();
     let ((), lines) = crate::logging::capture(|| {
-        crate::events::register(std::rc::Rc::new(state(
+        crate::events::register(std::sync::Arc::new(state(
             warning_log(),
             Box::new(move || {
                 calls2.fetch_add(1, Ordering::SeqCst);
@@ -134,7 +134,7 @@ fn one_update_per_command() {
     let calls = Arc::new(AtomicUsize::new(0));
     let calls2 = calls.clone();
     let ((), _lines) = crate::logging::capture(|| {
-        crate::events::register(std::rc::Rc::new(state(
+        crate::events::register(std::sync::Arc::new(state(
             warning_log(),
             Box::new(move || {
                 calls2.fetch_add(1, Ordering::SeqCst);

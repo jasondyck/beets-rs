@@ -10,10 +10,8 @@ use crate::config::Config;
 use crate::events::{Event, Listener};
 use crate::model::Value;
 use crate::plugins::PluginLog;
-use std::cell::RefCell;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::rc::Rc;
 
 pub struct ImportAddedPlugin;
 
@@ -27,22 +25,22 @@ struct State {
     cfg: Config,
     log: PluginLog,
     /// A library path to the mtime of the file it came from.
-    item_mtime: RefCell<HashMap<PathBuf, f64>>,
+    item_mtime: std::sync::Mutex<HashMap<PathBuf, f64>>,
     /// Ids of new items that replaced library items.
-    reimported_item_ids: RefCell<Vec<i64>>,
+    reimported_item_ids: std::sync::Mutex<Vec<i64>>,
     /// Directories of the albums a reimport replaced.
-    replaced_album_paths: RefCell<Vec<PathBuf>>,
+    replaced_album_paths: std::sync::Mutex<Vec<PathBuf>>,
 }
 
 pub fn load(cfg: &Config) -> ImportAddedPlugin {
     let log = PluginLog::new("importadded");
     log.set_base_level(crate::plugins::WARNING);
-    crate::events::register(Rc::new(State {
+    crate::events::register(std::sync::Arc::new(State {
         cfg: cfg.clone(),
         log,
-        item_mtime: RefCell::default(),
-        reimported_item_ids: RefCell::default(),
-        replaced_album_paths: RefCell::default(),
+        item_mtime: std::sync::Mutex::default(),
+        reimported_item_ids: std::sync::Mutex::default(),
+        replaced_album_paths: std::sync::Mutex::default(),
     }));
     ImportAddedPlugin
 }
@@ -73,7 +71,7 @@ impl State {
             return;
         };
         self.item_mtime
-            .borrow_mut()
+            .lock().unwrap_or_else(std::sync::PoisonError::into_inner)
             .insert(dest.to_path_buf(), mtime);
         self.log.debug(&format!(
             "Recorded mtime {} for item '{}' imported from '{}'",
@@ -95,7 +93,7 @@ impl State {
             .and_then(|i| i.path().parent())
             .map(Path::to_path_buf)
             .unwrap_or_default();
-        if self.replaced_album_paths.borrow().contains(&dir) {
+        if self.replaced_album_paths.lock().unwrap_or_else(std::sync::PoisonError::into_inner).contains(&dir) {
             self.log.debug(&format!(
                 "Album '{}' is reimported, skipping import of added dates for the album and its items.",
                 dir.display()
@@ -104,7 +102,7 @@ impl State {
         }
         let mut mtimes = vec![];
         for item in &mut items {
-            let mtime = self.item_mtime.borrow_mut().remove(item.path());
+            let mtime = self.item_mtime.lock().unwrap_or_else(std::sync::PoisonError::into_inner).remove(item.path());
             if let Some(mtime) = mtime.filter(|m| *m != 0.0) {
                 mtimes.push(mtime);
                 if self.preserve("preserve_mtimes") {
@@ -144,7 +142,7 @@ impl State {
         };
         if self
             .reimported_item_ids
-            .borrow()
+            .lock().unwrap_or_else(std::sync::PoisonError::into_inner)
             .contains(&item.id.unwrap_or(-1))
         {
             self.log.debug(&format!(
@@ -153,7 +151,7 @@ impl State {
             ));
             return;
         }
-        let mtime = self.item_mtime.borrow_mut().remove(item.path());
+        let mtime = self.item_mtime.lock().unwrap_or_else(std::sync::PoisonError::into_inner).remove(item.path());
         let Some(mtime) = mtime.filter(|m| *m != 0.0) else {
             return;
         };
@@ -227,8 +225,8 @@ impl Listener for State {
             "import_task_files" => {
                 // `record_reimported`.
                 let Some(task) = ev.task() else { return };
-                self.reimported_item_ids.borrow_mut().clone_from(&task.reimported_item_ids);
-                self.replaced_album_paths.borrow_mut().clone_from(&task.replaced_album_paths);
+                self.reimported_item_ids.lock().unwrap_or_else(std::sync::PoisonError::into_inner).clone_from(&task.reimported_item_ids);
+                self.replaced_album_paths.lock().unwrap_or_else(std::sync::PoisonError::into_inner).clone_from(&task.replaced_album_paths);
             }
             "album_imported" => self.album_imported(ev),
             "item_imported" => self.item_imported(ev),

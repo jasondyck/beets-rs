@@ -11,7 +11,6 @@
 use crate::config::Config;
 use crate::events::{Event, Listener};
 use crate::plugins::Plugin;
-use std::rc::Rc;
 
 pub struct MBPseudoPlugin;
 
@@ -51,7 +50,7 @@ pub fn load(cfg: &Config) -> anyhow::Result<MBPseudoPlugin> {
             "The musicbrainz plugin should not be enabled together with the mbpseudo plugin"
         );
     }
-    crate::events::register(Rc::new(MatchAdjust));
+    crate::events::register(std::sync::Arc::new(MatchAdjust));
     Ok(MBPseudoPlugin)
 }
 

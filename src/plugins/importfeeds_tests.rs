@@ -86,7 +86,7 @@ fn import_events_write_the_session_playlist() {
         serde_yaml::from_str("[m3u_session]").unwrap(),
     );
     let lib = Library::open_with(&d.path().join("l.db"), Some(&music), false).unwrap();
-    crate::events::register(std::rc::Rc::new(ImportFeeds::new(&c)));
+    crate::events::register(std::sync::Arc::new(ImportFeeds::new(&c)));
     crate::events::send(
         "import_begin",
         &[("session", crate::events::Arg::Opaque("<session>"))],

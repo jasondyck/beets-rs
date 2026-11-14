@@ -9,13 +9,11 @@
 use crate::config::Config;
 use crate::events::{Event, Listener};
 use crate::plugins::PluginLog;
-use std::cell::Cell;
 use std::fmt::Write as _;
 use std::io::{Read, Write};
 use std::net::TcpStream;
 #[cfg(unix)]
 use std::os::unix::net::UnixStream;
-use std::rc::Rc;
 use std::time::Duration;
 
 pub struct MpdUpdatePlugin;
@@ -202,7 +200,7 @@ struct State {
     cfg: Config,
     /// `cli_exit` is registered on the first library change (beets dedupes
     /// the listener, so one is enough).
-    registered: Cell<bool>,
+    registered: std::sync::atomic::AtomicBool,
 }
 
 impl Listener for State {
@@ -211,8 +209,8 @@ impl Listener for State {
     }
 
     fn on(&self, _ev: &Event) {
-        if !self.registered.replace(true) {
-            crate::events::register(Rc::new(UpdateListener {
+        if !self.registered.swap(true, std::sync::atomic::Ordering::Relaxed) {
+            crate::events::register(std::sync::Arc::new(UpdateListener {
                 cfg: self.cfg.clone(),
                 log: PluginLog::new("mpdupdate"),
             }));
@@ -237,9 +235,9 @@ impl Listener for UpdateListener {
 
 /// The plugin's `__init__`: read its settings and listen for changes.
 pub fn load(cfg: &Config) -> MpdUpdatePlugin {
-    crate::events::register(Rc::new(State {
+    crate::events::register(std::sync::Arc::new(State {
         cfg: cfg.clone(),
-        registered: Cell::new(false),
+        registered: std::sync::atomic::AtomicBool::new(false),
     }));
     MpdUpdatePlugin
 }

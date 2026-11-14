@@ -116,6 +116,50 @@ fn list_reads_the_joined_remote_library() {
 }
 
 #[test]
+fn play_plans_the_remote_albums_through_the_play_plugin() {
+    let (d, mut cfg, _lib) = env();
+    let remotes = d.path().join("remotes");
+    std::fs::create_dir_all(&remotes).unwrap();
+    {
+        let rlib = Library::open_with(&remotes.join("joined.db"), None, false).unwrap();
+        let mut item = Item::new_item();
+        item.set_path("/ipfs/QmRemote/01.mp3");
+        item.set_str("album", "Remote Album");
+        item.set_str("albumartist", "Remote Artist");
+        let mut album = rlib.add_album(std::slice::from_mut(&mut item)).unwrap();
+        album.set_str("ipfs", "QmRemote");
+        rlib.store(&album).unwrap();
+    }
+    cfg.set("plugins", serde_yaml::from_str("[ipfs, play]").unwrap());
+    cfg.set("play.command", "echo".into());
+    cfg.set("play.raw", serde_yaml::Value::Bool(true));
+    // Relative paths would hide the /ipfs/... paths; ipfs_play unsets this.
+    cfg.set(
+        "play.relative_to",
+        serde_yaml::Value::String(d.path().to_string_lossy().into_owned()),
+    );
+    let mut out = vec![];
+    let plan = ipfs_plan(
+        &cfg,
+        &CmdOpts {
+            play: true,
+            ..CmdOpts::default()
+        },
+        &mut out,
+        &mut || Some('c'),
+    )
+    .unwrap()
+    .unwrap();
+    assert_eq!(plan.command, "echo");
+    assert_eq!(plan.item_type, "album");
+    assert_eq!(plan.count, 1);
+    assert_eq!(
+        plan.open_args,
+        vec![PathBuf::from("/ipfs/QmRemote/01.mp3")]
+    );
+}
+
+#[test]
 fn publish_adds_the_temporary_database() {
     let (d, cfg, lib) = env();
     let album_dir = d.path().join("orig");

@@ -210,13 +210,33 @@ impl Session {
         Self::build(user_agent, false)
     }
 
+    /// A session whose requests skip certificate verification (beets'
+    /// `verify=False`, e.g. `plex.ignore_cert_errors`).
+    pub fn with_tls_config(
+        user_agent: &str,
+        tls: &std::sync::Arc<ureq::rustls::ClientConfig>,
+    ) -> Self {
+        Self::build_with(user_agent, true, Some(tls))
+    }
+
     fn build(user_agent: &str, retries: bool) -> Self {
+        Self::build_with(user_agent, retries, None)
+    }
+
+    fn build_with(
+        user_agent: &str,
+        retries: bool,
+        tls: Option<&std::sync::Arc<ureq::rustls::ClientConfig>>,
+    ) -> Self {
         let build = |redirects| {
-            ureq::AgentBuilder::new()
+            let mut agent = ureq::AgentBuilder::new()
                 .user_agent(user_agent)
                 .timeout(TIMEOUT)
-                .redirects(redirects)
-                .build()
+                .redirects(redirects);
+            if let Some(tls) = &tls {
+                agent = agent.tls_config(std::sync::Arc::clone(tls));
+            }
+            agent.build()
         };
         Session {
             agent: build(5),

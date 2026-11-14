@@ -62,7 +62,7 @@ impl Listener for AutoUpdate {
 
 /// The plugin's `__init__`: register the auto-update listeners.
 pub fn load(cfg: &Config) -> PlaylistPlugin {
-    crate::events::register(std::rc::Rc::new(AutoUpdate { cfg: cfg.clone() }));
+    crate::events::register(std::sync::Arc::new(AutoUpdate { cfg: cfg.clone() }));
     PlaylistPlugin
 }
 

@@ -13,8 +13,6 @@ use crate::events::{Event, Listener};
 use crate::plugins::requests::{Request, Session, format_url};
 use crate::plugins::{PluginLog, USER_AGENT};
 use serde_json::Value as J;
-use std::cell::Cell;
-use std::rc::Rc;
 
 pub struct SubsonicUpdate;
 
@@ -156,13 +154,13 @@ fn json_string(v: &J) -> String {
 
 struct State {
     cfg: Config,
-    registered: Cell<bool>,
+    registered: std::sync::atomic::AtomicBool,
 }
 
 impl State {
     fn register_exit(&self) {
-        if !self.registered.replace(true) {
-            crate::events::register(Rc::new(ExitListener {
+        if !self.registered.swap(true, std::sync::atomic::Ordering::Relaxed) {
+            crate::events::register(std::sync::Arc::new(ExitListener {
                 cfg: self.cfg.clone(),
                 log: PluginLog::new("subsonic"),
             }));
@@ -198,9 +196,9 @@ impl Listener for ExitListener {
 /// The plugin's `__init__`.
 pub fn load(cfg: &Config) -> SubsonicUpdate {
     if auto(cfg) {
-        crate::events::register(Rc::new(State {
+        crate::events::register(std::sync::Arc::new(State {
             cfg: cfg.clone(),
-            registered: Cell::new(false),
+            registered: std::sync::atomic::AtomicBool::new(false),
         }));
     }
     SubsonicUpdate

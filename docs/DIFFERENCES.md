@@ -149,11 +149,6 @@ windows-latest). The port follows beets' Windows rules:
 
 ## Plugins: shared behaviour
 
-- **The plugin event bus is per thread**: listeners run on the thread that
-  sends an event, so files written by `convert`'s parallel transcoders don't
-  reach `write`/`after_write` listeners (beets' registry is global). Reason:
-  the registry is thread-local; the main import/command path behaves as
-  beets.
 - **A plugin's own error is reported, not raised as a traceback**: an
   invalid `permissions` mode, an `importadded` album with no recorded
   mtimes, or a `hook` command format error is logged and the run continues;
@@ -198,7 +193,10 @@ windows-latest). The port follows beets' Windows rules:
 - **acousticbrainz**: a URL missing at runtime is logged instead of raising.
 - **absubmit**: analyses run one at a time (beets uses `par_map`); a
   transport error ends the command, as beets.
-- **aura**: no Pillow, so image documents have no `width`/`height`; no
+- **aura**: image `width`/`height` are read from the file header, as beets
+  does with Pillow (the comparison environment has no Pillow, so reference
+  beets omits them there); the `image` crate's formats are JPEG, PNG, WebP,
+  GIF, BMP and TIFF, so an image only Pillow reads gets neither. No
   flask-cors (the `cors` list is honoured for `Origin`); an invalid
   `page`/`limit` falls back to the default instead of crashing; the
   reference's threaded Flask server loses the library directory (relative
@@ -227,24 +225,22 @@ windows-latest). The port follows beets' Windows rules:
   error (network, bad response) is logged at debug and skipped, where beets
   ends with a traceback; an item with an `mb_trackid` the release doesn't
   list is skipped too (beets raises `KeyError`).
-- **chroma**: fingerprint POST bodies are sent plain rather than
-  gzip-compressed. Reason: not done yet (no gzip in the request session).
 - **convert**: a temporary transcode the library still uses (imported with
   `copy: no` or `link`) isn't deleted, where beets deletes it and leaves the
   library pointing at a missing file; a missing `tmpdir` or a failed tag
-  write on import is a warning (beets crashes); the `after_convert` event
-  isn't sent (no ported plugin listens to it, but `hook` can't see it).
+  write on import is a warning (beets crashes); with `-k` the
+  `after_convert` event (`keepnew=True`) is sent just before the item is
+  stored, where beets stores it in the transcoder thread first (listeners
+  see the updated item either way).
 - **duplicates**: a list key (`-k genres`) groups by the list (beets fails);
   a `-C` program that can't start is an error (beets crashes); a `tiebreak`
   field that doesn't exist sorts as empty (beets fails); a checksum is
   stored as text (beets stores a blob).
-- **ipfs**: `-m/--play` isn't wired to the ported `play` plugin yet, and
-  reports that instead of playing.
 - **mpdupdate / plexupdate / kodiupdate / subsonicupdate / mbcollection /
   listenbrainz / lastimport**: `mpd.host`/`port` take their values from the
   environment only while they still hold their defaults (so `beet config -d`
-  shows the static defaults); `plex.ignore_cert_errors` is accepted but
-  certificate verification can't be turned off (ureq); last.fm requests
+  shows the static defaults); with `plex.ignore_cert_errors` there are no
+  urllib3 `InsecureRequestWarning` lines; last.fm requests
   carry pylast's parameters but not its XML-identical headers; the
   ListenBrainz playlist helpers beets carries but no command uses aren't
   ported.
@@ -257,8 +253,9 @@ windows-latest). The port follows beets' Windows rules:
   including the 429 `Retry-After` handling, is as beets.
 - **web**: keys are sorted in list responses too (beets' order there is
   arbitrary); a PATCHed flexible attribute shows as stored (a string); no
-  Flask debugger or reloader with `-d`; no `ETag`/conditional requests for
-  files; the startup banner is shortened. Reason: no Flask.
+  Flask debugger or reloader with `-d`; the browser UI's embedded static
+  files are sent without `ETag` (beets serves them from disk through
+  `send_file`); the startup banner is shortened. Reason: no Flask.
 - Every other ported plugin behaves as beets 2.14 in the differential
   tests, with no known difference: advancedrewrite, albumtypes, bpm, bucket,
   edit, embedart, embyupdate, export, fetchart, fish, freedesktop,
@@ -275,6 +272,5 @@ for the detail):
 - **beets' developer-only `bench` plugin** (`bench_aunique`) isn't ported.
 - **Python `pluginpath` plugins** (beets' Python plugin API) are out of
   scope; the bundled plugins are ported natively.
-- The small gaps noted above: `chroma` gzip bodies, `ipfs --play`, the
-  ListenBrainz playlist helpers, `after_convert`, `bpd`'s `ctrl_profile`
-  (guppy).
+- The small gaps noted above: the ListenBrainz playlist helpers and `bpd`'s
+  `ctrl_profile` (guppy).

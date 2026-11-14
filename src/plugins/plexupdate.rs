@@ -11,9 +11,11 @@ use crate::events::{Event, Listener};
 use crate::plugins::PluginLog;
 use crate::plugins::requests::{HttpError, Request, Session};
 use serde_json::{Map, Value as J};
-use std::cell::{Cell, RefCell};
+use std::cell::RefCell;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
+use std::sync::Arc;
+use ureq::rustls;
 
 /// plex.tv's API, used by the interactive PIN authentication.
 pub const PLEX_API: &str = "https://plex.tv/api/v2";
@@ -37,13 +39,29 @@ pub struct PlexSession {
 }
 
 impl PlexSession {
+    #[cfg(test)]
     pub fn new(token_path: PathBuf, token_override: Option<String>, api_root: &str) -> Self {
+        Self::with_verify(token_path, token_override, api_root, true)
+    }
+
+    /// `verify=False` (beets' `plex.ignore_cert_errors`): this session
+    /// accepts any server certificate; nothing else in beets-rs does.
+    pub fn with_verify(
+        token_path: PathBuf,
+        token_override: Option<String>,
+        api_root: &str,
+        verify: bool,
+    ) -> Self {
         PlexSession {
             token_path,
             token_override,
             api_root: api_root.to_string(),
             poll_interval: std::cell::Cell::new(std::time::Duration::from_secs(5)),
-            session: Session::new(),
+            session: if verify {
+                Session::new()
+            } else {
+                Session::with_tls_config(super::USER_AGENT, &insecure_tls())
+            },
         }
     }
 
@@ -195,8 +213,8 @@ pub struct PlexAPI {
     pub library_name: String,
     pub base_url: String,
     pub api_root: String,
-    /// `ignore_cert_errors` (see the module's note on ureq's TLS).
-    #[allow(dead_code)]
+    /// `ignore_cert_errors`: this API's session accepts any certificate
+    /// (beets' `verify=False`).
     pub verify: bool,
     /// Open the authorization URL in a browser (off in tests).
     pub open_browser: bool,
@@ -230,10 +248,11 @@ impl PlexAPI {
         if let Some(s) = self.session.borrow().as_ref() {
             return s.clone();
         }
-        let session = Rc::new(PlexSession::new(
+        let session = Rc::new(PlexSession::with_verify(
             self.token_path.clone(),
             self.token_override.clone(),
             &self.api_root,
+            self.verify,
         ));
         *self.session.borrow_mut() = Some(session.clone());
         session
@@ -327,6 +346,66 @@ impl PlexAPI {
             ))
             .map_err(plex_error)?;
         Ok(())
+    }
+}
+
+/// A rustls config that accepts any server certificate, for
+/// `ignore_cert_errors` (beets' `requests`/urllib3 `verify=False`).
+fn insecure_tls() -> Arc<rustls::ClientConfig> {
+    let provider = rustls::crypto::ring::default_provider();
+    let config = rustls::ClientConfig::builder()
+        .dangerous()
+        .with_custom_certificate_verifier(Arc::new(AcceptAnyCert(provider)))
+        .with_no_client_auth();
+    Arc::new(config)
+}
+
+/// Accepts every certificate and still checks the handshake signatures.
+#[derive(Debug)]
+struct AcceptAnyCert(rustls::crypto::CryptoProvider);
+
+impl rustls::client::danger::ServerCertVerifier for AcceptAnyCert {
+    fn verify_server_cert(
+        &self,
+        _end_entity: &rustls::pki_types::CertificateDer<'_>,
+        _intermediates: &[rustls::pki_types::CertificateDer<'_>],
+        _server_name: &rustls::pki_types::ServerName<'_>,
+        _ocsp_response: &[u8],
+        _now: rustls::pki_types::UnixTime,
+    ) -> Result<rustls::client::danger::ServerCertVerified, rustls::Error> {
+        Ok(rustls::client::danger::ServerCertVerified::assertion())
+    }
+
+    fn verify_tls12_signature(
+        &self,
+        message: &[u8],
+        cert: &rustls::pki_types::CertificateDer<'_>,
+        dss: &rustls::DigitallySignedStruct,
+    ) -> Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error> {
+        rustls::crypto::verify_tls12_signature(
+            message,
+            cert,
+            dss,
+            &self.0.signature_verification_algorithms,
+        )
+    }
+
+    fn verify_tls13_signature(
+        &self,
+        message: &[u8],
+        cert: &rustls::pki_types::CertificateDer<'_>,
+        dss: &rustls::DigitallySignedStruct,
+    ) -> Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error> {
+        rustls::crypto::verify_tls13_signature(
+            message,
+            cert,
+            dss,
+            &self.0.signature_verification_algorithms,
+        )
+    }
+
+    fn supported_verify_schemes(&self) -> Vec<rustls::SignatureScheme> {
+        self.0.signature_verification_algorithms.supported_schemes()
     }
 }
 
@@ -430,8 +509,8 @@ impl PlexUpdate {
 }
 
 struct ListenerState {
-    plugin: Rc<PlexUpdate>,
-    registered: Cell<bool>,
+    plugin: Arc<PlexUpdate>,
+    registered: std::sync::atomic::AtomicBool,
 }
 
 impl Listener for ListenerState {
@@ -440,8 +519,8 @@ impl Listener for ListenerState {
     }
 
     fn on(&self, _ev: &Event) {
-        if !self.registered.replace(true) {
-            crate::events::register(Rc::new(ExitListener {
+        if !self.registered.swap(true, std::sync::atomic::Ordering::Relaxed) {
+            crate::events::register(std::sync::Arc::new(ExitListener {
                 plugin: self.plugin.clone(),
             }));
         }
@@ -449,7 +528,7 @@ impl Listener for ListenerState {
 }
 
 struct ExitListener {
-    plugin: Rc<PlexUpdate>,
+    plugin: Arc<PlexUpdate>,
 }
 
 impl Listener for ExitListener {
@@ -465,9 +544,9 @@ impl Listener for ExitListener {
 /// The plugin's `__init__`: listen for changes (the exit-time refresh is
 /// registered on the first one, so read-only commands skip it).
 pub fn load(cfg: &Config) -> PlexUpdate {
-    crate::events::register(Rc::new(ListenerState {
-        plugin: Rc::new(PlexUpdate::new(cfg)),
-        registered: Cell::new(false),
+    crate::events::register(std::sync::Arc::new(ListenerState {
+        plugin: Arc::new(PlexUpdate::new(cfg)),
+        registered: std::sync::atomic::AtomicBool::new(false),
     }));
     PlexUpdate::new(cfg)
 }

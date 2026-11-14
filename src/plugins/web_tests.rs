@@ -631,6 +631,60 @@ fn get_item_file() {
 }
 
 #[test]
+fn file_etag_and_conditional_get() {
+    let env = Env::new();
+    let (_, id) = env.mp3_item("testfile2.mp3");
+    let url = format!("/item/{id}/file");
+    let r = env.get(&url);
+    let etag = r.header("ETag").unwrap().to_string();
+    let last_modified = r.header("Last-Modified").unwrap().to_string();
+    // Werkzeug's `set_etag`: a quoted `"{mtime}-{size}-{adler32}"`.
+    assert!(etag.starts_with('"') && etag.ends_with('"'), "{etag}");
+    assert_eq!(etag.matches('-').count(), 2, "{etag}");
+    let conditional = |headers: &[(&str, &str)]| {
+        let mut q = Request::new("GET", &url);
+        for (k, v) in headers {
+            q.headers.push(((*k).into(), (*v).into()));
+        }
+        env.request(&q)
+    };
+    let r = conditional(&[("If-None-Match", etag.as_str())]);
+    assert_eq!(r.status, 304);
+    assert!(r.into_bytes().is_empty());
+    // Weak comparison, lists and `*`.
+    assert_eq!(
+        conditional(&[("If-None-Match", &format!("W/{etag}"))]).status,
+        304
+    );
+    assert_eq!(
+        conditional(&[("If-None-Match", &format!("\"x\", {etag}"))]).status,
+        304
+    );
+    assert_eq!(conditional(&[("If-None-Match", "*")]).status, 304);
+    assert_eq!(conditional(&[("If-None-Match", "\"other\"")]).status, 200);
+    // `If-Modified-Since`, when no `If-None-Match` decides it.
+    assert_eq!(
+        conditional(&[("If-Modified-Since", last_modified.as_str())]).status,
+        304
+    );
+    assert_eq!(
+        conditional(&[("If-Modified-Since", "Thu, 01 Jan 1970 00:00:00 GMT")]).status,
+        200
+    );
+    // A range request is answered as one, as Werkzeug does.
+    assert_eq!(
+        conditional(&[("If-None-Match", etag.as_str()), ("Range", "bytes=0-1")]).status,
+        206
+    );
+}
+
+#[test]
+fn adler32_matches_zlib() {
+    assert_eq!(adler32(b""), 1);
+    assert_eq!(adler32(b"Wikipedia"), 0x11E6_0398);
+}
+
+#[test]
 fn item_file_relative_path_outside_main_context() {
     // A file inside the library directory (stored relative to it).
     let env = Env::new();

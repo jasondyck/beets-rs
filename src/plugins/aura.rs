@@ -942,6 +942,13 @@ pub fn image_resource(lib: &Library, image_id: &str) -> Option<Json> {
     if size != 0 {
         attributes.push(("size".into(), Json::Int(size as i64)));
     }
+    // Pillow's `Image.open(path).width/height` (from the header, as
+    // `image`'s `image_dimensions` reads it): a file even Pillow can't
+    // identify has neither.
+    if let Ok((width, height)) = image::image_dimensions(&image_path) {
+        attributes.push(("width".into(), Json::Int(i64::from(width))));
+        attributes.push(("height".into(), Json::Int(i64::from(height))));
+    }
     let parts: Vec<&str> = image_id.split('-').collect();
     let relationships = vec![(
         format!("{}s", parts[0]),
