@@ -70,9 +70,6 @@ things that aren't ported yet are at the end and in
 - **The database uses SQLite's WAL journal** (`library.db-wal` /
   `-shm` files appear beside it). Reason: better concurrency and crash
   safety; the schema and contents are beets 2.14's.
-- **`langdetect` language guessing is not ported** (beets' optional
-  dependency): `lyrics_language` stays unset and `lyrics.translate`'s
-  `from_languages` never matches, exactly as beets without langdetect.
 - An **instrumental lyrics marker** is left for beets' instrumental
   migration to blank rather than blanked first; the end state is the same.
 - **A library made by an older beets-rs** (absolute paths, `genre` columns)
@@ -213,7 +210,6 @@ things that aren't ported yet are at the end and in
   stored as text (beets stores a blob).
 - **ipfs**: `-m/--play` isn't wired to the ported `play` plugin yet, and
   reports that instead of playing.
-- **lyrics**: no `langdetect` language detection (see above).
 - **mpdupdate / plexupdate / kodiupdate / subsonicupdate / mbcollection /
   listenbrainz / lastimport**: `mpd.host`/`port` take their values from the
   environment only while they still hold their defaults (so `beet config -d`
@@ -249,7 +245,6 @@ for the detail):
 - **beets' developer-only `bench` plugin** (`bench_aunique`) isn't ported.
 - **Python `pluginpath` plugins** (beets' Python plugin API) are out of
   scope; the bundled plugins are ported natively.
-- **`lyrics` language detection** (`langdetect`), **ASF/WMA tags**, and the
-  small gaps noted above: `chroma` gzip bodies, `ipfs --play`, the
-  ListenBrainz playlist helpers, `after_convert`, `bpd`'s `ctrl_profile`
-  (guppy).
+- **ASF/WMA tags**, and the small gaps noted above: `chroma` gzip bodies,
+  `ipfs --play`, the ListenBrainz playlist helpers, `after_convert`, `bpd`'s
+  `ctrl_profile` (guppy).

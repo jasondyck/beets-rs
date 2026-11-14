@@ -335,6 +335,8 @@ mod tests {
         assert_eq!(one.str("lyrics"), "la");
         assert_eq!(one.str("lyrics_backend"), "genius");
         assert_eq!(one.str("lyrics_url"), "https://genius.com/x");
+        assert_eq!(one.str("lyrics_language"), "ES");
+        assert!(!one.flex.contains_key("lyrics_translation_language"));
         assert_eq!(one.str("mood"), "calm");
         assert!(!one.flex.contains_key("artpath"));
         let two = its.iter().find(|i| i.id == Some(9)).unwrap();
