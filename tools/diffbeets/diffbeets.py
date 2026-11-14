@@ -162,11 +162,26 @@ NOISE = [
 ]
 
 
+# `replace`'s "Matching songs" menu lists an item's field names (beets'
+# `displayable_path(item)` iterates the model), and beets' key order is a
+# Python set's: arbitrary and different from run to run. Compare the set.
+MENU_LINE = re.compile(r"^(\d+)\. ([A-Za-z_][A-Za-z0-9_]*"
+                       r"(?:; [A-Za-z_][A-Za-z0-9_]*)+)$")
+
+
+def sort_menu_keys(line):
+    m = MENU_LINE.match(line)
+    if not m:
+        return line
+    return f"{m.group(1)}. " + "; ".join(sorted(m.group(2).split("; ")))
+
+
 def normalise(tool, text):
     for root in (tool.root, *tool.other_roots):
         text = text.replace(root, "<ROOT>")
     lines = [
-        line for line in text.splitlines() if not any(n.match(line) for n in NOISE)
+        sort_menu_keys(line) for line in text.splitlines()
+        if not any(n.match(line) for n in NOISE)
     ]
     return "\n".join(lines)
 

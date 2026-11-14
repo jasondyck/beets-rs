@@ -131,6 +131,14 @@ things that aren't ported yet are at the end and in
   invalid `permissions` mode, an `importadded` album with no recorded
   mtimes, or a `hook` command format error is logged and the run continues;
   beets crashes. Reason: no Python tracebacks.
+- **`replace`**: a file `mediafile` can't parse (a corrupt MP3, say) is
+  reported as `PATH: File is not in a recognized format` and exits 1; beets
+  raises an `UnreadableFileError` traceback. The "Matching songs" menu lists
+  the item's field names (beets' `displayable_path(item)` iterates the
+  model, its album's fields included) in beets-rs' field order; beets' order
+  is Python set iteration, which changes between runs, so the differential
+  tests compare the names sorted. Reason: no Python tracebacks; the
+  nondeterminism isn't worth copying.
 - **`types`**: a field declared again with another type gives beets'
   message, not a traceback.
 - **`inline`**: beets' Python expressions are evaluated by a built-in subset
