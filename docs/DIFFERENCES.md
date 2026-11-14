@@ -241,9 +241,7 @@ windows-latest). The port follows beets' Windows rules:
   environment only while they still hold their defaults (so `beet config -d`
   shows the static defaults); with `plex.ignore_cert_errors` there are no
   urllib3 `InsecureRequestWarning` lines; last.fm requests
-  carry pylast's parameters but not its XML-identical headers; the
-  ListenBrainz playlist helpers beets carries but no command uses aren't
-  ported.
+  carry pylast's parameters but not its XML-identical headers.
 - **random**: the shuffle uses this port's own RNG instead of Python's
   `random`; both are unseeded, so selections differ run to run.
 - **smartplaylist**: `auto` is accepted but not wired up, as in beets 2.14,
@@ -272,5 +270,4 @@ for the detail):
 - **beets' developer-only `bench` plugin** (`bench_aunique`) isn't ported.
 - **Python `pluginpath` plugins** (beets' Python plugin API) are out of
   scope; the bundled plugins are ported natively.
-- The small gaps noted above: the ListenBrainz playlist helpers and `bpd`'s
-  `ctrl_profile` (guppy).
+- The small gaps noted above: `bpd`'s `ctrl_profile` (guppy).
