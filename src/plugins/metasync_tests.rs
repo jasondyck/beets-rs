@@ -1,6 +1,8 @@
 use super::*;
 use crate::config::Config;
 
+// Upstream reads the Unix library file only off Windows.
+#[cfg(unix)]
 #[test]
 fn itunes_library_syncs_fields() {
     let mut c = Config::defaults();
@@ -35,6 +37,7 @@ fn itunes_library_syncs_fields() {
 
 /// beets lower-cases the key on every platform (`bytestring_path(...).lower()`),
 /// so a Location differing only in case still matches.
+#[cfg(unix)]
 #[test]
 fn itunes_paths_match_case_insensitively() {
     let mut c = Config::defaults();

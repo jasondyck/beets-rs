@@ -143,12 +143,16 @@ fn normalise_itunes_path(raw: &str) -> PathBuf {
     let rest = raw.strip_prefix("file://").unwrap_or(raw);
     let rest = rest.strip_prefix("localhost/").map(|r| format!("/{r}")).unwrap_or(rest.to_string());
     let decoded = percent_decode(&rest);
-    let trimmed = decoded.trim_start_matches('\\');
-    let path = crate::library::lexical_normpath(&PathBuf::from(trimmed));
-    // beets' `os.path.normpath(...).lstrip("\\")`: on Windows the URL path
-    // has a leading separator before the drive (`/G:/Music` -> `G:\Music`).
-    let s = path.to_string_lossy();
-    PathBuf::from(s.trim_start_matches('\\'))
+    // beets' `os.path.normpath(...).lstrip("\\")`. On Windows normpath turns
+    // `/` into `\`, so the URL path's separator before the drive goes too
+    // (`/G:/Music` -> `G:\Music`); strip it before Rust parses the path,
+    // which would otherwise read `\G:` as a root and a `G:` component.
+    let decoded = if cfg!(windows) {
+        decoded.replace('/', "\\")
+    } else {
+        decoded
+    };
+    crate::library::lexical_normpath(Path::new(decoded.trim_start_matches('\\')))
 }
 
 /// beets' iTunes key: the component-wise path (so `/` and `\` agree on
