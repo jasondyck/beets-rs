@@ -27,6 +27,14 @@ use std::path::Path;
 
 /// `_scrub`: remove every tag (of the kinds beets removes) from the file.
 pub fn scrub(path: &Path) -> Result<()> {
+    // ASF (Windows Media): every attribute is deleted; Mutagen's
+    // `ASFTag.delete` isn't implemented, so beets deletes each tag and
+    // saves, which is what `remove_all` and `save` do here.
+    if crate::asf::is_asf(path) {
+        let mut a = crate::asf::Asf::open(path)?;
+        a.remove_all();
+        return a.save();
+    }
     let ft = lofty::probe::Probe::open(path)?
         .guess_file_type()?
         .file_type()

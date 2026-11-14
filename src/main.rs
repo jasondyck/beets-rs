@@ -5,6 +5,7 @@
 //! plugins and library, and dispatch to [`commands`].
 
 mod artresizer;
+mod asf;
 mod audioprops;
 mod autotag;
 mod cli;
@@ -19,6 +20,7 @@ mod formatted;
 mod hooks;
 mod importer;
 mod inline;
+mod langdetect;
 mod layout;
 mod library;
 mod logging;

@@ -59,6 +59,7 @@ from cases import (  # noqa: E402
 )
 import importphase  # noqa: E402
 import artphase  # noqa: E402
+import lyricsphase  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Corpus generation
@@ -79,6 +80,10 @@ FORMATS = {
     "wv": ["-ar", "44100", "-ac", "1", "-c:a", "wavpack"],
     "aiff": ["-ar", "48000", "-ac", "2", "-c:a", "pcm_s24be", "-write_id3v2", "1"],
     "wav": ["-ar", "22050", "-ac", "1", "-c:a", "pcm_s16le"],
+    "wma": ["-ar", "44100", "-ac", "1", "-c:a", "wmav2", "-b:a", "128k"],
+    # MP3 inside ASF: no byte rate in the stream, so beets estimates the
+    # bitrate from the file size (MediaFile's fallback).
+    "wma_mp3": ["-ar", "44100", "-ac", "1", "-c:a", "libmp3lame", "-b:a", "96k"],
 }
 
 
@@ -162,11 +167,26 @@ NOISE = [
 ]
 
 
+# `replace`'s "Matching songs" menu lists an item's field names (beets'
+# `displayable_path(item)` iterates the model), and beets' key order is a
+# Python set's: arbitrary and different from run to run. Compare the set.
+MENU_LINE = re.compile(r"^(\d+)\. ([A-Za-z_][A-Za-z0-9_]*"
+                       r"(?:; [A-Za-z_][A-Za-z0-9_]*)+)$")
+
+
+def sort_menu_keys(line):
+    m = MENU_LINE.match(line)
+    if not m:
+        return line
+    return f"{m.group(1)}. " + "; ".join(sorted(m.group(2).split("; ")))
+
+
 def normalise(tool, text):
     for root in (tool.root, *tool.other_roots):
         text = text.replace(root, "<ROOT>")
     lines = [
-        line for line in text.splitlines() if not any(n.match(line) for n in NOISE)
+        sort_menu_keys(line) for line in text.splitlines()
+        if not any(n.match(line) for n in NOISE)
     ]
     return "\n".join(lines)
 
@@ -222,7 +242,7 @@ def setup(work, ref, rs, verbose):
 # Tag round trips
 
 
-AUDIO = (".mp3", ".flac", ".m4a", ".ogg", ".opus", ".wv", ".aiff", ".wav")
+AUDIO = (".mp3", ".flac", ".m4a", ".ogg", ".opus", ".wv", ".aiff", ".wav", ".wma")
 
 
 def mediafile_view(path):
@@ -488,6 +508,15 @@ def main():
             ]
             seen.update(r[0] for r in art_results)
             results += art_results
+
+        if not opts.only or any(o.startswith("lyrics") or o in "lyrics:" for o in opts.only):
+            print("lyrics phase...", flush=True)
+            lyrics_results = [
+                r for r in lyricsphase.run_lyrics_phase(work, ref, rs, opts, ffmpeg, normalise)
+                if not opts.only or any(o in r[0] for o in opts.only)
+            ]
+            seen.update(r[0] for r in lyrics_results)
+            results += lyrics_results
 
         counts = {"PASS": 0, "DIFF": 0, "EXPECTED": 0, "FIXED?": 0}
         for cid, args, r, s in results:

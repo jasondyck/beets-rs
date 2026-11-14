@@ -912,3 +912,66 @@ fn id3v2_sizes_at_the_synchsafe_maximum() {
         assert_eq!(super::read(&path, lofty::file::FileType::Mpeg), None);
     });
 }
+
+// ------------------------------------------------------------------- ASF
+
+#[test]
+fn asf_length_and_bitrate_from_the_header_objects() {
+    // A Header Object with a File Properties Object (play duration 3.1 s,
+    // preroll 3.1 s) and an audio stream (16 kB/s): beets' 3.0 s and
+    // 128 kbps, the double exactly as Mutagen computes it.
+    let mut file = Vec::new();
+    let fpo = {
+        let mut b = vec![0u8; 80];
+        b[40..48].copy_from_slice(&61_000_000u64.to_le_bytes());
+        b[56..64].copy_from_slice(&3_100u64.to_le_bytes());
+        b[76..80].copy_from_slice(&3_200u32.to_le_bytes());
+        b
+    };
+    let spo = {
+        let mut b = vec![0u8; 54 + 18];
+        b[..16].copy_from_slice(&super::asf::AUDIO_MEDIA_GUID_FOR_TEST);
+        b[40..44].copy_from_slice(&18u32.to_le_bytes());
+        b[54..58].copy_from_slice(&[0x61, 0x01, 0x01, 0x00]);
+        b[58..62].copy_from_slice(&44_100u32.to_le_bytes());
+        b[62..66].copy_from_slice(&16_000u32.to_le_bytes());
+        b
+    };
+    for (guid, body) in [
+        (super::asf::FILE_PROPERTIES_GUID_FOR_TEST, fpo),
+        (super::asf::STREAM_PROPERTIES_GUID_FOR_TEST, spo),
+    ] {
+        file.extend_from_slice(&guid);
+        file.extend_from_slice(&(24 + body.len() as u64).to_le_bytes());
+        file.extend_from_slice(&body);
+    }
+    let mut d = super::asf::HEADER_GUID_FOR_TEST.to_vec();
+    d.extend_from_slice(&(30 + file.len() as u64).to_le_bytes());
+    d.extend_from_slice(&2u32.to_le_bytes());
+    d.extend_from_slice(&[1, 2]);
+    d.extend_from_slice(&file);
+    let info = read_bytes(&d, super::asf::parse).unwrap();
+    assert_eq!(info.length, 61_000_000.0 / 1e7 - 3_100.0 / 1000.0);
+    assert_eq!(info.bitrate, 128_000);
+}
+
+#[test]
+fn asf_corrupt_input_is_none_not_a_panic() {
+    let good = {
+        let mut d = super::asf::HEADER_GUID_FOR_TEST.to_vec();
+        d.extend_from_slice(&30u64.to_le_bytes());
+        d.extend_from_slice(&0u32.to_le_bytes());
+        d.extend_from_slice(&[1, 2]);
+        d
+    };
+    assert!(read_bytes(&good, super::asf::parse).is_some());
+    for n in 0..good.len() {
+        assert_eq!(read_bytes(&good[..n], super::asf::parse), None);
+    }
+    let mut huge = good.clone();
+    huge[24..28].copy_from_slice(&u32::MAX.to_le_bytes());
+    assert_eq!(read_bytes(&huge, super::asf::parse), None);
+    let mut bad_size = good.clone();
+    bad_size[16..24].copy_from_slice(&u64::MAX.to_le_bytes());
+    assert_eq!(read_bytes(&bad_size, super::asf::parse), None);
+}

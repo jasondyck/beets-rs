@@ -2,8 +2,8 @@
 //! translation metadata, and the text helpers the plugin shares.
 //!
 //! beets detects `language` and `translation_language` with `langdetect`
-//! when it's installed (an optional dependency); beets-rs doesn't, as
-//! beets without it.
+//! (an optional dependency) when it's installed; beets-rs ports langdetect
+//! with the seed beets uses (0), so detection is deterministic.
 
 use crate::model::Item;
 use regex::Regex;
@@ -17,6 +17,8 @@ static LINE_PARTS: LazyLock<Regex> =
 static LRC_TIMESTAMP: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"^\[(\d{2}):(\d{2})\.(\d{2,3})\]").unwrap());
 static TRANSLATION: LazyLock<Regex> = LazyLock::new(|| Regex::new(r" / [^\n]+").unwrap());
+/// `ORIGINAL_PAT`: the original text of a translated line, for detection.
+static ORIGINAL: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"[^\n]+ / ").unwrap());
 
 /// Python's `str.splitlines()`.
 pub fn splitlines(s: &str) -> Vec<&str> {
@@ -76,7 +78,7 @@ pub struct Lyrics {
 
 impl Lyrics {
     /// `Lyrics(text, backend, url)`: the instrumental marker becomes the
-    /// `instrumental` flag with no text.
+    /// `instrumental` flag with no text, and languages are guessed.
     pub fn new(text: impl Into<String>, backend: Option<&str>, url: Option<&str>) -> Self {
         let mut l = Lyrics {
             text: text.into(),
@@ -84,25 +86,55 @@ impl Lyrics {
             url: url.map(String::from),
             ..Default::default()
         };
-        if l.text == INSTRUMENTAL_LYRICS {
-            l.instrumental = true;
-            l.text.clear();
-        }
+        l.finalize();
         l
     }
 
     /// `Lyrics.from_item`: the item's lyrics and `lyrics_*` attributes.
     pub fn from_item(item: &Item) -> Self {
         let flex = |k: &str| item.flex.get(&format!("lyrics_{k}")).cloned();
-        let mut l = Lyrics::new(item.str("lyrics"), None, None);
-        l.backend = flex("backend");
-        l.url = flex("url");
-        l.instrumental |= flex("instrumental")
-            .and_then(|v| crate::model::parse_bool(&v))
-            .unwrap_or(false);
-        l.language = flex("language");
-        l.translation_language = flex("translation_language");
+        let mut l = Lyrics {
+            text: item.str("lyrics").to_string(),
+            backend: flex("backend"),
+            url: flex("url"),
+            instrumental: flex("instrumental")
+                .and_then(|v| crate::model::parse_bool(&v))
+                .unwrap_or(false),
+            language: flex("language"),
+            translation_language: flex("translation_language"),
+            ..Default::default()
+        };
+        l.finalize();
         l
+    }
+
+    /// beets' `Lyrics.__post_init__`: handle the instrumental marker, then
+    /// guess `language` (from the original text) and, when the text looks
+    /// like translations, `translation_language`, with `langdetect`.
+    fn finalize(&mut self) {
+        if self.text == INSTRUMENTAL_LYRICS {
+            self.instrumental = true;
+            self.text.clear();
+        }
+        if self.text.is_empty() {
+            return;
+        }
+        // beets tests the truthiness of these: an empty string is unset too.
+        if self.language.as_deref().is_none_or(str::is_empty)
+            && let Some(lang) = crate::langdetect::detect(&self.original_text())
+        {
+            self.language = Some(lang.to_uppercase());
+        }
+        if self.translation_language.as_deref().is_none_or(str::is_empty) {
+            let lines = splitlines(&self.text);
+            let with_delimiter = lines.iter().filter(|l| l.contains(" / ")).count();
+            // We are confident we are dealing with translations.
+            if with_delimiter as f64 >= lines.len() as f64 / 2.0
+                && let Some(lang) = crate::langdetect::detect(&ORIGINAL.replace_all(&self.text, ""))
+            {
+                self.translation_language = Some(lang.to_uppercase());
+            }
+        }
     }
 
     /// The text without translations.
@@ -215,6 +247,62 @@ mod tests {
         assert_eq!(l.text, "");
         assert!(Lyrics::new("[00:00.00] a", None, None).synced());
         assert!(!Lyrics::new("a", None, None).synced());
+    }
+
+    #[test]
+    fn language_detection() {
+        // beets' `Lyrics.__post_init__` with langdetect (seed 0).
+        let l = Lyrics::new("sing in the rain every hour of the day", None, None);
+        assert_eq!(l.language.as_deref(), Some("EN"));
+        assert_eq!(l.translation_language, None);
+
+        // Upstream's `test_from_legacy_text`: the original text is English and
+        // the translations are French.
+        let l = Lyrics::new(
+            "[00:00.00] Some synced lyrics / Quelques paroles synchronisées\n\
+             [00:00.50]\n\
+             [00:01.00] Some more synced lyrics / Quelques paroles plus synchronisées",
+            Some("lrclib"),
+            Some("https://lrclib.net/api/1/"),
+        );
+        assert_eq!(l.language.as_deref(), Some("EN"));
+        assert_eq!(l.translation_language.as_deref(), Some("FR"));
+
+        // Short lines without a delimiter don't look like translations.
+        let l = Lyrics::new("Hello\nworld", None, None);
+        assert_eq!(l.language.as_deref(), Some("EN"));
+        assert_eq!(l.translation_language, None);
+
+        // Instrumental and featureless text have no language.
+        let l = Lyrics::new("[Instrumental]", None, None);
+        assert_eq!(l.language, None);
+        let l = Lyrics::new("", None, None);
+        assert_eq!(l.language, None);
+        let l = Lyrics::new("12345 !!!", None, None);
+        assert_eq!(l.language, None);
+
+        // An item's stored language wins; `from_item` guesses the rest.
+        let mut i = crate::model::Item::new_item();
+        i.set_parsed("lyrics", "sing in the rain every hour of the day")
+            .unwrap();
+        i.set_str("lyrics_language", "XX");
+        assert_eq!(Lyrics::from_item(&i).language.as_deref(), Some("XX"));
+        i.remove_flex("lyrics_language");
+        assert_eq!(Lyrics::from_item(&i).language.as_deref(), Some("EN"));
+
+        // An empty stored language is unset, as beets' `if not
+        // self.language` treats it: detection runs and replaces it.
+        i.set_str("lyrics_language", "");
+        i.set_parsed(
+            "lyrics",
+            "Some synced lyrics / Quelques paroles synchronisées\n\
+             [00:01.00] More lyrics / Quelques paroles plus synchronisées",
+        )
+        .unwrap();
+        i.set_str("lyrics_translation_language", "");
+        let l = Lyrics::from_item(&i);
+        assert_eq!(l.language.as_deref(), Some("EN"));
+        assert_eq!(l.translation_language.as_deref(), Some("FR"));
     }
 
     #[test]

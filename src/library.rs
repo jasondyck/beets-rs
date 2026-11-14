@@ -531,8 +531,8 @@ impl Migrator<'_> {
 
     /// `LyricsMetadataInFlexFieldsMigration`: lyrics stored with an inline
     /// "Source: URL" footer keep the text; the URL and its backend move to
-    /// `lyrics_url` and `lyrics_backend`. (beets also detects the language
-    /// when `langdetect` is installed; beets-rs doesn't.)
+    /// `lyrics_url` and `lyrics_backend`, and the language guess (langdetect
+    /// with seed 0, as beets) to `lyrics_language`/`lyrics_translation_language`.
     fn lyrics_metadata(&self, kind: Kind) -> Result<()> {
         let (t, a) = (table(kind), attr_table(kind));
         let done: std::collections::HashSet<i64> = self
@@ -566,13 +566,24 @@ impl Migrator<'_> {
                         rusqlite::params![text, id],
                     )?;
                 }
-                if let Some((backend, url)) = source {
-                    for (key, value) in [("lyrics_backend", backend), ("lyrics_url", url)] {
-                        tx.execute(
-                            &format!("INSERT INTO {a} (entity_id, key, value) VALUES (?, ?, ?)"),
-                            rusqlite::params![id, key, value],
-                        )?;
-                    }
+                // beets' `lyr_fields`: backend, URL and the languages
+                // langdetect finds (each only when it has a value).
+                let (backend, url) = match source {
+                    Some((backend, url)) => (Some(backend), Some(url)),
+                    None => (None, None),
+                };
+                let (language, translation_language) = legacy_language(&text);
+                for (key, value) in [
+                    ("lyrics_backend", backend),
+                    ("lyrics_url", url),
+                    ("lyrics_language", language),
+                    ("lyrics_translation_language", translation_language),
+                ] {
+                    let Some(value) = value else { continue };
+                    tx.execute(
+                        &format!("INSERT INTO {a} (entity_id, key, value) VALUES (?, ?, ?)"),
+                        rusqlite::params![id, key, value],
+                    )?;
                 }
             }
             tx.commit()?;
@@ -699,6 +710,18 @@ fn legacy_lyrics(text: &str) -> (String, Option<(String, String)>) {
     // `instrumental_lyrics_in_flex_field` migration could record it; it's
     // kept for that migration instead.
     (body.to_string(), source)
+}
+
+/// The language guesses for a legacy lyrics body, as beets'
+/// `Lyrics.from_legacy_text(...).language`/`translation_language` (the
+/// instrumental marker is left for the instrumental migration and gets
+/// none).
+fn legacy_language(text: &str) -> (Option<String>, Option<String>) {
+    if text == INSTRUMENTAL_LYRICS {
+        return (None, None);
+    }
+    let lyrics = crate::plugins::lyrics::text::Lyrics::new(text, None, None);
+    (lyrics.language, lyrics.translation_language)
 }
 
 /// `urllib.parse.urlparse(url).netloc`.

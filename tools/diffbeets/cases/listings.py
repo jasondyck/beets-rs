@@ -564,7 +564,8 @@ PROPERTY_QUERIES = [
 PROPERTY_FORMATS = ["$title $length $bitrate $format $samplerate $bitdepth $channels",
                     "${length}|${bitrate}",
                     "$title|$bitrate_mode|$encoder_info|$encoder_settings"]
-STATS_FORMATS = ["MP3", "FLAC", "AAC", "ALAC", "OGG", "Opus", "WavPack", "AIFF", "WAVE"]
+STATS_FORMATS = ["MP3", "FLAC", "AAC", "ALAC", "OGG", "Opus", "WavPack", "AIFF", "WAVE",
+                 "Windows Media"]
 
 # `stats` options and queries (beets' show_stats; -l is beets' limit option).
 STATS = [[], ["-e"], ["Hit"], ["-e", "Hit"], ["-l", "3"], ["-e", "-l", "3"],

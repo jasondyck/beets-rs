@@ -8,6 +8,8 @@
 //!
 //! The parsers implement the published file-format specifications:
 //!
+//! - ASF (Windows Media): the File Properties Object's play duration
+//!   and preroll, and the audio stream's average byte rate.
 //! - MPEG audio frame headers: ISO/IEC 11172-3 (MPEG-1) and ISO/IEC
 //!   13818-3 (MPEG-2); the Xing/Info VBR header (as written by LAME and
 //!   others); the LAME tag, "Mp3 Info Tag revision 1" (Gabriel Bouvigne);
@@ -27,6 +29,7 @@
 //!   sample rate.
 
 mod ape;
+mod asf;
 mod flac;
 mod mp4;
 mod mpeg;
@@ -80,6 +83,17 @@ pub fn read(path: &Path, ft: FileType) -> Option<(f64, i64, Encoder)> {
         _ => return None,
     };
     Some((info.length, mediafile_bitrate(info, src.len), enc))
+}
+
+/// The same for ASF (Windows Media), which lofty doesn't know.
+pub fn read_asf(path: &Path) -> Option<(f64, i64, Encoder)> {
+    let mut src = Source::open(path)?;
+    let info = asf::parse(&mut src)?;
+    Some((
+        info.length,
+        mediafile_bitrate(info, src.len),
+        Encoder::default(),
+    ))
 }
 
 /// MediaFile's `bitrate`: the format's own, else estimated from the file
