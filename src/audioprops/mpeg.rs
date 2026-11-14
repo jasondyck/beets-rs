@@ -130,15 +130,20 @@ impl Header {
 /// The offset just past any leading ID3v2 tags (ID3v2.3/2.4 §3.1: a
 /// ten-byte header with a 28-bit synchsafe size, plus an optional footer).
 fn skip_id3v2(d: &[u8]) -> Option<usize> {
-    let mut at = 0;
-    while d.get(at..at + 3) == Some(b"ID3") {
-        let flags = *d.get(at + 5)?;
-        let size = d.get(at + 6..at + 10)?;
+    let mut at = 0usize;
+    while at
+        .checked_add(3)
+        .and_then(|end| d.get(at..end))
+        .is_some_and(|magic| magic == b"ID3")
+    {
+        let flags = *d.get(at.checked_add(5)?)?;
+        let size = d.get(at.checked_add(6)?..at.checked_add(10)?)?;
         let size = ((size[0] as usize) << 21)
             | ((size[1] as usize) << 14)
             | ((size[2] as usize) << 7)
             | size[3] as usize;
-        at += 10 + size + if flags & 0x10 != 0 { 10 } else { 0 };
+        let footer = if flags & 0x10 != 0 { 10 } else { 0 };
+        at = at.checked_add(10)?.checked_add(size)?.checked_add(footer)?;
     }
     (at <= d.len()).then_some(at)
 }
@@ -152,11 +157,18 @@ fn find_frame(d: &[u8], from: usize) -> Option<usize> {
             continue;
         };
         let side = header.version.side_info_len(header.mono) as usize;
-        let xing = d.get(at + 4 + side..at + 8 + side);
-        let next = at + header.frame_size as usize;
-        let next_ok = d
-            .get(next..next + 2)
-            .is_none_or(|b| b[0] == 0xff && b[1] & 0xe0 == 0xe0);
+        let (xing, next_ok) = match at
+            .checked_add(4 + side)
+            .zip(at.checked_add(8 + side))
+            .zip(at.checked_add(header.frame_size as usize))
+        {
+            Some(((xing_at, xing_end), next)) => (
+                d.get(xing_at..xing_end),
+                d.get(next..next.saturating_add(2))
+                    .is_none_or(|b| b[0] == 0xff && b[1] & 0xe0 == 0xe0),
+            ),
+            None => continue,
+        };
         if xing == Some(b"Xing") || xing == Some(b"Info") || next_ok {
             return Some(at);
         }
@@ -436,10 +448,11 @@ pub fn parse(src: &mut Source) -> Option<(Info, Encoder)> {
     let frame_at = find_frame(&head, after_tags)?;
     let header = Header::parse(&head, frame_at)?;
     let mut enc = Encoder::default();
-    let xing_at = frame_at + 4 + header.version.side_info_len(header.mono) as usize;
+    let side = header.version.side_info_len(header.mono) as usize;
+    let xing_at = frame_at.checked_add(4)?.checked_add(side)?;
     let info = match vbr_header(&head, xing_at) {
         Some(vbr) => {
-            let lame = lame_tag(&head, xing_at + 120);
+            let lame = lame_tag(&head, xing_at.checked_add(120)?);
             let recognized = lame.as_ref().is_some_and(|l| l.version.header);
             let quality = vbr.quality.unwrap_or(0);
             if let Some(lame) = &lame {
@@ -480,10 +493,12 @@ pub fn parse(src: &mut Source) -> Option<(Info, Encoder)> {
             // No VBR header: the nominal first-frame bitrate and the rest
             // of the file (after the ID3v2 tag) at that rate.
             let bitrate = i64::from(header.bitrate);
-            let length = if bitrate > 0 {
-                (src.len - frame_at as u64) as f64 * 8.0 / bitrate as f64
-            } else {
-                0.0
+            let remaining = u64::try_from(frame_at)
+                .ok()
+                .and_then(|at| src.len.checked_sub(at));
+            let length = match remaining {
+                Some(remaining) if bitrate > 0 => remaining as f64 * 8.0 / bitrate as f64,
+                _ => 0.0,
             };
             Info { length, bitrate }
         }

@@ -7,11 +7,28 @@
 
 use super::{Info, Source, be16, be32, le16, le32, seconds};
 
+/// Real files have few chunks; a malformed file full of empty ones must
+/// not build an unbounded vector.
+const MAX_CHUNKS: usize = 100_000;
+/// Header chunks hold a few dozen bytes at most; a declared size in the
+/// gigabytes must not be allocated.
+const MAX_HEADER_CHUNK: u64 = 4096;
+const MAX_COMM_CHUNK: u64 = 1024;
+
 /// The chunks of a RIFF/IFF file payload, in file order.
 fn chunks(src: &mut Source, start: u64, end: u64, little_endian: bool) -> Vec<([u8; 4], u64, u64)> {
     let mut out = Vec::new();
     let mut at = start;
-    while at + 8 <= end {
+    loop {
+        if out.len() >= MAX_CHUNKS {
+            break;
+        }
+        let Some(remaining) = end.checked_sub(at) else {
+            break;
+        };
+        if remaining < 8 {
+            break;
+        }
         let Some(h) = src.at(at, 8) else { break };
         let kind: [u8; 4] = h[0..4].try_into().unwrap();
         let size = u64::from(
@@ -22,15 +39,31 @@ fn chunks(src: &mut Source, start: u64, end: u64, little_endian: bool) -> Vec<([
             }
             .unwrap_or(0),
         );
-        let payload = at + 8;
-        if payload + size > end {
+        let Some(payload) = at.checked_add(8) else {
+            break;
+        };
+        let Some(chunk_end) = payload.checked_add(size) else {
+            break;
+        };
+        if chunk_end > end {
             break;
         }
-        out.push((kind, payload, payload + size));
+        out.push((kind, payload, chunk_end));
         // Chunks are word aligned.
-        at = payload + size + (size & 1);
+        let Some(next) = chunk_end.checked_add(size & 1) else {
+            break;
+        };
+        if next <= at {
+            break;
+        }
+        at = next;
     }
     out
+}
+
+/// A bitrate field that doesn't fit an `i64` (malformed headers only).
+fn saturated_bitrate(value: i128) -> i64 {
+    i64::try_from(value).unwrap_or(if value < 0 { i64::MIN } else { i64::MAX })
 }
 
 /// An 80-bit IEEE 754 extended float, big-endian, as AIFF stores the
@@ -58,7 +91,8 @@ pub fn parse_wave(src: &mut Source) -> Option<Info> {
     }
     let all = chunks(src, 12, src.len, true);
     let fmt = all.iter().find(|(k, _, _)| k == b"fmt ")?;
-    let d = src.at(fmt.1, (fmt.2 - fmt.1) as usize)?;
+    let fmt_len = fmt.2.checked_sub(fmt.1)?.min(MAX_HEADER_CHUNK) as usize;
+    let d = src.at(fmt.1, fmt_len)?;
     let channels = u32::from(le16(&d, 2)?);
     let sample_rate = le32(&d, 4)?;
     let block_align = u32::from(le16(&d, 12)?);
@@ -68,9 +102,10 @@ pub fn parse_wave(src: &mut Source) -> Option<Info> {
         return None;
     }
     let frames = (data.2 - data.1) as f64 / f64::from(block_align);
+    let bitrate = i128::from(sample_rate) * i128::from(channels) * i128::from(bits);
     Some(Info {
         length: seconds(frames, sample_rate)?,
-        bitrate: i64::from(sample_rate) * i64::from(channels) * i64::from(bits),
+        bitrate: saturated_bitrate(bitrate),
     })
 }
 
@@ -85,17 +120,19 @@ pub fn parse_aiff(src: &mut Source) -> Option<Info> {
         .into_iter()
         .find(|(k, _, _)| k == b"COMM")
         .map(|(_, start, end)| (start, end))?;
-    let d = src.at(comm.0, (comm.1 - comm.0) as usize)?;
+    let comm_len = comm.1.checked_sub(comm.0)?.min(MAX_COMM_CHUNK) as usize;
+    let d = src.at(comm.0, comm_len)?;
     let channels = i64::from(be16(&d, 0)?);
     let frames = f64::from(be32(&d, 2)?);
     let bits = i64::from(be16(&d, 6)?);
     let sample_rate = extended(d.get(8..18)?)?;
-    if sample_rate <= 0.0 {
+    if !sample_rate.is_finite() || sample_rate <= 0.0 {
         return None;
     }
+    let bitrate = i128::from(sample_rate as i64) * i128::from(channels) * i128::from(bits);
     Some(Info {
         length: frames / sample_rate,
-        bitrate: sample_rate as i64 * channels * bits,
+        bitrate: saturated_bitrate(bitrate),
     })
 }
 

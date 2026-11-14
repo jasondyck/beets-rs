@@ -137,24 +137,30 @@ impl Source {
     }
 }
 
+/// `N` bytes at `at`, with an overflow-checked end offset.
+fn fixed<const N: usize>(d: &[u8], at: usize) -> Option<[u8; N]> {
+    let end = at.checked_add(N)?;
+    d.get(at..end)?.try_into().ok()
+}
+
 pub(crate) fn be16(d: &[u8], at: usize) -> Option<u16> {
-    Some(u16::from_be_bytes(d.get(at..at + 2)?.try_into().ok()?))
+    fixed(d, at).map(u16::from_be_bytes)
 }
 
 pub(crate) fn be32(d: &[u8], at: usize) -> Option<u32> {
-    Some(u32::from_be_bytes(d.get(at..at + 4)?.try_into().ok()?))
+    fixed(d, at).map(u32::from_be_bytes)
 }
 
 pub(crate) fn be64(d: &[u8], at: usize) -> Option<u64> {
-    Some(u64::from_be_bytes(d.get(at..at + 8)?.try_into().ok()?))
+    fixed(d, at).map(u64::from_be_bytes)
 }
 
 pub(crate) fn le16(d: &[u8], at: usize) -> Option<u16> {
-    Some(u16::from_le_bytes(d.get(at..at + 2)?.try_into().ok()?))
+    fixed(d, at).map(u16::from_le_bytes)
 }
 
 pub(crate) fn le32(d: &[u8], at: usize) -> Option<u32> {
-    Some(u32::from_le_bytes(d.get(at..at + 4)?.try_into().ok()?))
+    fixed(d, at).map(u32::from_le_bytes)
 }
 
 /// `length` is only meaningful with a positive sample rate.

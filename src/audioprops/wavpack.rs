@@ -29,7 +29,7 @@ pub fn parse(src: &mut Source) -> Option<Info> {
     if version >= 0x0500 {
         total |= u64::from(h[11]) << 32;
     }
-    if total == 0xffff_ffff || (version >= 0x0500 && total == 0xffff_ffff_ffff) {
+    if total == 0xffff_ffff || (version >= 0x0500 && total == 0x00ff_ffff_ffff) {
         total = sum_block_samples(src)?;
     }
     Some(Info {
@@ -38,19 +38,31 @@ pub fn parse(src: &mut Source) -> Option<Info> {
     })
 }
 
-/// Walk the block chain and add up the per-block sample counts; a stream
-/// written without a known length records it this way.
+/// A stream with an unknown length records it as the sum of the blocks'
+/// sample counts. Real files have one block per fraction of a second; a
+/// crafted file full of tiny blocks must not make us walk it forever.
+const MAX_BLOCKS: u64 = 1_000_000;
+
+/// Walk the block chain and add up the per-block sample counts.
 fn sum_block_samples(src: &mut Source) -> Option<u64> {
     let mut total = 0u64;
     let mut at = 0u64;
-    while at + HEADER_LEN <= src.len {
+    for _ in 0..MAX_BLOCKS {
+        let Some(remaining) = src.len.checked_sub(at) else {
+            break;
+        };
+        if remaining < HEADER_LEN {
+            break;
+        }
         let h = src.at(at, HEADER_LEN as usize)?;
         if &h[0..4] != b"wvpk" {
             break;
         }
-        total += u64::from(le32(&h, 20)?);
+        total = total.saturating_add(u64::from(le32(&h, 20)?));
         let size = u64::from(le32(&h, 4)?);
-        let next = at + 8 + size;
+        let Some(next) = at.checked_add(8).and_then(|v| v.checked_add(size)) else {
+            break;
+        };
         if next <= at {
             break;
         }

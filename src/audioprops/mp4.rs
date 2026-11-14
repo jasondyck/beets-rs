@@ -11,27 +11,59 @@ use super::{Info, Source, be32, be64, seconds};
 type Range = (u64, u64);
 
 const HEADER: u64 = 8;
+/// Real files have a handful of boxes; stop at a number no sane file
+/// reaches so a file full of tiny boxes can't build a huge vector.
+const MAX_BOXES: usize = 100_000;
+/// The codec boxes we read (`esds`, `alac`) are tiny; their declared size
+/// must not make us allocate more than this.
+const MAX_CODEC_BOX: u64 = 64 * 1024;
+/// A real `esds` nests an `ES_Descriptor` and a
+/// `DecoderConfigDescriptor`; a crafted one must not recurse deeply.
+const MAX_DESCRIPTOR_DEPTH: u32 = 8;
 
 /// The child boxes of the box payload `start..end`.
 fn children(src: &mut Source, start: u64, end: u64) -> Vec<([u8; 4], Range)> {
     let mut out = Vec::new();
     let mut at = start;
-    while at + HEADER <= end {
-        let Some(h) = src.at(at, 8) else { break };
-        let mut size = u64::from(be32(&h, 0).unwrap_or(0));
-        let mut payload = at + HEADER;
-        if size == 1 {
-            let Some(ext) = src.at(at + 8, 8) else { break };
-            size = be64(&ext, 0).unwrap_or(0);
-            payload += 8;
-        } else if size == 0 {
-            size = end - at;
-        }
-        if size < payload - at || at + size > end {
+    loop {
+        if out.len() >= MAX_BOXES {
             break;
         }
-        out.push((h[4..8].try_into().unwrap(), (payload, at + size)));
-        at += size;
+        let Some(remaining) = end.checked_sub(at) else {
+            break;
+        };
+        if remaining < HEADER {
+            break;
+        }
+        let Some(h) = src.at(at, 8) else { break };
+        let declared = u64::from(be32(&h, 0).unwrap_or(0));
+        let (size, header) = match declared {
+            // A zero size means "to the end of the parent box".
+            0 => (remaining, HEADER),
+            // The 64-bit size follows the normal header.
+            1 => {
+                let Some(ext_at) = at.checked_add(HEADER) else {
+                    break;
+                };
+                let Some(ext) = src.at(ext_at, 8) else { break };
+                (be64(&ext, 0).unwrap_or(0), HEADER + 8)
+            }
+            size => (size, HEADER),
+        };
+        if size < header {
+            break;
+        }
+        let Some(payload) = at.checked_add(header) else {
+            break;
+        };
+        let Some(next) = at.checked_add(size) else {
+            break;
+        };
+        if next > end || next <= at {
+            break;
+        }
+        out.push((h[4..8].try_into().unwrap(), (payload, next)));
+        at = next;
     }
     out
 }
@@ -76,10 +108,13 @@ fn esds_bitrate(data: &[u8]) -> u32 {
     // Full box header, then a nest of MPEG-4 descriptors (each a tag byte
     // and a length in 7-bit groups).
     let mut p = 4;
-    walk_descriptors(data, &mut p, data.len()).unwrap_or(0)
+    walk_descriptors(data, &mut p, data.len(), 0).unwrap_or(0)
 }
 
-fn walk_descriptors(data: &[u8], p: &mut usize, end: usize) -> Option<u32> {
+fn walk_descriptors(data: &[u8], p: &mut usize, end: usize, depth: u32) -> Option<u32> {
+    if depth > MAX_DESCRIPTOR_DEPTH {
+        return None;
+    }
     while *p < end {
         let tag = *data.get(*p)?;
         *p += 1;
@@ -100,23 +135,24 @@ fn walk_descriptors(data: &[u8], p: &mut usize, end: usize) -> Option<u32> {
         match tag {
             // DecoderConfigDescriptor: object type, stream type, buffer
             // size, max bitrate, average bitrate.
-            0x04 => return be32(data, body + 9),
+            0x04 => return be32(data, body.checked_add(9)?),
             // ES_Descriptor: ES_ID, flags and optional fields, then its
             // child descriptors.
             0x03 => {
-                let flags = *data.get(body + 2)?;
-                let mut child = body + 3;
+                let flags = *data.get(body.checked_add(2)?)?;
+                let mut child = body.checked_add(3)?;
                 if flags & 0x80 != 0 {
-                    child += 2;
+                    child = child.checked_add(2)?;
                 }
                 if flags & 0x40 != 0 {
-                    child += 1 + *data.get(child)? as usize;
+                    let url_len = *data.get(child)? as usize;
+                    child = child.checked_add(1)?.checked_add(url_len)?;
                 }
                 if flags & 0x20 != 0 {
-                    child += 2;
+                    child = child.checked_add(2)?;
                 }
                 *p = child;
-                if let Some(bitrate) = walk_descriptors(data, p, next) {
+                if let Some(bitrate) = walk_descriptors(data, p, next, depth + 1) {
                     return Some(bitrate);
                 }
                 *p = next;
@@ -138,29 +174,35 @@ fn sample_entry_bitrate(src: &mut Source, stsd: Range) -> u32 {
     if stsd.1 - stsd.0 < 16 {
         return 0;
     }
-    let Some((kind, (start, end))) = children(src, stsd.0 + 8, stsd.1).into_iter().next() else {
+    let Some(children_at) = stsd.0.checked_add(8) else {
+        return 0;
+    };
+    let Some((kind, (start, end))) = children(src, children_at, stsd.1).into_iter().next() else {
+        return 0;
+    };
+    let Some(codec_at) = start.checked_add(28) else {
         return 0;
     };
     if kind == *b"mp4a" {
         // Audio sample entry fields end 28 bytes after the box payload
         // begins; the codec's boxes follow.
-        if let Some(esds) = child(src, (start + 28, end), b"esds")
-            && let Some(data) = src.at(esds.0, (esds.1 - esds.0) as usize)
+        if let Some(esds) = child(src, (codec_at, end), b"esds")
+            && let Some(data) = read_codec_box(src, esds)
         {
             return esds_bitrate(&data);
         }
-        if let Some((_, wave)) = children(src, start + 28, end)
+        if let Some((_, wave)) = children(src, codec_at, end)
             .into_iter()
             .find(|(k, _)| k == b"wave")
             && let Some(esds) = child(src, wave, b"esds")
-            && let Some(data) = src.at(esds.0, (esds.1 - esds.0) as usize)
+            && let Some(data) = read_codec_box(src, esds)
         {
             return esds_bitrate(&data);
         }
         0
     } else if kind == *b"alac" {
-        if let Some(alac) = child(src, (start + 28, end), b"alac")
-            && let Some(data) = src.at(alac.0, (alac.1 - alac.0) as usize)
+        if let Some(alac) = child(src, (codec_at, end), b"alac")
+            && let Some(data) = read_codec_box(src, alac)
         {
             return alac_bitrate(&data).unwrap_or(0);
         }
@@ -168,6 +210,13 @@ fn sample_entry_bitrate(src: &mut Source, stsd: Range) -> u32 {
     } else {
         0
     }
+}
+
+/// A codec configuration box's payload, capped: these hold a few dozen
+/// bytes, so a declared size in the gigabytes must not be allocated.
+fn read_codec_box(src: &mut Source, range: Range) -> Option<Vec<u8>> {
+    let size = range.1.checked_sub(range.0)?.min(MAX_CODEC_BOX) as usize;
+    src.at(range.0, size)
 }
 
 pub fn parse(src: &mut Source) -> Option<Info> {

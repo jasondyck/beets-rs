@@ -696,3 +696,219 @@ fn aiff_with_a_bad_form_type_is_unreadable() {
     d[8..12].copy_from_slice(b"WAVE");
     assert_eq!(read_bytes(&d, riff::parse_aiff), None);
 }
+
+// ------------------------------------------------------- robustness fuzzing
+
+/// Run `f` in a worker thread and fail if it panics or doesn't finish: audio
+/// files are untrusted input, so no parser may hang or crash on them.
+fn within<F: FnOnce() + Send + 'static>(label: &str, f: F) {
+    use std::sync::mpsc::{RecvTimeoutError, channel};
+    use std::time::Duration;
+    let (tx, rx) = channel();
+    std::thread::spawn(move || {
+        f();
+        let _ = tx.send(());
+    });
+    match rx.recv_timeout(Duration::from_secs(20)) {
+        Ok(()) => {}
+        Err(RecvTimeoutError::Timeout) => panic!("{label}: did not finish within 20s"),
+        Err(RecvTimeoutError::Disconnected) => panic!("{label}: panicked"),
+    }
+}
+
+/// A small valid file for each format the parsers handle.
+fn robustness_samples() -> Vec<(&'static str, lofty::file::FileType, Vec<u8>)> {
+    use lofty::file::FileType;
+    let mut ape = vec![0u8; 120];
+    ape[..4].copy_from_slice(b"MAC ");
+    ape[4..6].copy_from_slice(&3990u16.to_le_bytes());
+    ape[56..60].copy_from_slice(&73_728u32.to_le_bytes());
+    ape[60..64].copy_from_slice(&1000u32.to_le_bytes());
+    ape[64..68].copy_from_slice(&2u32.to_le_bytes());
+    ape[72..76].copy_from_slice(&44_100u32.to_le_bytes());
+    let mut vorbis = ogg_page(7, 0, 2, &vorbis_id(44100, 128_000));
+    vorbis.extend(ogg_page(7, 44100, 4, &[0u8; 100]));
+    let mut opus = ogg_page(9, 0, 2, &opus_head(312));
+    opus.extend(ogg_page(9, 0, 0, b"OpusTags"));
+    opus.extend(ogg_page(9, 48_312, 4, &[0u8; 100]));
+    vec![
+        (
+            "mp3",
+            FileType::Mpeg,
+            mp3(b"Info", 40, 41 * 417, None, None),
+        ),
+        ("flac", FileType::Flac, flac(44100, 2, 16, 88200, 200)),
+        (
+            "mp4",
+            FileType::Mp4,
+            mp4(b"mp4a", &esds(128_000), 0, 44100, 88200),
+        ),
+        ("vorbis", FileType::Vorbis, vorbis),
+        ("opus", FileType::Opus, opus),
+        (
+            "wavpack",
+            FileType::WavPack,
+            wavpack_block(88_200, 88_200, wavpack_flags()),
+        ),
+        ("ape", FileType::Ape, ape),
+        ("wav", FileType::Wav, wav(1, 2, 44100, 4, 16, 400)),
+        ("aiff", FileType::Aiff, aiff(1, 66150, 16, 44100.0)),
+    ]
+}
+
+/// Feed a parser every truncation of a small valid file plus deterministic
+/// byte mutations; each must return (Some or None) without panicking.
+fn exercise_parser(ft: lofty::file::FileType, sample: &[u8]) {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("f");
+    let mut state = 0x1234_5678_9abc_def0u64;
+    let mut next = move || {
+        state ^= state << 13;
+        state ^= state >> 7;
+        state ^= state << 17;
+        state
+    };
+    std::fs::write(&path, sample).unwrap();
+    assert!(super::read(&path, ft).is_some(), "sample must be readable");
+
+    for len in 0..sample.len() {
+        std::fs::write(&path, &sample[..len]).unwrap();
+        let _ = super::read(&path, ft);
+    }
+    for _ in 0..3000 {
+        let mut d = sample.to_vec();
+        let flips = 1 + (next() % 4) as usize;
+        for _ in 0..flips {
+            let at = next() as usize % d.len();
+            d[at] = next() as u8;
+        }
+        // A few cases also add or drop bytes, moving every later field.
+        match next() % 8 {
+            0 => d.truncate(next() as usize % (d.len() + 1)),
+            1 => d.extend((0..8).map(|_| next() as u8)),
+            _ => {}
+        }
+        std::fs::write(&path, &d).unwrap();
+        let _ = super::read(&path, ft);
+    }
+}
+
+#[test]
+fn malformed_files_do_not_panic_or_hang() {
+    for (name, ft, sample) in robustness_samples() {
+        within(name, move || exercise_parser(ft, &sample));
+    }
+}
+
+/// A box with the given 32-bit size (and optional 64-bit extension after a
+/// size of 1), then some payload bytes.
+fn raw_mp4_box(size: u32, ext: Option<u64>, kind: &[u8; 4], payload: usize) -> Vec<u8> {
+    let mut d = size.to_be_bytes().to_vec();
+    d.extend(kind);
+    if let Some(ext) = ext {
+        d.extend(ext.to_be_bytes());
+    }
+    d.extend(vec![0u8; payload]);
+    d
+}
+
+#[test]
+fn mp4_extreme_box_sizes_do_not_hang() {
+    let cases: Vec<Vec<u8>> = vec![
+        raw_mp4_box(0, None, b"moov", 32),
+        raw_mp4_box(1, Some(u64::MAX), b"moov", 32),
+        raw_mp4_box(1, Some(u64::MAX - 7), b"moov", 32),
+        raw_mp4_box(1, Some(0), b"moov", 32),
+        raw_mp4_box(7, None, b"moov", 32),
+        raw_mp4_box(u32::MAX, None, b"moov", 8),
+        raw_mp4_box(0, None, b"free", 8),
+        // A parent box whose child's 64-bit size wraps around the offset.
+        {
+            let mut moov = mp4_box(b"moov", b"");
+            moov[0..4].copy_from_slice(&u32::MAX.to_be_bytes());
+            moov
+        },
+    ];
+    for (n, d) in cases.into_iter().enumerate() {
+        within(&format!("mp4 box case {n}"), move || {
+            let dir = tempfile::tempdir().unwrap();
+            let path = dir.path().join("f");
+            std::fs::write(&path, &d).unwrap();
+            let _ = super::read(&path, lofty::file::FileType::Mp4);
+        });
+    }
+}
+
+#[test]
+fn deeply_nested_es_descriptors_stop_at_the_depth_limit() {
+    // 100k nested ES_Descriptors, each 8 bytes (tag, 4-byte length, ES_ID,
+    // flags); the innermost has an empty body.
+    const DEPTH: usize = 100_000;
+    let mut nested = vec![0u8; DEPTH * 8];
+    for level in 0..DEPTH {
+        let at = level * 8;
+        nested[at] = 0x03;
+        let len = ((DEPTH - level - 1) * 8 + 3) as u32;
+        // Four 7-bit groups: 28 bits are enough for ~800k.
+        nested[at + 1] = ((len >> 21) & 0x7f) as u8 | 0x80;
+        nested[at + 2] = ((len >> 14) & 0x7f) as u8 | 0x80;
+        nested[at + 3] = ((len >> 7) & 0x7f) as u8 | 0x80;
+        nested[at + 4] = (len & 0x7f) as u8;
+        // ES_ID and flags stay zero.
+    }
+    let esds = mp4_box(b"esds", &fullbox(0, &nested));
+    let d = mp4(b"mp4a", &esds, 0, 44100, 88200);
+    within("nested esds", move || {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("f");
+        std::fs::write(&path, &d).unwrap();
+        let _ = super::read(&path, lofty::file::FileType::Mp4);
+    });
+}
+
+#[test]
+fn ogg_page_with_255_empty_segments() {
+    // A page with 255 zero-length segments (no body) carrying the last
+    // granule position.
+    let mut d = ogg_page(7, 0, 2, &vorbis_id(44100, 128_000));
+    let mut p = Vec::new();
+    p.extend(b"OggS");
+    p.push(0);
+    p.push(4);
+    p.extend(88200u64.to_le_bytes());
+    p.extend(7u32.to_le_bytes());
+    p.extend(0u32.to_le_bytes());
+    p.extend(0u32.to_le_bytes());
+    p.push(255);
+    p.extend([0u8; 255]);
+    let sum = ogg::crc(&p);
+    p[22..26].copy_from_slice(&sum.to_le_bytes());
+    d.extend(p);
+    let info = read_bytes(&d, |src| ogg::parse(src, ogg::Codec::Vorbis)).unwrap();
+    assert_eq!(info.length, 2.0);
+}
+
+#[test]
+fn id3v2_sizes_at_the_synchsafe_maximum() {
+    // A 28-bit tag size (256 MiB) that runs past the end of a small file,
+    // and a chain of such tags.
+    let mut d = b"ID3\x04\x00\x00\x7f\x7f\x7f\x7f".to_vec();
+    d.extend(vec![0u8; 64]);
+    let head = d[..10].to_vec();
+    let mut chain = head.clone();
+    for _ in 0..1000 {
+        chain.extend(&head);
+    }
+    within("id3 max", move || {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("f");
+        std::fs::write(&path, &d).unwrap();
+        assert_eq!(super::read(&path, lofty::file::FileType::Mpeg), None);
+    });
+    within("id3 max chain", move || {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("f");
+        std::fs::write(&path, &chain).unwrap();
+        assert_eq!(super::read(&path, lofty::file::FileType::Mpeg), None);
+    });
+}

@@ -39,9 +39,10 @@ pub fn parse(src: &mut Source) -> Option<Info> {
         (frames, blocks_per_frame, final_frame_blocks, sample_rate)
     };
     // A stream of no blocks has no length; the frame count includes the
-    // final, partially filled block.
+    // final, partially filled block. The multiplication is done wide so a
+    // crafted header's 32-bit fields can't overflow.
     let samples =
-        (i64::from(frames) - 1) * i64::from(blocks_per_frame) + i64::from(final_frame_blocks);
+        (i128::from(frames) - 1) * i128::from(blocks_per_frame) + i128::from(final_frame_blocks);
     Some(Info {
         length: seconds(samples.max(0) as f64, sample_rate)?,
         bitrate: 0,

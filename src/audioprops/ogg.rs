@@ -30,14 +30,16 @@ struct Page {
 
 /// Decode the page header at `d[at..]`; `file_len` bounds the body.
 fn page(d: &[u8], at: usize, file_len: u64) -> Option<Page> {
-    let h = d.get(at..at + PAGE_HEADER)?;
+    let header_end = at.checked_add(PAGE_HEADER)?;
+    let h = d.get(at..header_end)?;
     if &h[0..4] != b"OggS" || h[4] != 0 {
         return None;
     }
     let segments = h[26] as usize;
-    let table = d.get(at + PAGE_HEADER..at + PAGE_HEADER + segments)?;
+    let table_end = header_end.checked_add(segments)?;
+    let table = d.get(header_end..table_end)?;
     let body: usize = table.iter().map(|&n| n as usize).sum();
-    let len = (PAGE_HEADER + segments + body) as u64;
+    let len = (segments + body).checked_add(PAGE_HEADER)? as u64;
     if (at as u64).checked_add(len)? > file_len {
         return None;
     }
@@ -101,24 +103,34 @@ fn find_last(src: &mut Source, serial: u32) -> Option<Page> {
 }
 
 /// Where the audio pages start: just past the page that finishes the
-/// second packet (the `OpusTags` comment header).
+/// second packet (the `OpusTags` comment header). Comment headers can span
+/// many pages (cover art), but a crafted stream must not make us walk it
+/// forever.
+const MAX_HEADER_PAGES: usize = 100_000;
+
 fn audio_data_offset(src: &mut Source) -> Option<u64> {
     let mut at = 0u64;
     let mut packets = 0usize;
-    loop {
+    for _ in 0..MAX_HEADER_PAGES {
         let head = src.at(at, PAGE_HEADER)?;
         let nseg = head[PAGE_HEADER - 1] as usize;
-        let table = src.at(at + PAGE_HEADER as u64, nseg)?;
-        packets += table.iter().filter(|&&n| n < 255).count();
+        let table_at = at.checked_add(PAGE_HEADER as u64)?;
+        let table = src.at(table_at, nseg)?;
+        packets = packets.saturating_add(table.iter().filter(|&&n| n < 255).count());
         let body: u64 = table.iter().map(|&n| u64::from(n)).sum();
-        at += PAGE_HEADER as u64 + nseg as u64 + body;
-        if at > src.len {
+        let page_len = (PAGE_HEADER as u64)
+            .checked_add(nseg as u64)?
+            .checked_add(body)?;
+        let next = at.checked_add(page_len)?;
+        if next <= at || next > src.len {
             return None;
         }
+        at = next;
         if packets >= 2 {
             return Some(at);
         }
     }
+    None
 }
 
 pub fn parse(src: &mut Source, codec: Codec) -> Option<Info> {
