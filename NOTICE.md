@@ -1,48 +1,55 @@
 # Third-party notices
 
-beets-rs is released under the MIT License (see `LICENSE`), like beets. **Read
-the first section first**: some files follow GPL-licensed mutagen code, which
-needs a licensing decision before redistribution. The rest of this file lists
-the third-party projects whose code or data beets-rs ports or embeds, with the
-upstream licence and where it lives in this tree. It is an inventory, not a
+beets-rs is released under the MIT License (see `LICENSE`), like beets. The
+first section records how the earlier mutagen-derived audio-property code was
+replaced with a specification-based implementation, so the tree no longer
+contains GPL-derived code. The rest of this file lists the third-party
+projects whose code or data beets-rs ports or embeds, with the upstream
+licence and where it lives in this tree. It is an inventory, not a
 change of licence: the notices below are the ones the upstream licences require
 us to keep. Rust crate dependencies (crates.io, pinned in `Cargo.lock`) are not
 "embedded" in the tree; their licences ship in the crates themselves — see
 "Rust dependencies" at the end for the non-permissive ones.
 
-## ⚠ Copyleft-derived code — needs a decision
+## Formerly copyleft-derived code (resolved)
 
-**mutagen — GPL-2.0-or-later** (<https://mutagen.readthedocs.io>, GPLv2 text in
-mutagen's `COPYING`). Its audio-property parsers are followed closely, name by
-name, in:
+**mutagen — GPL-2.0-or-later** (<https://mutagen.readthedocs.io>). Beets uses
+mutagen for audio stream properties; the first version of beets-rs followed
+mutagen's parsing code closely in `src/props.rs`. That file has been removed
+and replaced by `src/audioprops/`, written from the file-format
+specifications instead:
 
-- `src/props.rs` — re-implements mutagen's `info.length` / `info.bitrate` per
-  format from mutagen's own code: `MPEGInfo` and `_parse_vbr_header` (Xing/Info,
-  VBRI), `LAMEHeader.parse_version` and `guess_settings`, `FLAC`,
-  `MP4Info`, `OggVorbisInfo`/`OggOpusInfo` and `OggPage.find_last`,
-  `WavPackInfo`, `MonkeysAudioInfo`, `WaveStreamInfo`, AiffInfo. The comments
-  cite each class/method; the parsing logic (not just the file-format specs)
-  is translated from mutagen.
+- `src/audioprops/mpeg.rs` — MPEG audio frame headers (ISO/IEC 11172-3 and
+  ISO/IEC 13818-3), the Xing/Info VBR header, the LAME tag ("Mp3 Info Tag
+  revision 1", Gabriel Bouvigne) including its documented VBR method, preset,
+  quality, lowpass and ATH fields, and ID3v2 tags in front of the stream
+  (ID3v2.3/2.4 specification). VBRI headers are not read: reference beets
+  (mutagen 1.48) ignores them too (checked black-box with patched headers).
+- `src/audioprops/flac.rs` — the FLAC format specification (STREAMINFO).
+- `src/audioprops/mp4.rs` — ISO/IEC 14496-12 (`moov`/`trak`/`mdia`/`stsd`
+  boxes, `mdhd` duration and timescale) and ISO/IEC 14496-14 (`esds`
+  ES_Descriptor/DecoderConfigDescriptor average bitrate, `mp4a` sample
+  entries); the Apple Lossless "alac" magic cookie's average bitrate.
+- `src/audioprops/ogg.rs` — RFC 3533 (pages, granule position, CRC-32), the
+  Vorbis I specification (identification header), RFC 7845 (OpusHead
+  pre-skip and 48 kHz granule clock; Opus average bitrate from the audio
+  data after the two header packets).
+- `src/audioprops/wavpack.rs` — the WavPack 4/5 block header (`wvpk`).
+- `src/audioprops/ape.rs` — the Monkey's Audio header (3.98+ and the older
+  layouts, with their fixed block sizes).
+- `src/audioprops/riff.rs` — RIFF WAVE (`fmt `/`data`) and AIFF/AIFF-C
+  (`COMM`, including the 80-bit extended sample rate).
 
-These parts should be treated as derived from a GPL-2.0-or-later work. Until
-that is decided, the project as a whole cannot honestly be distributed under
-the MIT licence alone if these files remain as they are. Options:
+The values were checked black-box against reference beets 2.14.1 (mutagen
+1.48) over a corpus of ffmpeg-generated files in every supported format plus
+beets' own `test/rsrc` audio; no mutagen source was consulted for the
+rewrite. `src/media.rs`'s MP4 sample-entry fields (channel count, sample
+size, 16.16 sample rate) and its Monkey's Audio pre-3.98 bit-depth rule are
+likewise read from the specifications described above.
 
-1. **Keep and relicense**: beets-rs (or these files) under GPL-2.0-or-later,
-   the same licence mutagen uses (beets itself is MIT but only *depends* on
-   mutagen, so this is a change for us, not a beets-compatibility issue).
-2. **Rewrite from the specifications**: implement `src/props.rs` from the
-   MPEG audio / Xing / LAME / VBRI, FLAC, ISO-BMFF (`mdhd`, `stsd`),
-   Ogg (granule position), WavPack, Monkey's Audio and WAV/AIFF format
-   documentation instead of mutagen's code; take the ID3v1 genre list from
-   the ID3v1/ID3v2 specification (or a permissively licensed crate such as
-   `id3`) and re-implement `TCON` conversion / ID3v1 saving from the ID3
-   spec. Exactness against beets can be re-checked with the existing
-   `props`/`mediafile` tests and diffbeets tag round-trips.
-3. **Replace with permissive crates**: e.g. the `id3` crate for ID3v1
-   genres/`TCON`, and accept lofty's `length`/`bitrate` (this changes user-
-   visible `length`/`bitrate` values vs beets, so it conflicts with the
-   port's compatibility goal).
+`src/mediafile.rs`'s tag rules (genre lists, `TCON`, ID3v1/v2.3 handling)
+and `src/plugins/scrub.rs`'s per-format stripping have been re-derived as
+listed under "Not copyleft-derived" below.
 
 Not copyleft, but worth knowing: `tools/diffbeets` and the `tests/fixtures/mb/
 expected/` data were *compared against* reference beets in a venv that has

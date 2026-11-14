@@ -308,7 +308,10 @@ CORPUS = (
 LAME_CORPUS = [
     (f"s04/lame{n:02d}.mp3", opts.split(), {"title": f"Lame {opts}", "artist": "Lame"})
     for n, opts in enumerate(["-b 128", "-V 2", "-V 9", "--abr 160", "--preset insane",
-                              "--preset 128", "-V 4 --vbr-old", "-t -b 96"], 1)
+                              "--preset 128", "-V 4 --vbr-old", "-t -b 96",
+                              # -V 8/-V 7 write an automatic lowpass and a
+                              # minimum-bitrate tag field (props rewrite).
+                              "-V 8", "-V 7"], 1)
 ]
 
 # Import steps: args to `beet`; the last one is a directory under src/.

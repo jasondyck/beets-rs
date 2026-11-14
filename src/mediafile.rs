@@ -819,8 +819,7 @@ impl Raw {
                 .trim()
                 .replace('_', "")
                 .parse::<i64>()
-                .map(|i| i != 0)
-                .unwrap_or(false),
+                .is_ok_and(|i| i != 0),
         }
     }
 
@@ -3211,7 +3210,7 @@ mod tests {
     }
 
     /// The genre tables cover ID3v1's 80 numbers and Winamp's 112
-    /// extensions, and genre_index() inverts genre_name().
+    /// extensions, and `genre_index()` inverts `genre_name()`.
     #[test]
     fn genre_table_covers_both_lists() {
         assert_eq!(ID3V1_GENRES.len(), 80);

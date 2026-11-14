@@ -84,6 +84,7 @@ pub enum Cmd {
         #[arg(short = 'W', long = "nowrite")]
         nowrite: bool,
         /// Never prompt: apply strong matches, otherwise use quiet_fallback
+        #[allow(clippy::doc_markdown)] // beets' own help text: the config key
         #[arg(short = 'q', long)]
         quiet: bool,
         /// Decision in quiet mode when there's no strong match
