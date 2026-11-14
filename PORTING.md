@@ -100,6 +100,8 @@ Done: fetchart (filesystem + CAA), lyrics (LRCLIB), embedart.
   - [x] **5.21d bpsync**: only the deprecation warnings and flags exist; finish once the beatport source (5.19) is in
   - [x] **5.21e loose ends**: move `item_types` into the plugin registry (plugins/types.rs still has a central per-plugin match, a merge-conflict spot); mpdstats reads MPD_HOST/MPD_PORT and shows beets' computed `music_directory` in `config -d` (registry defaults are static: allow a computed default); acousticbrainz `Float(6)` fields need per-field float digits in FieldType; mbpseudo's post-match adjustment needs the `album_matched` event (not sent by our importer yet) and `data_source` switching
 
+- [ ] **5.22 replace plugin** (found 2026-11-14 while listing plugins for the README): beets 2.14's `replace` (beetsplug/replace.py): `beet replace [-l N] QUERY NEW_FILE` replaces an item's audio file with another while keeping its tags (file checks, item selection prompt, confirmation, tag write, `after_write`-style DB update). Port with tests, a docs/FEATURES.md section, the README plugin list, and diffbeets cases
+
 ## 6. Quality
 
 - [x] **6.1 Integration tests**: CLI end-to-end tests in temp `BEETSRSDIR` with generated audio files (import → ls → modify → mv → update → rm)
