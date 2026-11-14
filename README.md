@@ -20,8 +20,8 @@ manager and MusicBrainz tagger.
 
 Download the archive for your system from the
 [latest release](https://github.com/jasondyck/beets-rs/releases/latest)
-(Linux x86_64/ARM, macOS Apple silicon/Intel), unpack it, and put `beet` on
-your `PATH`.
+(Linux x86_64/ARM, macOS Apple silicon/Intel, Windows x86_64), unpack it,
+and put `beet` (`beet.exe` on Windows) on your `PATH`.
 
 Or build from source with a recent Rust toolchain:
 
