@@ -97,6 +97,28 @@ def build_art_corpus(src, ffmpeg_audio):
     for i, (title, fmt) in enumerate([("Uno", "flac"), ("Dos", "ogg")], 1):
         tags = dict(common, title=title, track=str(i), album="Conv Album", _d="0.5")
         ffmpeg_audio(os.path.join(src, "conv", f"{i:02d}.{fmt}"), fmt, tags)
+    # replace (`replace/`): an album to import plus the files a `beet
+    # replace` can put in its items' places (other tags, another format,
+    # and a text file the file check rejects).
+    rep = {"artist": "Rep Artist", "album_artist": "Rep Artist",
+           "album": "Rep Album"}
+    for i, title in enumerate(["One", "Two"], 1):
+        tags = dict(rep, title=title, track=str(i))
+        ffmpeg_audio(os.path.join(src, "replace", "album", f"{i:02d}.mp3"), "mp3", tags)
+    ffmpeg_audio(os.path.join(src, "replace", "new.mp3"), "mp3",
+                 dict(rep, title="New Title", artist="New Artist", track="1", _d="1.5"))
+    ffmpeg_audio(os.path.join(src, "replace", "new2.mp3"), "mp3",
+                 dict(rep, title="Second Title", _d="2"))
+    ffmpeg_audio(os.path.join(src, "replace", "new.flac"), "flac",
+                 dict(rep, title="Flac Title", artist="Flac Artist", _d="1.2"))
+    with open(os.path.join(src, "replace", "notes.txt"), "w") as fh:
+        fh.write("not audio\n")
+    # The replacement files must look newer than the imported ones (beets'
+    # `update` compares whole seconds), so a case can show that `replace`
+    # leaves the item's tags alone until `update` reads the new file.
+    later = os.path.getmtime(os.path.join(src, "replace", "album", "01.mp3")) + 10
+    for name in ("new.mp3", "new2.mp3", "new.flac"):
+        os.utime(os.path.join(src, "replace", name), (later, later))
 
 
 # replaygain (`rg/`): an MP3 album over two discs whose tracks differ in
@@ -295,7 +317,7 @@ def run_one(work, name, music, images, extra, steps, tool, normalise, url):
     root = os.path.join(work, "art", name, tool.name)
     os.makedirs(root)
     fill = {"root": root, "src": os.path.join(src, "img"), "url": url,
-            "music": os.path.join(root, "music")}
+            "music": os.path.join(root, "music"), "corpus": src}
     config = merge(yaml.safe_load(ART_CONFIG.format(root=root)),
                    yaml.safe_load(extra.format(**fill)) or {})
     with open(os.path.join(root, "config.yaml"), "w") as f:
@@ -304,9 +326,15 @@ def run_one(work, name, music, images, extra, steps, tool, normalise, url):
     for dest, img in images.items():
         target = os.path.join(fill["music"], dest)
         if isinstance(img, tuple):
-            # ("text", template) or ("copy", fixture path): a file whose
-            # contents are written with the case's fill-ins.
+            # ("text", template), ("copy", fixture path) or ("copyfile",
+            # path): a file whose contents are written with the case's
+            # fill-ins, or copied as it is (binary audio).
             kind, value = img
+            if kind == "copyfile":
+                # Binary (or plain) content, copied as it is.
+                os.makedirs(os.path.dirname(target), exist_ok=True)
+                shutil.copy2(value.format(**fill), target)
+                continue
             if kind == "copy":
                 with open(value) as fh:
                     value = fh.read()

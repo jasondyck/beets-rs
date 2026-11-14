@@ -530,6 +530,34 @@ Beets 2.14's `play`: `beet play [-a/--album] [-A/--args ARGS] [-R/--randomize] [
 - Playing execs the player as beets' `interactive_open` does, and a failure is beets' "Could not play the query: ..."
 - The importer prompt gains "plaY" (`y`), which plays the task's files with a subprocess and returns to the prompt
 
+### replace
+
+Beets 2.14's `replace`: `beet replace [-l N] QUERY NEW_FILE` moves an audio
+file over the file of the item the query matches, keeping the item's database
+tags (the new file keeps its own; nothing is written to it):
+
+- `NEW_FILE` is checked first ("'PATH' is not a valid file.", or mediafile's
+  "PATH: File is not in a recognized format"), then the query ("No matching
+  songs found."); `-l` caps the matches
+- Several matches: "Matching songs:" followed by a numbered list. As in
+  beets, the entries are the item's field names (beets passes the model where
+  a path is expected, and iterating a model yields its keys), so the album's
+  fields are included too. "Which song would you like to replace? [1-N] (0 to
+  cancel): " with "Invalid input. Please type in a number." and "Invalid
+  choice. Please enter a number between 1 and N."; 0 cancels
+  ("Operation cancelled.")
+- The confirmation ("Replacing: NEW -> OLD", "Are you sure you want to
+  replace this track? (y/N): "; "yes"/"y" in any case) or "Aborting
+  replacement."; a missing original file is "The original song file was not
+  found."
+- The new file takes the old path with its own extension (same extension: in
+  place; another: the old file is removed) and the item's stored path follows
+  it, so a later `update` reads the new file's tags. "Replacement
+  successful.", or "Error replacing file: ..." / "Could not delete original
+  file: ..."
+- `beet replace` with fewer than two arguments is "Usage: beet replace
+  <query> <new_file_path>"
+
 ### replaygain
 
 Beets 2.14's `replaygain`: ReplayGain (`rg_track_gain`/`peak`, `rg_album_gain`/`peak`) or, for the formats in `r128` (default `[Opus]`), EBU R128 (`r128_track_gain`, `r128_album_gain`; the other kind's fields are cleared), stored and written as beets does:
