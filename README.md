@@ -131,21 +131,23 @@ the median of several runs:
 
 | Command (10,000 tracks) | beets | beets-rs | Speedup |
 |---|--:|--:|--:|
-| `version` (startup) | 0.22 s | 0.011 s | 21x |
-| `import -A` | 45.2 s | 2.03 s | 22x |
-| `ls` (all items) | 2.43 s | 0.20 s | 12x |
-| `ls -a` (all albums) | 0.29 s | 0.018 s | 16x |
-| `ls artist:'Artist 7'` | 0.27 s | 0.018 s | 15x |
-| `ls title::'^Song 1'` (regex) | 0.48 s | 0.037 s | 13x |
-| `ls year:1970..1979` | 0.59 s | 0.045 s | 13x |
-| `ls -f` (custom template) | 2.50 s | 0.20 s | 12x |
-| `ls year- title+` (sorted) | 2.41 s | 0.19 s | 13x |
-| `stats` | 1.25 s | 0.20 s | 6x |
-| `mv -p` (pretend, all items) | 9.51 s | 0.71 s | 13x |
-| `modify -y album:'Album 3' genre=Ska` | 1.16 s | 0.087 s | 13x |
+| `version` (startup) | 0.22 s | 0.009 s | 24x |
+| `import -A` | 45.8 s | 3.66 s | 13x |
+| `ls` (all items) | 2.34 s | 0.083 s | 28x |
+| `ls -a` (all albums) | 0.27 s | 0.014 s | 19x |
+| `ls artist:'Artist 7'` | 0.27 s | 0.015 s | 18x |
+| `ls title::'^Song 1'` (regex) | 0.47 s | 0.022 s | 21x |
+| `ls year:1970..1979` | 0.58 s | 0.025 s | 23x |
+| `ls -f` (custom template) | 2.43 s | 0.087 s | 28x |
+| `ls year- title+` (sorted) | 2.34 s | 0.103 s | 23x |
+| `stats` | 1.23 s | 0.080 s | 16x |
+| `mv -p` (pretend, all items) | 8.45 s | 0.38 s | 22x |
+| `modify -y album:'Album 3' genre=Ska` | 1.15 s | 0.060 s | 19x |
 
-Measured on Linux with an 8-core AMD Ryzen 7 3800X, a release build and warm
-caches. Imports that autotag spend most of their time waiting on
+Measured on Linux with an 8-core AMD Ryzen 7 3800X, a release build, warm
+caches and the library database on an NVMe disk (with it on a RAM disk,
+`import -A` takes 1.8 s: most of the rest is SQLite syncing each album's
+commit to disk). Imports that autotag spend most of their time waiting on
 MusicBrainz, which allows about one request per second, so the gain there is
 smaller. `tools/bench/bench.sh` reruns the comparison (see
 [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md#benchmarks)).
