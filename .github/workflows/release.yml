@@ -1,7 +1,7 @@
 name: Release
 
-# Pushing a tag like v0.1.0 builds the binaries and publishes a GitHub
-# release with them. Running the workflow by hand ("Run workflow") only
+# Pushing a tag like v0.1.0 builds the binaries (`beet` and the `beet-gui`
+# desktop app) and publishes a GitHub release with them. Running the workflow by hand ("Run workflow") only
 # builds, so the platforms can be checked without releasing.
 on:
   push:
@@ -42,13 +42,26 @@ jobs:
         with:
           key: ${{ matrix.target }}
 
+      # beet-gui (GPUI) links the desktop libraries: Wayland, X11/xkbcommon,
+      # fontconfig and freetype.
+      - name: Install GUI build dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends pkg-config \
+            libxkbcommon-dev libxkbcommon-x11-dev libwayland-dev \
+            libxcb1-dev libx11-xcb-dev libfontconfig1-dev libfreetype-dev \
+            libvulkan-dev
+
       - name: Build
-        run: cargo build --release --locked --target ${{ matrix.target }}
+        run: cargo build --release --locked --workspace --target ${{ matrix.target }}
 
       - name: Smoke test
         run: |
           export BEETSRSDIR="$RUNNER_TEMP/beets-rs"
           target/${{ matrix.target }}/release/beet version
+          # The GUI's command-line mode (no window needed).
+          target/${{ matrix.target }}/release/beet-gui --beet version
 
       - name: Package
         id: package
@@ -57,7 +70,8 @@ jobs:
           name="beets-rs-${GITHUB_REF_NAME}-${{ matrix.target }}"
           [[ $GITHUB_REF_TYPE == tag ]] || name="beets-rs-dev-${{ matrix.target }}"
           mkdir "$name"
-          cp "target/${{ matrix.target }}/release/beet" README.md LICENSE NOTICE.md "$name/"
+          cp "target/${{ matrix.target }}/release/beet" "target/${{ matrix.target }}/release/beet-gui" README.md LICENSE NOTICE.md "$name/"
+          cp gui/README.md "$name/GUI.md"
           cp -r docs "$name/"
           tar -czf "$name.tar.gz" "$name"
           if command -v sha256sum >/dev/null; then
@@ -90,13 +104,14 @@ jobs:
           key: x86_64-pc-windows-msvc
 
       - name: Build
-        run: cargo build --release --locked --target x86_64-pc-windows-msvc
+        run: cargo build --release --locked --workspace --target x86_64-pc-windows-msvc
 
       - name: Smoke test
         shell: bash
         run: |
           export BEETSRSDIR="$RUNNER_TEMP/beets-rs"
           target/x86_64-pc-windows-msvc/release/beet.exe version
+          target/x86_64-pc-windows-msvc/release/beet-gui.exe --beet version
 
       - name: Package
         id: package
@@ -105,7 +120,8 @@ jobs:
           name="beets-rs-${GITHUB_REF_NAME}-x86_64-pc-windows-msvc"
           [[ $GITHUB_REF_TYPE == tag ]] || name="beets-rs-dev-x86_64-pc-windows-msvc"
           mkdir "$name"
-          cp "target/x86_64-pc-windows-msvc/release/beet.exe" README.md LICENSE NOTICE.md "$name/"
+          cp "target/x86_64-pc-windows-msvc/release/beet.exe" "target/x86_64-pc-windows-msvc/release/beet-gui.exe" README.md LICENSE NOTICE.md "$name/"
+          cp gui/README.md "$name/GUI.md"
           cp -r docs "$name/"
           # `7z` is on the Windows runners; a zip keeps the executable bit
           # question out of it (Windows has none).
