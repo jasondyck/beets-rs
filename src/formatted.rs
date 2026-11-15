@@ -9,6 +9,7 @@ use crate::model::{ALBUM_FIELDS, Album, ITEM_FIELDS, Item, Kind, Record};
 use crate::template::{Context, asciify_path};
 use anyhow::{Result, anyhow};
 use fancy_regex::Regex;
+use std::borrow::Cow;
 use std::cell::{OnceCell, RefCell};
 use std::collections::{HashMap, HashSet};
 use std::fmt::Write as _;
@@ -233,8 +234,10 @@ impl FormatEnv {
             .into_iter()
             .map(|mut comp| {
                 for (re, rep) in replacements {
-                    if let Ok(c) = re.try_replacen(&comp, 0, rep.as_str()) {
-                        comp = c.into_owned();
+                    // A borrowed result means no match: keep the existing
+                    // component instead of allocating another identical copy.
+                    if let Ok(Cow::Owned(c)) = re.try_replacen(&comp, 0, rep.as_str()) {
+                        comp = c;
                     }
                 }
                 comp

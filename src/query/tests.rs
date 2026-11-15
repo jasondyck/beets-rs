@@ -65,6 +65,25 @@ fn set(v: &[&str]) -> BTreeSet<String> {
 // ------------------------------------------------------------ query parsing
 
 #[test]
+fn regexp_matching_normalizes_unicode() {
+    set_ctx(None, true);
+    for (text, normalized) in [
+        ("Song 1", "Song 1"),
+        ("Café", "Café"),
+        ("Cafe\u{301}", "Café"),
+        ("a\u{315}\u{300}", "à\u{315}"),
+        ("\u{1100}\u{1161}", "가"),
+        ("q\u{301}", "q\u{301}"),
+    ] {
+        let record = item(&[("title", text)]);
+        let query = Query::parse(Kind::Item, &[format!("title::^{normalized}$")]).unwrap();
+        assert!(query.matches_obj(&Obj::new(&record)), "{text:?}");
+        let mismatch = Query::parse(Kind::Item, &[format!("title::^{normalized}x$")]).unwrap();
+        assert!(!mismatch.matches_obj(&Obj::new(&record)), "{text:?}");
+    }
+}
+
+#[test]
 fn parse_query_part_as_beets() {
     let p = |s: &str| {
         let (k, t, _) = parse_query_part(s);

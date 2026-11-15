@@ -67,7 +67,13 @@ zip = { version = "2", default-features = false, features = ["deflate"] }
 zbus = "5"
 
 [dev-dependencies]
+criterion = { version = "0.8.2", default-features = false, features = ["cargo_bench_support"] }
 tempfile = "3.27.0"
+
+# Micro-benchmarks of the hot paths: `cargo bench --bench core`.
+[[bench]]
+name = "core"
+harness = false
 
 [lints.clippy]
 # Every unsafe block needs a `// SAFETY:` comment (6.5 batch U).

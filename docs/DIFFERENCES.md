@@ -70,6 +70,12 @@ things that aren't ported yet are at the end and in
 - **The database uses SQLite's WAL journal** (`library.db-wal` /
   `-shm` files appear beside it). Reason: better concurrency and crash
   safety; the schema and contents are beets 2.14's.
+- **Two extra indexes**, `idx_item_default_sort` and
+  `idx_album_default_sort`, on the default `sort_item` / `sort_album`
+  expressions, so listing in the default order reads an index instead of
+  sorting every row. Reason: speed (about a quarter off a full `ls`). They use
+  only SQLite's built-in functions, so beets and the `sqlite3` shell can
+  still read and write the database; adding items costs slightly more.
 - An **instrumental lyrics marker** is left for beets' instrumental
   migration to blank rather than blanked first; the end state is the same.
 - **A library made by an older beets-rs** (absolute paths, `genre` columns)

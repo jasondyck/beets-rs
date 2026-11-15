@@ -3,7 +3,7 @@
 use crate::model::{Album, FieldType, Item, Kind, Record, Value, schema};
 use crate::query::Query;
 use anyhow::{Context, Result, bail};
-use rusqlite::types::Value as SqlValue;
+use rusqlite::types::{Value as SqlValue, ValueRef};
 use rusqlite::{Connection, Row, params};
 use std::any::Any;
 use std::cell::RefCell;
@@ -222,31 +222,43 @@ impl Library {
 
 // beets stores/reads these as Python numbers; the casts mirror that.
 #[allow(clippy::cast_possible_truncation, clippy::cast_precision_loss)]
-fn from_sql(v: SqlValue, ty: FieldType, music_dir: Option<&Path>) -> Value {
-    match (ty, v) {
-        (_, SqlValue::Null) => ty.default_value(),
-        (FieldType::Path, SqlValue::Blob(b)) => Value::Path(from_db_path(b, music_dir)),
-        (FieldType::Path, SqlValue::Text(s)) => {
-            Value::Path(from_db_path(s.into_bytes(), music_dir))
+fn from_sql(
+    v: ValueRef<'_>,
+    ty: FieldType,
+    music_dir: Option<&Path>,
+    column: usize,
+) -> rusqlite::Result<Value> {
+    Ok(match v {
+        ValueRef::Null => ty.default_value(),
+        ValueRef::Text(bytes) => {
+            // Even path text must report the same UTF-8 error and column as
+            // Row::get::<_, SqlValue>, rather than accepting malformed text.
+            let s =
+                std::str::from_utf8(bytes).map_err(|e| rusqlite::Error::Utf8Error(column, e))?;
+            match ty {
+                FieldType::Path => Value::Path(from_db_path(bytes.to_vec(), music_dir)),
+                FieldType::NullFloat => s.trim().parse().map_or(Value::Null, Value::Float),
+                _ => Value::Str(s.to_owned()),
+            }
         }
-        (FieldType::Str, SqlValue::Text(s)) => Value::Str(s),
-        (FieldType::Bool, SqlValue::Integer(i)) => Value::Bool(i != 0),
-        (
-            FieldType::Float(_) | FieldType::NullFloat | FieldType::Duration | FieldType::Date,
-            SqlValue::Real(f),
-        ) => Value::Float(f),
-        (
-            FieldType::Float(_) | FieldType::NullFloat | FieldType::Duration | FieldType::Date,
-            SqlValue::Integer(i),
-        ) => Value::Float(i as f64),
-        (FieldType::NullFloat, SqlValue::Text(s)) => {
-            s.trim().parse().map_or(Value::Null, Value::Float)
-        }
-        (_, SqlValue::Integer(i)) => Value::Int(i),
-        (_, SqlValue::Real(f)) => Value::Int(f as i64),
-        (_, SqlValue::Text(s)) => Value::Str(s),
-        (t, _) => t.default_value(),
-    }
+        ValueRef::Blob(bytes) => match ty {
+            FieldType::Path => Value::Path(from_db_path(bytes.to_vec(), music_dir)),
+            _ => ty.default_value(),
+        },
+        ValueRef::Integer(i) => match ty {
+            FieldType::Bool => Value::Bool(i != 0),
+            FieldType::Float(_) | FieldType::NullFloat | FieldType::Duration | FieldType::Date => {
+                Value::Float(i as f64)
+            }
+            _ => Value::Int(i),
+        },
+        ValueRef::Real(f) => match ty {
+            FieldType::Float(_) | FieldType::NullFloat | FieldType::Duration | FieldType::Date => {
+                Value::Float(f)
+            }
+            _ => Value::Int(f as i64),
+        },
+    })
 }
 
 /// beets' schema statements, as SQLite keeps them in `sqlite_master`
@@ -292,6 +304,28 @@ fn columns_of(conn: &Connection, t: &str) -> Result<Vec<(String, String)>> {
         .collect::<Result<_, _>>()?)
 }
 
+// These expressions deliberately match FieldSort::order_clause, including
+// its type-dependent LOWER and the smart artist sort's NOCASE collation.
+const ITEM_DEFAULT_SORT_INDEX_SQL: &str = "
+    CREATE INDEX IF NOT EXISTS idx_item_default_sort ON items (
+        COALESCE(NULLIF(artist_sort, ''), artist) COLLATE NOCASE,
+        CASE WHEN TYPEOF(album)='text' THEN LOWER(album)
+             WHEN TYPEOF(album)='blob' THEN LOWER(album) ELSE album END,
+        CASE WHEN TYPEOF(disc)='text' THEN LOWER(disc)
+             WHEN TYPEOF(disc)='blob' THEN LOWER(disc) ELSE disc END,
+        CASE WHEN TYPEOF(track)='text' THEN LOWER(track)
+             WHEN TYPEOF(track)='blob' THEN LOWER(track) ELSE track END,
+        id
+    );";
+
+const ALBUM_DEFAULT_SORT_INDEX_SQL: &str = "
+    CREATE INDEX IF NOT EXISTS idx_album_default_sort ON albums (
+        COALESCE(NULLIF(albumartist_sort, ''), albumartist) COLLATE NOCASE,
+        CASE WHEN TYPEOF(album)='text' THEN LOWER(album)
+             WHEN TYPEOF(album)='blob' THEN LOWER(album) ELSE album END,
+        id
+    );";
+
 /// beets' `_make_table`, `_make_attribute_table` and `_create_indices`:
 /// a missing table is created with beets' statement, an existing one
 /// gets the columns it lacks.
@@ -316,6 +350,9 @@ fn make_tables(conn: &Connection) -> Result<()> {
             conn.execute_batch(
                 "CREATE INDEX IF NOT EXISTS idx_item_album_id ON items (album_id);",
             )?;
+            conn.execute_batch(ITEM_DEFAULT_SORT_INDEX_SQL)?;
+        } else {
+            conn.execute_batch(ALBUM_DEFAULT_SORT_INDEX_SQL)?;
         }
     }
     Ok(())
@@ -437,14 +474,13 @@ pub(crate) struct Migrator<'a> {
 
 impl Migrator<'_> {
     pub(crate) fn run(&self) -> Result<()> {
+        let mut done_stmt = self
+            .conn
+            .prepare("SELECT EXISTS(SELECT 1 FROM migrations WHERE name = ? AND table_name = ?)")?;
         for (name, kinds) in MIGRATIONS {
             for kind in *kinds {
                 let t = table(*kind);
-                let done: bool = self.conn.query_row(
-                    "SELECT EXISTS(SELECT 1 FROM migrations WHERE name = ? AND table_name = ?)",
-                    [name, &t],
-                    |r| r.get(0),
-                )?;
+                let done: bool = done_stmt.query_row([name, &t], |r| r.get(0))?;
                 if done {
                     continue;
                 }
@@ -1005,10 +1041,11 @@ impl Library {
         let mut values = Vec::with_capacity(cols.1.len());
         for ((_, ty), &i) in schema(kind).iter().zip(&cols.1) {
             values.push(from_sql(
-                row.get::<_, SqlValue>(i)?,
+                row.get_ref(i)?,
                 *ty,
                 self.music_dir.as_deref(),
-            ));
+                i,
+            )?);
         }
         Ok(Record::from_values(kind, row.get(cols.0)?, values))
     }
@@ -1142,15 +1179,46 @@ impl Library {
             .collect::<Result<_, _>>()?;
         let a = attr_table(kind);
         let mut flex: HashMap<i64, BTreeMap<String, String>> = HashMap::new();
-        let mut stmt = self.conn.prepare(&format!(
-            "SELECT entity_id, key, value FROM {a} WHERE entity_id IN (SELECT id FROM ({inner}))"
-        ))?;
-        let rows = stmt.query_map(rusqlite::params_from_iter(args.iter()), |r| {
-            Ok((r.get(0)?, r.get(1)?, r.get::<_, Option<String>>(2)?))
-        })?;
-        for row in rows {
-            let (id, k, v): (i64, String, Option<String>) = row?;
-            flex.entry(id).or_default().insert(k, v.unwrap_or_default());
+        let mut read_attrs = |sql: &str, ids: &[i64]| -> Result<()> {
+            let mut stmt = self.conn.prepare_cached(sql)?;
+            let rows = stmt.query_map(rusqlite::params_from_iter(ids.iter()), |r| {
+                Ok((r.get(0)?, r.get(1)?, r.get::<_, Option<String>>(2)?))
+            })?;
+            for row in rows {
+                let (id, k, v): (i64, String, Option<String>) = row?;
+                flex.entry(id).or_default().insert(k, v.unwrap_or_default());
+            }
+            Ok(())
+        };
+        if where_sql == "1" {
+            // With no filter, scanning owner IDs is cheaper than binding them.
+            // Keep the owner check so orphan attributes retain their behavior.
+            read_attrs(
+                &format!(
+                    "SELECT entity_id, key, value FROM {a} WHERE entity_id IN (SELECT id FROM {t})"
+                ),
+                &[],
+            )?;
+        } else {
+            // The matching IDs are already known. Re-running the predicate
+            // duplicates regex/LIKE scans. Batches stay below SQLite's historical
+            // variable limit; sorted IDs retain the existing entity scan order.
+            let mut ids: Vec<_> = recs
+                .iter()
+                .map(|r| {
+                    r.id.expect("BUG: records loaded from the database have an id")
+                })
+                .collect();
+            ids.sort_unstable();
+            for batch in ids.chunks(900) {
+                let placeholders = vec!["?"; batch.len()].join(",");
+                read_attrs(
+                    &format!(
+                        "SELECT entity_id, key, value FROM {a} WHERE entity_id IN ({placeholders})"
+                    ),
+                    batch,
+                )?;
+            }
         }
         for r in &mut recs {
             if let Some(f) = flex.remove(
@@ -1649,8 +1717,220 @@ mod tests {
             .unwrap()
     }
 
-    /// A new library has beets 2.14's schema, statement for statement, and
-    /// every beets migration recorded as done, as beets records them.
+    fn beets_master(conn: &Connection) -> Vec<(String, String, Option<String>)> {
+        // Native performance indexes are the only intentional additions to
+        // beets' schema. Keep comparing every other statement exactly.
+        master(conn)
+            .into_iter()
+            .filter(|(_, name, _)| {
+                !matches!(
+                    name.as_str(),
+                    "idx_item_default_sort" | "idx_album_default_sort"
+                )
+            })
+            .collect()
+    }
+
+    #[test]
+    fn borrowed_sql_values_keep_storage_type_conversions() {
+        let conn = Connection::open_in_memory().unwrap();
+        for (ty, input, expected) in [
+            (FieldType::Str, SqlValue::Null, Value::Str(String::new())),
+            (FieldType::NullFloat, SqlValue::Null, Value::Null),
+            (FieldType::MusicalKey, SqlValue::Null, Value::Null),
+            (FieldType::Bool, SqlValue::Integer(0), Value::Bool(false)),
+            (FieldType::Bool, SqlValue::Integer(-1), Value::Bool(true)),
+            (FieldType::Bool, SqlValue::Real(2.75), Value::Int(2)),
+            (FieldType::Date, SqlValue::Integer(2), Value::Float(2.0)),
+            (
+                FieldType::Duration,
+                SqlValue::Real(2.75),
+                Value::Float(2.75),
+            ),
+            (FieldType::Bitrate, SqlValue::Real(2.75), Value::Int(2)),
+            (
+                FieldType::Int,
+                SqlValue::Integer(i64::MAX),
+                Value::Int(i64::MAX),
+            ),
+            (FieldType::Str, SqlValue::Integer(2), Value::Int(2)),
+            (
+                FieldType::Int,
+                SqlValue::Text("text".into()),
+                Value::Str("text".into()),
+            ),
+            (
+                FieldType::NullFloat,
+                SqlValue::Text(" 1.5 ".into()),
+                Value::Float(1.5),
+            ),
+            (
+                FieldType::NullFloat,
+                SqlValue::Text("bad".into()),
+                Value::Null,
+            ),
+            (
+                FieldType::Duration,
+                SqlValue::Text("bad".into()),
+                Value::Str("bad".into()),
+            ),
+            (
+                FieldType::Str,
+                SqlValue::Blob(b"text".to_vec()),
+                Value::Str(String::new()),
+            ),
+            (
+                FieldType::Path,
+                SqlValue::Blob(b"a/b".to_vec()),
+                Value::Path("a/b".into()),
+            ),
+            (
+                FieldType::Path,
+                SqlValue::Text("a/b".into()),
+                Value::Path("a/b".into()),
+            ),
+        ] {
+            let actual = conn
+                .query_row("SELECT ?", [input], |r| {
+                    from_sql(r.get_ref(0)?, ty, None, 0)
+                })
+                .unwrap();
+            assert_eq!(actual, expected, "{ty:?}");
+        }
+    }
+
+    #[test]
+    fn borrowed_sql_values_keep_utf8_errors_and_column_indexes() {
+        let conn = Connection::open_in_memory().unwrap();
+        for ty in [
+            FieldType::Str,
+            FieldType::Path,
+            FieldType::NullFloat,
+            FieldType::Int,
+        ] {
+            conn.query_row("SELECT 0, CAST(x'ff' AS TEXT)", [], |r| {
+                let original = r.get::<_, SqlValue>(1).unwrap_err();
+                let borrowed = from_sql(r.get_ref(1)?, ty, None, 1).unwrap_err();
+                assert_eq!(original.to_string(), borrowed.to_string());
+                match (original, borrowed) {
+                    (rusqlite::Error::Utf8Error(a, e), rusqlite::Error::Utf8Error(b, f)) => {
+                        assert_eq!((a, e), (b, f));
+                    }
+                    errors => panic!("unexpected errors: {errors:?}"),
+                }
+                Ok(())
+            })
+            .unwrap();
+        }
+    }
+
+    #[test]
+    fn default_sort_indexes_preserve_sql_order_and_avoid_sorters() {
+        crate::query::set_context(crate::query::Context::default());
+        let lib = Library::in_memory().unwrap();
+        let values = [
+            SqlValue::Null,
+            SqlValue::Text(String::new()),
+            SqlValue::Text("A".into()),
+            SqlValue::Text("a".into()),
+            SqlValue::Text("É".into()),
+            SqlValue::Text("é".into()),
+            SqlValue::Blob(b"A".to_vec()),
+            SqlValue::Blob(vec![0xff]),
+            SqlValue::Integer(1),
+            SqlValue::Real(1.25),
+        ];
+        for kind in [Kind::Item, Kind::Album] {
+            let t = table(kind);
+            for i in 0..200 {
+                let mut rec = Record::new(kind);
+                lib.add(&mut rec).unwrap();
+                // Identical pairs exercise the final id tie-breaker. Raw SQL
+                // also exercises SQLite's mixed-type and NULL sort semantics.
+                let n = i / 2;
+                let artist = &values[n % values.len()];
+                let sort = &values[(n / values.len()) % values.len()];
+                let album = &values[(n / 3) % values.len()];
+                let id = rec.id.unwrap();
+                match kind {
+                    Kind::Item => lib.conn.execute(
+                        "UPDATE items SET artist=?, artist_sort=?, album=?, disc=?, track=? WHERE id=?",
+                        params![artist, sort, album, values[(n / 7) % values.len()], values[(n / 11) % values.len()], id],
+                    ),
+                    Kind::Album => lib.conn.execute(
+                        "UPDATE albums SET albumartist=?, albumartist_sort=?, album=? WHERE id=?",
+                        params![artist, sort, album, id],
+                    ),
+                }.unwrap();
+            }
+            let q = Query::parse::<&str>(kind, &[]).unwrap();
+            let order = q.effective_sort().order_clause(kind).unwrap();
+            let sql = format!("SELECT {t}.* FROM {t} WHERE 1 ORDER BY {order}, {t}.id");
+            let unindexed = sql.replace(
+                &format!("FROM {t} WHERE"),
+                &format!("FROM {t} NOT INDEXED WHERE"),
+            );
+            let ids = |sql: &str| -> Vec<i64> {
+                lib.conn
+                    .prepare(sql)
+                    .unwrap()
+                    .query_map([], |r| r.get("id"))
+                    .unwrap()
+                    .collect::<Result<_, _>>()
+                    .unwrap()
+            };
+            let expected = ids(&unindexed);
+            let actual = lib.fetch(kind, &q).unwrap();
+            assert_eq!(
+                actual.iter().map(|r| r.id.unwrap()).collect::<Vec<_>>(),
+                expected
+            );
+            let plan = |sql: &str| -> Vec<String> {
+                lib.conn
+                    .prepare(&format!("EXPLAIN QUERY PLAN {sql}"))
+                    .unwrap()
+                    .query_map([], |r| r.get(3))
+                    .unwrap()
+                    .collect::<Result<_, _>>()
+                    .unwrap()
+            };
+            let before = plan(&unindexed);
+            let after = plan(&sql);
+            println!("{kind:?}: unindexed={before:?}; indexed={after:?}");
+            assert!(
+                before
+                    .iter()
+                    .any(|p| p.contains("USE TEMP B-TREE FOR ORDER BY"))
+            );
+            assert!(!after.iter().any(|p| p.contains("USE TEMP B-TREE")));
+            let index = match kind {
+                Kind::Item => "idx_item_default_sort",
+                Kind::Album => "idx_album_default_sort",
+            };
+            assert!(after.iter().any(|p| p.contains(index)));
+        }
+    }
+
+    #[test]
+    fn older_libraries_acquire_default_sort_indexes_on_open() {
+        let d = tempfile::tempdir().unwrap();
+        let path = d.path().join("library.db");
+        let lib = Library::open_with(&path, None, false).unwrap();
+        lib.conn
+            .execute_batch("DROP INDEX idx_item_default_sort; DROP INDEX idx_album_default_sort;")
+            .unwrap();
+        drop(lib);
+        let lib = Library::open_with(&path, None, false).unwrap();
+        let names: Vec<_> = master(&lib.conn)
+            .into_iter()
+            .map(|(_, name, _)| name)
+            .collect();
+        assert!(names.iter().any(|n| n == "idx_item_default_sort"));
+        assert!(names.iter().any(|n| n == "idx_album_default_sort"));
+    }
+
+    /// Apart from the native sort indexes, a new library has beets 2.14's
+    /// schema statement for statement, with every beets migration recorded.
     #[test]
     fn new_library_has_beets_schema() {
         let d = tempfile::tempdir().unwrap();
@@ -1658,7 +1938,7 @@ mod tests {
         make_beets_fixture(&beets);
         let ours = Library::open(&d.path().join("library.db")).unwrap();
         let beets = Connection::open(&beets).unwrap();
-        assert_eq!(master(&ours.conn), master(&beets));
+        assert_eq!(beets_master(&ours.conn), master(&beets));
         assert_eq!(migrations(&ours.conn), migrations(&beets));
     }
 
@@ -1870,7 +2150,7 @@ mod tests {
         let beets = d.path().join("beets.db");
         make_beets_fixture(&beets);
         let beets = Connection::open(&beets).unwrap();
-        let got = master(&lib.conn);
+        let got = beets_master(&lib.conn);
         let items_sql = |m: &[(String, String, Option<String>)]| {
             m.iter()
                 .find(|r| r.1 == "items")
@@ -2149,6 +2429,49 @@ mod tests {
         );
         let got = lib.duplicate_candidates(Kind::Item, &w, true).unwrap();
         assert_eq!(ids(&got), vec![single.id.unwrap()]);
+    }
+
+    #[test]
+    fn fetched_attributes_follow_records_across_batches() {
+        crate::query::set_context(crate::query::Context::default());
+        let lib = Library::in_memory().unwrap();
+        lib.transaction(|lib| {
+            for i in 0..1201 {
+                let mut item = Record::new_item();
+                let title = format!("Song {i}");
+                item.set_str("title", title.clone());
+                item.set_str("artist", format!("Artist {}", i % 7));
+                item.flex.insert("row".into(), title);
+                lib.add(&mut item)?;
+            }
+            Ok(())
+        })
+        .unwrap();
+        lib.conn
+            .execute_batch(
+                "INSERT INTO item_attributes(entity_id, key, value) VALUES (999999, NULL, NULL);
+             UPDATE item_attributes SET value=NULL WHERE entity_id=1;",
+            )
+            .unwrap();
+        for (args, expected_count) in [
+            (&[][..], 1201),
+            (&["title::^Song"][..], 1201),
+            (&["artist:Artist 2"][..], 172),
+        ] {
+            let q = Query::parse(Kind::Item, args).unwrap();
+            let items = lib.items(&q).unwrap();
+            assert_eq!(items.len(), expected_count);
+            for item in items {
+                let expected = if item.id == Some(1) {
+                    ""
+                } else {
+                    item.str("title")
+                };
+                assert_eq!(item.flex.get("row").map(String::as_str), Some(expected));
+            }
+        }
+        let missing = Query::parse(Kind::Item, &["title:missing"]).unwrap();
+        assert!(lib.items(&missing).unwrap().is_empty());
     }
 
     #[test]

@@ -274,13 +274,15 @@ static NON_ALNUM: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"[^a-z0-9]").un
 fn string_dist_basic(a: &str, b: &str) -> f64 {
     let a = deunicode(a).to_lowercase();
     let b = deunicode(b).to_lowercase();
-    let a = NON_ALNUM.replace_all(&a, "");
-    let b = NON_ALNUM.replace_all(&b, "");
+    let a = NON_ALNUM.replace_all(&a, "").into_owned().into_bytes();
+    let b = NON_ALNUM.replace_all(&b, "").into_owned().into_bytes();
     if a.is_empty() && b.is_empty() {
         return 0.0;
     }
-    let max = a.chars().count().max(b.chars().count());
-    strsim::levenshtein(&a, &b) as f64 / max as f64
+    // NON_ALNUM leaves only ASCII letters and digits, so byte distance is
+    // identical to character distance without repeatedly decoding UTF-8.
+    let max = a.len().max(b.len());
+    strsim::generic_levenshtein(&a, &b) as f64 / max as f64
 }
 
 /// beets' `string_dist`: an edit distance with tweaks for "Beatles, The",

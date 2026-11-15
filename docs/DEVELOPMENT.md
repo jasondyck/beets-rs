@@ -85,3 +85,10 @@ sorted alphabetically) and its name in the README's plugin list, and its cases a
 `tools/bench/bench.sh [n-files] [workdir]` builds the same synthetic library
 with reference beets and with beets-rs and times common commands; the
 README's Performance table comes from it.
+
+`cargo bench --bench core` runs the criterion micro-benchmarks in
+`benches/core.rs` (template parsing/rendering, query parsing and matching,
+library queries over a 10,000-item database, path destinations, the
+autotagger's distances). Filter by name (`cargo bench --bench core --
+library`) and compare against a saved run with `--save-baseline before`
+then `--baseline before`.

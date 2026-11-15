@@ -497,24 +497,29 @@ pub fn schema(kind: Kind) -> &'static [(&'static str, FieldType)] {
     }
 }
 
-/// The fixed fields by name, for the lookups that every tag read and
-/// every database write does.
-fn field_map(kind: Kind) -> &'static HashMap<&'static str, FieldType> {
-    static ITEM: std::sync::OnceLock<HashMap<&'static str, FieldType>> = std::sync::OnceLock::new();
-    static ALBUM: std::sync::OnceLock<HashMap<&'static str, FieldType>> =
-        std::sync::OnceLock::new();
+/// Fixed fields by name, with their slots in a record's schema-ordered storage.
+fn field_map(kind: Kind) -> &'static HashMap<&'static str, (usize, FieldType)> {
+    type Fields = HashMap<&'static str, (usize, FieldType)>;
+    static ITEM: std::sync::OnceLock<Fields> = std::sync::OnceLock::new();
+    static ALBUM: std::sync::OnceLock<Fields> = std::sync::OnceLock::new();
     let cell = match kind {
         Kind::Item => &ITEM,
         Kind::Album => &ALBUM,
     };
-    cell.get_or_init(|| schema(kind).iter().copied().collect())
+    cell.get_or_init(|| {
+        schema(kind)
+            .iter()
+            .enumerate()
+            .map(|(i, (name, ty))| (*name, (i, *ty)))
+            .collect()
+    })
 }
 
 pub fn field_type(kind: Kind, name: &str) -> Option<FieldType> {
     if name == "id" {
         return Some(FieldType::Int);
     }
-    field_map(kind).get(name).copied()
+    field_map(kind).get(name).map(|(_, ty)| *ty)
 }
 
 // ------------------------------------------------- typed flexible attributes
@@ -574,12 +579,88 @@ fn flex_text(value: &Value, ty: FieldType) -> String {
     }
 }
 
+/// Fixed fields share one schema, so each record needs only its values.
+/// Optional slots preserve the missing fields accepted by `from_values`.
+#[derive(Clone)]
+struct FixedValues {
+    kind: Kind,
+    values: Vec<Option<Value>>,
+    extra: BTreeMap<&'static str, Value>,
+}
+
+impl FixedValues {
+    fn new(kind: Kind) -> Self {
+        Self {
+            kind,
+            values: schema(kind)
+                .iter()
+                .map(|(_, ty)| Some(ty.default_value()))
+                .collect(),
+            extra: BTreeMap::new(),
+        }
+    }
+
+    fn from_values(kind: Kind, values: Vec<Value>) -> Self {
+        Self {
+            kind,
+            values: values
+                .into_iter()
+                .take(schema(kind).len())
+                .map(Some)
+                .collect(),
+            extra: BTreeMap::new(),
+        }
+    }
+
+    fn get(&self, name: &str) -> Option<&Value> {
+        match field_map(self.kind).get(name) {
+            Some((i, _)) => self.values.get(*i)?.as_ref(),
+            None => self.extra.get(name),
+        }
+    }
+
+    fn contains_key(&self, name: &str) -> bool {
+        self.get(name).is_some()
+    }
+
+    fn insert(&mut self, name: &'static str, value: Value) -> Option<Value> {
+        let Some(&(i, _)) = field_map(self.kind).get(name) else {
+            // set_path accepts albums too; callers can also change Record::kind.
+            return self.extra.insert(name, value);
+        };
+        if self.values.len() <= i {
+            self.values.resize_with(i + 1, || None);
+        }
+        self.values[i].replace(value)
+    }
+}
+
+impl std::ops::Index<&str> for FixedValues {
+    type Output = Value;
+
+    fn index(&self, name: &str) -> &Self::Output {
+        self.get(name).expect("no entry found for key")
+    }
+}
+
+impl std::fmt::Debug for FixedValues {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // Keep Record's existing map-shaped, alphabetically ordered Debug output.
+        let values: BTreeMap<_, _> = schema(self.kind)
+            .iter()
+            .filter_map(|(name, _)| self.get(name).map(|v| (*name, v)))
+            .chain(self.extra.iter().map(|(name, value)| (*name, value)))
+            .collect();
+        std::fmt::Debug::fmt(&values, f)
+    }
+}
+
 /// One row of the `items` or `albums` table.
 #[derive(Clone, Debug)]
 pub struct Record {
     pub kind: Kind,
     pub id: Option<i64>,
-    values: BTreeMap<&'static str, Value>,
+    values: FixedValues,
     pub flex: BTreeMap<String, String>,
 }
 
@@ -588,14 +669,10 @@ pub type Album = Record;
 
 impl Record {
     pub fn new(kind: Kind) -> Self {
-        let values = schema(kind)
-            .iter()
-            .map(|(n, t)| (*n, t.default_value()))
-            .collect();
         Record {
             kind,
             id: None,
-            values,
+            values: FixedValues::new(kind),
             flex: BTreeMap::new(),
         }
     }
@@ -606,7 +683,7 @@ impl Record {
         Record {
             kind,
             id: Some(id),
-            values: schema(kind).iter().map(|(n, _)| *n).zip(values).collect(),
+            values: FixedValues::from_values(kind, values),
             flex: BTreeMap::new(),
         }
     }
@@ -667,11 +744,16 @@ impl Record {
         if self.kind == Kind::Item && name == "album_id" && self.int("album_id") == 0 {
             return Some(String::new());
         }
+        // Fixed values can be formatted by reference. get() clones them for
+        // callers that need ownership, which adds an allocation for text tags.
+        if let Some(value) = self.values.get(name) {
+            return Some(value.format(ty));
+        }
         self.get(name).map(|v| v.format(ty))
     }
 
     pub fn set(&mut self, name: &str, value: Value) {
-        if let Some((key, &ty)) = field_map(self.kind).get_key_value(name) {
+        if let Some((key, &(_, ty))) = field_map(self.kind).get_key_value(name) {
             let key: &'static str = key;
             let coerced = coerce(value, ty);
             let old = self.values.insert(key, coerced);
@@ -825,6 +907,57 @@ fn coerce(value: Value, ty: FieldType) -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn sparse_records_keep_missing_fields_and_extra_fixed_values() {
+        let mut rec = Record::from_values(Kind::Album, 7, vec![]);
+        rec.set_str("album", "Sparse");
+        assert!(!rec.has_field("albumartist"));
+        rec.set_path("/album/path");
+        assert_eq!(rec.path(), Path::new("/album/path"));
+
+        // kind is public: changing it must not lose fields or prevent storing
+        // fixed fields from the other schema.
+        rec.kind = Kind::Item;
+        rec.set_str("title", "Track");
+        rec.kind = Kind::Album;
+        assert_eq!(rec.str("title"), "Track");
+        assert_eq!(rec.str("album"), "Sparse");
+        assert!(!rec.has_field("albumartist"));
+        let expected = BTreeMap::from([
+            ("album", Value::Str("Sparse".into())),
+            ("mtime", Value::Float(0.0)),
+            ("path", Value::Path("/album/path".into())),
+            ("title", Value::Str("Track".into())),
+        ]);
+        assert_eq!(format!("{:?}", rec.values), format!("{expected:?}"));
+        let mut cloned = rec.clone();
+        cloned.set_path("/changed");
+        assert_eq!(rec.path(), Path::new("/album/path"));
+        assert_eq!(cloned.path(), Path::new("/changed"));
+    }
+
+    #[test]
+    fn loaded_values_keep_schema_associations() {
+        for kind in [Kind::Item, Kind::Album] {
+            let fields = schema(kind);
+            for len in [0, 1, fields.len() / 2, fields.len(), fields.len() + 1] {
+                let values: Vec<_> = (0..len).map(|i| Value::Str(i.to_string())).collect();
+                let expected: BTreeMap<_, _> = fields
+                    .iter()
+                    .map(|(name, _)| *name)
+                    .zip(values.clone())
+                    .collect();
+                let rec = Record::from_values(kind, 7, values);
+                assert_eq!(rec.id, Some(7));
+                for (name, _) in fields {
+                    assert_eq!(rec.values.get(name), expected.get(name));
+                }
+                assert_eq!(format!("{:?}", rec.values), format!("{expected:?}"));
+                assert!(rec.flex.is_empty());
+            }
+        }
+    }
 
     // beets' `Item.__setitem__`: changing a tag field resets `mtime`.
     #[test]

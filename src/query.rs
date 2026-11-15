@@ -18,7 +18,7 @@ use std::cmp::Ordering;
 use std::fmt;
 use std::path::{Path, PathBuf};
 use std::sync::LazyLock;
-use unicode_normalization::UnicodeNormalization;
+use unicode_normalization::{IsNormalized, UnicodeNormalization, is_nfc_quick};
 
 // ------------------------------------------------------------------ context
 
@@ -860,8 +860,14 @@ impl FieldQuery {
                 _ => false,
             },
             Test::Regexp(re) => value.unwrap_or(PyVal::None).strings().iter().any(|s| {
-                let s: String = s.nfc().collect();
-                re.is_match(&s).unwrap_or(false)
+                // Most stored text is already NFC. Only skip normalization
+                // when the quick check proves it; Maybe still needs composing.
+                if is_nfc_quick(s.chars()) == IsNormalized::Yes {
+                    re.is_match(s).unwrap_or(false)
+                } else {
+                    let s: String = s.nfc().collect();
+                    re.is_match(&s).unwrap_or(false)
+                }
             }),
             Test::Numeric { point, min, max } => {
                 let Some(v) = value else { return false };
