@@ -1,6 +1,7 @@
 //! The window: a sidebar of pages (albums, tracks, import, console,
 //! commands, configuration) around the library worker and the `beet` runner.
 
+use std::collections::HashSet;
 use std::ops::Range;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -26,24 +27,153 @@ use crate::runner::{self, Color as AnsiColor, Runner, Session};
 
 actions!(
     beet_gui,
-    [FocusSearch, Reload, ShowAlbums, ShowTracks, ShowConsole]
+    [
+        FocusSearch,
+        Reload,
+        ShowAlbums,
+        ShowTracks,
+        ShowImport,
+        ShowConsole,
+        ShowCommands,
+        ShowConfig,
+        ShowShortcuts,
+        // The album / track list (key context `Library`).
+        SelectAll,
+        ClearSelection,
+        CursorUp,
+        CursorDown,
+        CursorFirst,
+        CursorLast,
+        CursorPageUp,
+        CursorPageDown,
+        ExtendUp,
+        ExtendDown,
+        OpenSelection,
+        PlaySelection,
+        EditSelection,
+        RemoveSelection,
+        UpdateSelection,
+        WriteSelection,
+        MoveSelection,
+        RevealSelection,
+        // The field editor (key context `EditForm`) and the config page.
+        SaveEdit,
+        CancelEdit,
+        SaveConfig,
+    ]
 );
 
+/// Every shortcut: (keys, action, context, what it does). The help dialog
+/// lists the ones with a description.
+const SHORTCUTS: &[(&str, &str, &str)] = &[
+    ("Ctrl+F  /  Ctrl+L  /  /", "Search", "Anywhere"),
+    (
+        "Ctrl+1 … Ctrl+6",
+        "Albums, Tracks, Import, Console, Commands, Config",
+        "Anywhere",
+    ),
+    ("F5", "Reload the library", "Anywhere"),
+    ("F1  /  Ctrl+/", "This list", "Anywhere"),
+    (
+        "Enter (in search)",
+        "Search now and move to the list",
+        "Search",
+    ),
+    ("↑ ↓  Home End  PgUp PgDn", "Move through the list", "List"),
+    ("Click", "Select one", "List"),
+    ("Ctrl+Click", "Add to / remove from the selection", "List"),
+    ("Shift+Click, Shift+↑ ↓", "Select a range", "List"),
+    ("Ctrl+A", "Select everything in the list", "List"),
+    ("Esc", "Select only the current row", "List"),
+    ("Enter", "Album: show its tracks · Track: play", "List"),
+    ("Space", "Play", "List"),
+    (
+        "F2  /  Ctrl+E",
+        "Edit (several selected: modify them all)",
+        "List",
+    ),
+    ("Delete", "Remove…", "List"),
+    ("Ctrl+U", "Update from the files", "List"),
+    ("Ctrl+T", "Write tags to the files", "List"),
+    ("Ctrl+M", "Move / copy…", "List"),
+    ("Ctrl+O", "Show the folder", "List"),
+    ("Ctrl+S  /  Ctrl+Enter", "Save the edit", "Editing"),
+    ("Esc", "Cancel the edit", "Editing"),
+    ("Ctrl+S", "Save the configuration", "Configuration"),
+];
+
 pub fn bind_keys(cx: &mut App) {
+    const LIST: Option<&str> = Some("Library");
     cx.bind_keys([
         KeyBinding::new("ctrl-f", FocusSearch, None),
         KeyBinding::new("ctrl-l", FocusSearch, None),
         KeyBinding::new("f5", Reload, None),
         KeyBinding::new("ctrl-1", ShowAlbums, None),
         KeyBinding::new("ctrl-2", ShowTracks, None),
+        KeyBinding::new("ctrl-3", ShowImport, None),
+        KeyBinding::new("ctrl-4", ShowConsole, None),
         KeyBinding::new("ctrl-`", ShowConsole, None),
+        KeyBinding::new("ctrl-5", ShowCommands, None),
+        KeyBinding::new("ctrl-6", ShowConfig, None),
+        KeyBinding::new("f1", ShowShortcuts, None),
+        KeyBinding::new("ctrl-/", ShowShortcuts, None),
+        KeyBinding::new("/", FocusSearch, LIST),
+        KeyBinding::new("ctrl-a", SelectAll, LIST),
+        KeyBinding::new("escape", ClearSelection, LIST),
+        // The track table binds Escape itself (to drop its cursor); ours
+        // keeps the cursor and drops the rest of the selection.
+        KeyBinding::new("escape", ClearSelection, Some("DataTable")),
+        KeyBinding::new("up", CursorUp, LIST),
+        KeyBinding::new("down", CursorDown, LIST),
+        KeyBinding::new("home", CursorFirst, LIST),
+        KeyBinding::new("end", CursorLast, LIST),
+        KeyBinding::new("pageup", CursorPageUp, LIST),
+        KeyBinding::new("pagedown", CursorPageDown, LIST),
+        KeyBinding::new("shift-up", ExtendUp, LIST),
+        KeyBinding::new("shift-down", ExtendDown, LIST),
+        KeyBinding::new("enter", OpenSelection, LIST),
+        KeyBinding::new("space", PlaySelection, LIST),
+        KeyBinding::new("f2", EditSelection, LIST),
+        KeyBinding::new("ctrl-e", EditSelection, LIST),
+        KeyBinding::new("delete", RemoveSelection, LIST),
+        KeyBinding::new("ctrl-u", UpdateSelection, LIST),
+        KeyBinding::new("ctrl-t", WriteSelection, LIST),
+        KeyBinding::new("ctrl-m", MoveSelection, LIST),
+        KeyBinding::new("ctrl-o", RevealSelection, LIST),
+        KeyBinding::new("ctrl-s", SaveEdit, Some("EditForm")),
+        KeyBinding::new("ctrl-enter", SaveEdit, Some("EditForm")),
+        KeyBinding::new("escape", CancelEdit, Some("EditForm")),
+        KeyBinding::new("ctrl-s", SaveConfig, Some("ConfigPage")),
     ]);
+}
+
+/// The longest query argument to pass (Linux limits one argument to
+/// 128 KiB).
+const MAX_QUERY_ARG: usize = 120_000;
+
+/// One query argument matching any of `ids` in `field` (`id`, `album_id`):
+/// a regular expression, since an OR of thousands of terms is deeper than
+/// SQLite allows.
+fn ids_query(field: &str, ids: &[i64]) -> String {
+    if let [id] = ids {
+        return format!("{field}:{id}");
+    }
+    let alts: Vec<String> = ids.iter().map(i64::to_string).collect();
+    format!("{field}::^({})$", alts.join("|"))
 }
 
 /// Wait this long after the last keystroke before running a search.
 const SEARCH_DEBOUNCE: Duration = Duration::from_millis(220);
 /// How often the list is re-read while a command changes the library.
 const LIVE_REFRESH: Duration = Duration::from_secs(2);
+
+/// Where a keyboard move goes.
+#[derive(Clone, Copy, Debug)]
+enum MoveTo {
+    First,
+    Last,
+    By(isize),
+}
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum Page {
@@ -127,6 +257,11 @@ pub struct TrackTable {
     rows: Vec<Row>,
     /// The rows in the order the query returned them (for "no sort").
     original: Vec<Row>,
+    /// The app's selection, for highlighting.
+    marked: HashSet<i64>,
+    /// A Ctrl/Shift click for the app to apply (the table leaves those
+    /// alone, see `select_on_modifier_click`).
+    pending_click: Option<(usize, Modifiers)>,
 }
 
 impl TrackTable {
@@ -183,6 +318,28 @@ impl TableDelegate for TrackTable {
                 }
             }
         }
+    }
+
+    fn render_tr(
+        &mut self,
+        row_ix: usize,
+        _: &mut Window,
+        cx: &mut Context<TableState<Self>>,
+    ) -> Stateful<Div> {
+        let marked = self
+            .rows
+            .get(row_ix)
+            .is_some_and(|r| self.marked.contains(&r.id));
+        div()
+            .id(("row", row_ix))
+            .when(marked, |d| d.bg(selection_bg(cx)))
+            .on_click(cx.listener(move |table, e: &ClickEvent, _, cx| {
+                let m = e.modifiers();
+                if m.secondary(cx) || m.shift {
+                    table.delegate_mut().pending_click = Some((row_ix, m));
+                    cx.notify();
+                }
+            }))
     }
 
     fn render_td(
@@ -377,7 +534,8 @@ impl ActionForm {
         // `write` matches items: an album's tracks are `album_id:N`.
         if self.action == Action::Write && album {
             a.extend(self.query.iter().map(|q| match q.strip_prefix("id:") {
-                Some(id) => format!("album_id:{id}"),
+                // `id:N` or the selection's `id::^(…)$`.
+                Some(rest) => format!("album_id:{rest}"),
                 None => q.clone(),
             }));
         } else {
@@ -616,11 +774,13 @@ impl ImportForm {
 struct Startup {
     page: Option<Page>,
     query: Option<String>,
-    select: Option<(Kind, i64)>,
+    /// `album:N` or `track:N,M,…` (several: a multiple selection).
+    select: Option<(Kind, Vec<i64>)>,
     run: Option<String>,
     edit: bool,
     action: Option<Action>,
     dark: Option<bool>,
+    shortcuts: bool,
 }
 
 impl Startup {
@@ -640,7 +800,8 @@ impl Startup {
                     "item" | "track" => Kind::Item,
                     _ => return None,
                 };
-                Some((kind, id.parse().ok()?))
+                let ids: Vec<i64> = id.split(',').filter_map(|i| i.parse().ok()).collect();
+                (!ids.is_empty()).then_some((kind, ids))
             }),
             run: var("BEET_GUI_RUN"),
             edit: var("BEET_GUI_EDIT").is_some(),
@@ -655,6 +816,7 @@ impl Startup {
                 })
             }),
             dark: var("BEET_GUI_THEME").map(|t| t == "dark"),
+            shortcuts: var("BEET_GUI_SHORTCUTS").is_some(),
         };
         let any = s.page.is_some()
             || s.query.is_some()
@@ -662,7 +824,8 @@ impl Startup {
             || s.run.is_some()
             || s.edit
             || s.action.is_some()
-            || s.dark.is_some();
+            || s.dark.is_some()
+            || s.shortcuts;
         any.then_some(s)
     }
 }
@@ -693,7 +856,18 @@ pub struct BeetsApp {
     album_scroll: UniformListScrollHandle,
     tracks: Entity<TableState<TrackTable>>,
 
+    /// The current row (the detail pane shows it); with `marked`, the
+    /// cursor of a multiple selection.
     selected: Option<(Kind, i64)>,
+    /// The selection when more than the current row is selected (ids of
+    /// `selected`'s kind, the current row included).
+    marked: HashSet<i64>,
+    /// Where a Shift selection starts (a row index in the shown list).
+    anchor: Option<usize>,
+    /// A row the app selected in the track table itself, whose `SelectRow`
+    /// echo is not a user's click.
+    syncing_row: Option<usize>,
+    album_focus: FocusHandle,
     detail_gen: u64,
     detail: Option<Detail>,
     detail_error: Option<String>,
@@ -770,11 +944,14 @@ impl BeetsApp {
                 TrackTable {
                     rows: vec![],
                     original: vec![],
+                    marked: HashSet::new(),
+                    pending_click: None,
                 },
                 window,
                 cx,
             )
             .row_selectable(true)
+            .select_on_modifier_click(false)
             .col_selectable(false)
             .sortable(true)
             .col_resizable(true)
@@ -786,7 +963,10 @@ impl BeetsApp {
             window,
             |this, _, ev: &InputEvent, window, cx| match ev {
                 InputEvent::Change => this.schedule_search(window, cx),
-                InputEvent::PressEnter { .. } => this.run_search(cx),
+                InputEvent::PressEnter { .. } => {
+                    this.run_search(cx);
+                    this.focus_list(window, cx);
+                }
                 _ => {}
             },
         ));
@@ -804,13 +984,16 @@ impl BeetsApp {
                 };
                 match ev {
                     TableEvent::SelectRow(ix) => {
-                        if let Some((id, _)) = row(*ix, cx) {
-                            this.select(Kind::Item, id, cx);
+                        if this.syncing_row.take() == Some(*ix) {
+                            return;
+                        }
+                        if row(*ix, cx).is_some() {
+                            this.click_row(*ix, Modifiers::default(), cx);
                         }
                     }
                     TableEvent::DoubleClickedRow(ix) => {
                         if let Some((id, _)) = row(*ix, cx) {
-                            this.select(Kind::Item, id, cx);
+                            this.select_only(Kind::Item, id, Some(*ix), cx);
                             this.play_selection(cx);
                         }
                     }
@@ -853,6 +1036,13 @@ impl BeetsApp {
                 }
             },
         ));
+        // Ctrl/Shift clicks in the track table.
+        subs.push(cx.observe(&tracks, |this, table, cx| {
+            let click = table.update(cx, |t, _| t.delegate_mut().pending_click.take());
+            if let Some((ix, m)) = click {
+                this.click_row(ix, m, cx);
+            }
+        }));
         subs.push(cx.observe(&field_filter, |_, _, cx| cx.notify()));
         subs.push(cx.observe(&config_editor, |_, _, cx| cx.notify()));
 
@@ -935,6 +1125,10 @@ impl BeetsApp {
             album_scroll: UniformListScrollHandle::new(),
             tracks,
             selected: None,
+            marked: HashSet::new(),
+            anchor: None,
+            syncing_row: None,
+            album_focus: cx.focus_handle(),
             play_when_loaded: false,
             detail_gen: 0,
             detail: None,
@@ -1080,10 +1274,219 @@ impl BeetsApp {
         if self.selected == Some((kind, id)) {
             return;
         }
+        if self.selected.is_some_and(|(k, _)| k != kind) {
+            self.marked.clear();
+            self.anchor = None;
+        }
         self.selected = Some((kind, id));
         self.edit = None;
         self.request_detail(kind, id);
         cx.notify();
+    }
+
+    /// The shown list's ids, in display order.
+    fn list_ids(&self, kind: Kind, cx: &App) -> Vec<i64> {
+        match kind {
+            Kind::Album => self.albums.iter().map(|r| r.id).collect(),
+            Kind::Item => self
+                .tracks
+                .read(cx)
+                .delegate()
+                .rows
+                .iter()
+                .map(|r| r.id)
+                .collect(),
+        }
+    }
+
+    /// The current row's index in the shown list.
+    fn cursor(&self, cx: &App) -> Option<usize> {
+        let (kind, id) = self.selected?;
+        (self.page.kind() == Some(kind))
+            .then(|| self.list_ids(kind, cx).iter().position(|&x| x == id))
+            .flatten()
+    }
+
+    fn select_only(&mut self, kind: Kind, id: i64, ix: Option<usize>, cx: &mut Context<Self>) {
+        self.marked.clear();
+        self.anchor = ix;
+        self.select(kind, id, cx);
+        self.sync_marks(cx);
+    }
+
+    /// A click (or keyboard move, with no modifiers) on row `ix` of the
+    /// shown list.
+    fn click_row(&mut self, ix: usize, m: Modifiers, cx: &mut Context<Self>) {
+        let Some(kind) = self.page.kind() else {
+            return;
+        };
+        let ids = self.list_ids(kind, cx);
+        let Some(&id) = ids.get(ix) else {
+            return;
+        };
+        let same_kind = self.selected.is_some_and(|(k, _)| k == kind);
+        if m.shift {
+            let anchor = self.anchor.or(self.cursor(cx)).unwrap_or(ix);
+            let (a, b) = (anchor.min(ix), anchor.max(ix));
+            if !(m.secondary(cx) && same_kind) {
+                self.marked.clear();
+            }
+            self.marked.extend(&ids[a..=b.min(ids.len() - 1)]);
+            self.anchor = Some(anchor);
+            self.select(kind, id, cx);
+        } else if m.secondary(cx) {
+            if !same_kind {
+                self.marked.clear();
+            }
+            // Ctrl on a single selection starts a multiple one with it.
+            if self.marked.is_empty()
+                && let Some((_, cur)) = self.selected
+                && same_kind
+            {
+                self.marked.insert(cur);
+            }
+            if self.marked.contains(&id) {
+                self.marked.remove(&id);
+                // The current row moves to another selected one.
+                if self.selected == Some((kind, id))
+                    && let Some(&next) = ids.iter().find(|x| self.marked.contains(x))
+                {
+                    self.select(kind, next, cx);
+                }
+            } else {
+                self.marked.insert(id);
+                self.select(kind, id, cx);
+            }
+            self.anchor = Some(ix);
+        } else {
+            self.select_only(kind, id, Some(ix), cx);
+            return;
+        }
+        if self.marked.len() <= 1 {
+            self.marked.clear();
+        }
+        self.sync_marks(cx);
+        cx.notify();
+    }
+
+    fn select_all(&mut self, cx: &mut Context<Self>) {
+        let Some(kind) = self.page.kind() else {
+            return;
+        };
+        let ids = self.list_ids(kind, cx);
+        let Some(&first) = ids.first() else {
+            return;
+        };
+        if !self
+            .selected
+            .is_some_and(|(k, id)| k == kind && ids.contains(&id))
+        {
+            self.select(kind, first, cx);
+            self.anchor = Some(0);
+        }
+        self.marked = ids.into_iter().collect();
+        if self.marked.len() <= 1 {
+            self.marked.clear();
+        }
+        self.sync_marks(cx);
+        cx.notify();
+    }
+
+    /// Esc: keep only the current row.
+    fn clear_selection(&mut self, cx: &mut Context<Self>) {
+        self.marked.clear();
+        self.anchor = self.cursor(cx);
+        self.sync_marks(cx);
+        cx.notify();
+    }
+
+    /// Move the current row by `delta` (clamped); with `extend`, grow the
+    /// selection from the anchor as Shift+↑/↓ do.
+    fn move_cursor(&mut self, to: MoveTo, extend: bool, cx: &mut Context<Self>) {
+        let Some(kind) = self.page.kind() else {
+            return;
+        };
+        let len = self.list_ids(kind, cx).len();
+        if len == 0 {
+            return;
+        }
+        let cur = self.cursor(cx);
+        let ix = match (to, cur) {
+            (MoveTo::First, _) => 0,
+            (MoveTo::Last, _) => len - 1,
+            (MoveTo::By(_), None) => 0,
+            (MoveTo::By(d), Some(c)) => c.saturating_add_signed(d).min(len - 1),
+        };
+        let m = Modifiers {
+            shift: extend,
+            ..Modifiers::default()
+        };
+        if extend && self.anchor.is_none() {
+            self.anchor = cur;
+        }
+        self.click_row(ix, m, cx);
+        self.reveal_row(kind, ix, cx);
+    }
+
+    /// Scroll row `ix` into view and put the table's own cursor there.
+    fn reveal_row(&mut self, kind: Kind, ix: usize, cx: &mut Context<Self>) {
+        match kind {
+            Kind::Album => self
+                .album_scroll
+                .scroll_to_item(ix, ScrollStrategy::Nearest),
+            Kind::Item => {
+                self.syncing_row = Some(ix);
+                self.tracks.update(cx, |t, cx| t.set_selected_row(ix, cx));
+            }
+        }
+    }
+
+    /// Copy the selection to the track table for highlighting.
+    fn sync_marks(&mut self, cx: &mut Context<Self>) {
+        let marked = if self.selected.is_some_and(|(k, _)| k == Kind::Item) {
+            self.marked.clone()
+        } else {
+            HashSet::new()
+        };
+        self.tracks.update(cx, |t, cx| {
+            if t.delegate().marked != marked {
+                t.delegate_mut().marked = marked;
+                cx.notify();
+            }
+        });
+    }
+
+    /// Focus the shown list, for the keyboard.
+    fn focus_list(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        match self.page {
+            Page::Albums => window.focus(&self.album_focus, cx),
+            Page::Tracks => {
+                let handle = self.tracks.read(cx).focus_handle(cx);
+                window.focus(&handle, cx);
+            }
+            _ => {}
+        }
+    }
+
+    /// Enter: an album opens its tracks; a track plays.
+    fn open_selection(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        match self.selected {
+            Some((Kind::Album, _)) => {
+                let ids = self
+                    .selected_ids(cx)
+                    .map(|(_, ids)| ids)
+                    .unwrap_or_default();
+                if ids.is_empty() {
+                    return;
+                }
+                let q = ids_query("album_id", &ids);
+                self.search.update(cx, |s, cx| s.set_value(q, window, cx));
+                self.show(Page::Tracks, window, cx);
+                self.focus_list(window, cx);
+            }
+            Some((Kind::Item, _)) => self.play_selection(cx),
+            None => {}
+        }
     }
 
     fn request_detail(&mut self, kind: Kind, id: i64) {
@@ -1183,6 +1586,9 @@ impl BeetsApp {
     }
 
     fn apply_startup(&mut self, start: Startup, window: &mut Window, cx: &mut Context<Self>) {
+        if start.shortcuts {
+            self.show_shortcuts(window, cx);
+        }
         if let Some(dark) = start.dark {
             let mode = if dark {
                 ThemeMode::Dark
@@ -1201,9 +1607,13 @@ impl BeetsApp {
         if let Some(cmd) = &start.run {
             self.run_typed_command(cmd, cx);
         }
-        match start.select {
-            Some((kind, id)) => {
-                self.select(kind, id, cx);
+        match start.select.clone() {
+            Some((kind, ids)) => {
+                self.select(kind, ids[0], cx);
+                if ids.len() > 1 {
+                    self.marked = ids.into_iter().collect();
+                }
+                self.sync_marks(cx);
                 self.startup_after_detail = Some(start);
             }
             None => {
@@ -1281,14 +1691,75 @@ impl BeetsApp {
         true
     }
 
-    /// The query that matches the selection (album or track) as a list of
-    /// items, for plugin commands, which mostly take item queries.
-    fn selection_query(&self) -> Option<(Kind, Vec<String>)> {
+    /// The selected ids (several, or the current row), in list order.
+    fn selected_ids(&self, cx: &App) -> Option<(Kind, Vec<i64>)> {
         let (kind, id) = self.selected?;
+        if self.marked.len() <= 1 {
+            return Some((kind, vec![id]));
+        }
+        let mut ids: Vec<i64> = self
+            .list_ids(kind, cx)
+            .into_iter()
+            .filter(|x| self.marked.contains(x))
+            .collect();
+        // Selected rows the list no longer shows (after a search).
+        if ids.len() < self.marked.len() {
+            let mut rest: Vec<i64> = self
+                .marked
+                .iter()
+                .copied()
+                .filter(|x| !ids.contains(x))
+                .collect();
+            rest.sort_unstable();
+            ids.extend(rest);
+        }
+        Some((kind, ids))
+    }
+
+    /// Whether the selection is the whole shown list, whose search query
+    /// then stands for it.
+    fn selection_is_whole_list(&self, cx: &App) -> bool {
+        let Some((kind, _)) = self.selected else {
+            return false;
+        };
+        let ids = self.list_ids(kind, cx);
+        self.marked.len() > 1
+            && self.marked.len() == ids.len()
+            && ids.iter().all(|x| self.marked.contains(x))
+    }
+
+    /// The query for the selection in its own kind (with `-a` for albums).
+    fn selection_target(&self, cx: &App) -> Option<(Kind, Vec<String>)> {
+        let (kind, ids) = self.selected_ids(cx)?;
+        if self.selection_is_whole_list(cx) {
+            return Some((kind, split_words(&self.query_text(cx))));
+        }
+        Some((kind, vec![ids_query("id", &ids)]))
+    }
+
+    /// The query that matches the selection (albums or tracks) as items,
+    /// for plugin commands, which mostly take item queries.
+    fn selection_query_cx(&self, cx: &App) -> Option<(Kind, Vec<String>)> {
+        let (kind, ids) = self.selected_ids(cx)?;
         Some(match kind {
-            Kind::Album => (kind, vec![format!("album_id:{id}")]),
-            Kind::Item => (kind, vec![format!("id:{id}")]),
+            Kind::Album => (kind, vec![ids_query("album_id", &ids)]),
+            Kind::Item if self.selection_is_whole_list(cx) => {
+                (kind, split_words(&self.query_text(cx)))
+            }
+            Kind::Item => (kind, vec![ids_query("id", &ids)]),
         })
+    }
+
+    /// Run `args` + the selection's item query in the background.
+    fn run_quick(&mut self, args: &[String], cx: &mut Context<Self>) {
+        if let Some((_, q)) = self.selection_query_cx(cx) {
+            if q.iter().map(String::len).sum::<usize>() > MAX_QUERY_ARG {
+                return;
+            }
+            let mut a = args.to_vec();
+            a.extend(q);
+            self.start_background(runner::shell_join_short(&a), a, true, cx);
+        }
     }
 
     fn run_on_selection(&mut self, text: &str, cx: &mut Context<Self>) -> bool {
@@ -1296,14 +1767,14 @@ impl BeetsApp {
         if args.first().is_some_and(|a| a == "beet") {
             args.remove(0);
         }
-        let Some((_, q)) = self.selection_query() else {
+        let Some((_, q)) = self.selection_query_cx(cx) else {
             return false;
         };
         if args.is_empty() {
             return false;
         }
         args.extend(q);
-        self.start(runner::shell_join(&args), args, true, cx);
+        self.start(runner::shell_join_short(&args), args, true, cx);
         true
     }
 
@@ -1318,10 +1789,10 @@ impl BeetsApp {
     /// default player.
     fn play_selection(&mut self, cx: &mut Context<Self>) {
         if self.has_plugin("play") {
-            if let Some((_, q)) = self.selection_query() {
+            if let Some((_, q)) = self.selection_query_cx(cx) {
                 let mut args = vec!["play".to_string(), "-y".into()];
                 args.extend(q);
-                self.start_background(runner::shell_join(&args), args, false, cx);
+                self.start_background(runner::shell_join_short(&args), args, false, cx);
             }
         } else {
             match &self.detail {
@@ -1339,7 +1810,10 @@ impl BeetsApp {
     /// The `replace` plugin: pick a new audio file for the selected track;
     /// `beet replace` asks to confirm in the console.
     fn replace_file(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let Some((Kind::Item, q)) = self.selection_query() else {
+        if self.marked.len() > 1 {
+            return;
+        }
+        let Some((Kind::Item, q)) = self.selection_query_cx(cx) else {
             return;
         };
         let paths = cx.prompt_for_paths(PathPromptOptions {
@@ -1382,7 +1856,13 @@ impl BeetsApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let (kind, query, description, count) = if on_selection {
+        let (kind, query, description, count) = if on_selection && self.marked.len() > 1 {
+            let Some((kind, query)) = self.selection_target(cx) else {
+                return;
+            };
+            let n = self.marked.len();
+            (kind, query, "the selection".to_string(), Some(n))
+        } else if on_selection {
             let Some((kind, id)) = self.selected else {
                 return;
             };
@@ -1460,7 +1940,7 @@ impl BeetsApp {
                         // Nothing to assign.
                         return;
                     }
-                    let title = runner::shell_join(&args);
+                    let title = runner::shell_join_short(&args);
                     app.update(cx, |this, cx| this.start(title, args, true, cx))
                         .ok();
                     window.close_dialog(cx);
@@ -1699,7 +2179,18 @@ impl BeetsApp {
                         })
                         .child(b)
                 }))
-                .on_click(cx.listener(move |this, _, window, cx| this.show(page, window, cx)))
+                .on_click(cx.listener(move |this, _, window, cx| {
+                    this.show(page, window, cx);
+                    this.focus_list(window, cx);
+                }))
+                .tooltip(move |window, cx| {
+                    gpui_kit::component::tooltip::Tooltip::new(format!(
+                        "{}  (Ctrl+{})",
+                        page.label(),
+                        Page::ALL.iter().position(|&p| p == page).unwrap_or(0) + 1
+                    ))
+                    .build(window, cx)
+                })
         });
         let lib = match (&self.info, &self.open_error) {
             (_, Some(e)) => div()
@@ -1834,12 +2325,16 @@ impl BeetsApp {
                     )
                     .child(
                         div()
-                            .w(px(110.))
+                            .w(px(150.))
                             .text_sm()
                             .text_right()
                             .text_color(cx.theme().muted_foreground)
                             .child(if self.loading {
                                 "searching…".to_string()
+                            } else if self.marked.len() > 1
+                                && self.selected.is_some_and(|(k, _)| Some(k) == kind)
+                            {
+                                format!("{} of {count} selected", self.marked.len())
                             } else {
                                 format!("{count} {what}")
                             }),
@@ -1875,6 +2370,7 @@ impl BeetsApp {
 
     fn render_albums(&mut self, cx: &mut Context<Self>) -> impl IntoElement {
         let selected = self.selected;
+        let marked = self.marked.clone();
         let count = self.albums.len();
         let list = uniform_list(
             "albums",
@@ -1885,7 +2381,10 @@ impl BeetsApp {
                     .filter_map(|ix| {
                         let row = this.albums.get(ix)?;
                         let id = row.id;
-                        let is_selected = selected == Some((Kind::Album, id));
+                        let is_current = selected == Some((Kind::Album, id));
+                        let is_selected = is_current
+                            || (selected.is_some_and(|(k, _)| k == Kind::Album)
+                                && marked.contains(&id));
                         Some(
                             h_flex()
                                 .id(("album", ix))
@@ -1896,7 +2395,16 @@ impl BeetsApp {
                                 .cursor_pointer()
                                 .border_b_1()
                                 .border_color(theme.border)
-                                .when(is_selected, |d| d.bg(theme.list_active))
+                                .when(is_selected, |d| {
+                                    d.bg(if marked.len() > 1 {
+                                        selection_bg(cx)
+                                    } else {
+                                        theme.list_active
+                                    })
+                                })
+                                .when(is_current && marked.len() > 1, |d| {
+                                    d.border_l_2().border_color(theme.primary)
+                                })
                                 .hover(|d| d.bg(theme.list_hover))
                                 .child(cover(row.art.as_ref(), px(44.), cx))
                                 .child(
@@ -1937,8 +2445,12 @@ impl BeetsApp {
                                             if row.count == 1 { "" } else { "s" }
                                         )),
                                 )
-                                .on_click(cx.listener(move |this, _, _, cx| {
-                                    this.select(Kind::Album, id, cx)
+                                .on_click(cx.listener(move |this, e: &ClickEvent, window, cx| {
+                                    window.focus(&this.album_focus, cx);
+                                    this.click_row(ix, e.modifiers(), cx);
+                                    if e.click_count() == 2 && !e.modifiers().shift {
+                                        this.open_selection(window, cx);
+                                    }
                                 })),
                         )
                     })
@@ -1950,6 +2462,7 @@ impl BeetsApp {
         .h_full();
         v_flex()
             .size_full()
+            .track_focus(&self.album_focus)
             .when(count == 0 && !self.loading, |d| {
                 d.child(empty_state(
                     if self.query_text(cx).is_empty() {
@@ -1986,6 +2499,9 @@ impl BeetsApp {
     }
 
     fn render_detail(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
+        if self.marked.len() > 1 {
+            return self.render_bulk(cx);
+        }
         let theme = cx.theme().clone();
         let Some(detail) = self.detail.clone() else {
             let msg = match (&self.detail_error, self.selected) {
@@ -2052,6 +2568,7 @@ impl BeetsApp {
                 Button::new("edit")
                     .label(if editing { "Cancel edit" } else { "Edit" })
                     .small()
+                    .tooltip(if editing { "Esc" } else { "F2" })
                     .when(!editing, |b| b.primary())
                     .on_click(cx.listener(|this, _, window, cx| this.toggle_edit(window, cx))),
             )
@@ -2060,6 +2577,7 @@ impl BeetsApp {
                     Button::new("play")
                         .label("Play")
                         .small()
+                        .tooltip("Space")
                         .on_click(cx.listener(|this, _, _, cx| this.play_selection(cx))),
                 )
             })
@@ -2076,13 +2594,14 @@ impl BeetsApp {
                 Button::new("reveal")
                     .label("Show folder")
                     .small()
+                    .tooltip("Ctrl+O")
                     .on_click(cx.listener(move |this, _, _, cx| this.reveal(&p, cx)))
             }))
             .child(
                 Button::new("sel-update")
                     .label("Update")
                     .small()
-                    .tooltip("Re-read the tags from the files")
+                    .tooltip("Re-read the tags from the files (Ctrl+U)")
                     .on_click(cx.listener(|this, _, window, cx| {
                         this.open_action(Action::Update, true, window, cx)
                     })),
@@ -2091,87 +2610,32 @@ impl BeetsApp {
                 Button::new("sel-write")
                     .label("Write tags")
                     .small()
+                    .tooltip("Ctrl+T")
                     .on_click(cx.listener(|this, _, window, cx| {
                         this.open_action(Action::Write, true, window, cx)
                     })),
             )
-            .child(Button::new("sel-move").label("Move…").small().on_click(
-                cx.listener(|this, _, window, cx| this.open_action(Action::Move, true, window, cx)),
-            ))
+            .child(
+                Button::new("sel-move")
+                    .label("Move…")
+                    .small()
+                    .tooltip("Ctrl+M")
+                    .on_click(cx.listener(|this, _, window, cx| {
+                        this.open_action(Action::Move, true, window, cx)
+                    })),
+            )
             .child(
                 Button::new("sel-remove")
                     .label("Remove…")
                     .small()
+                    .tooltip("Delete")
                     .danger()
                     .on_click(cx.listener(|this, _, window, cx| {
                         this.open_action(Action::Remove, true, window, cx)
                     })),
             );
 
-        let plugins = self
-            .info
-            .as_ref()
-            .map(|i| i.plugins.clone())
-            .unwrap_or_default();
-        let quick: Vec<(&str, &str, Vec<String>)> = [
-            (
-                "fetchart",
-                "Fetch art",
-                vec!["fetchart".to_string(), "-f".into()],
-            ),
-            (
-                "embedart",
-                "Embed art",
-                vec!["embedart".into(), "-y".into()],
-            ),
-            ("lyrics", "Fetch lyrics", vec!["lyrics".into(), "-f".into()]),
-            ("lastgenre", "Last.fm genre", vec!["lastgenre".into()]),
-            ("replaygain", "ReplayGain", vec!["replaygain".into()]),
-            ("chroma", "Fingerprint", vec!["fingerprint".into()]),
-            ("mbsync", "MusicBrainz sync", vec!["mbsync".into()]),
-            ("scrub", "Scrub tags", vec!["scrub".into()]),
-            ("badfiles", "Check files", vec!["bad".into()]),
-            ("autobpm", "Detect BPM", vec!["autobpm".into()]),
-            ("keyfinder", "Find key", vec!["keyfinder".into()]),
-            (
-                "acousticbrainz",
-                "AcousticBrainz",
-                vec!["acousticbrainz".into()],
-            ),
-            ("parentwork", "Parent work", vec!["parentwork".into()]),
-            ("ftintitle", "Feat. to title", vec!["ftintitle".into()]),
-            ("titlecase", "Title case", vec!["titlecase".into()]),
-            ("zero", "Zero fields", vec!["zero".into()]),
-            ("thumbnails", "Thumbnails", vec!["thumbnails".into()]),
-            ("spotify", "Spotify sync", vec!["spotifysync".into()]),
-            ("deezer", "Deezer sync", vec!["deezerupdate".into()]),
-            ("tidal", "Tidal sync", vec!["tidalsync".into()]),
-            ("bpsync", "Beatport sync", vec!["bpsync".into()]),
-        ]
-        .into_iter()
-        .filter(|(p, _, _)| plugins.iter().any(|x| x == p))
-        .collect();
-        let plugin_row = v_flex()
-            .gap_1()
-            .child(section_title("Run on this selection", cx))
-            .when(!quick.is_empty(), |d| {
-                d.child(h_flex().flex_wrap().gap_1().children(quick.into_iter().map(
-                    |(id, label, args)| {
-                        Button::new(SharedString::from(format!("quick-{id}")))
-                            .label(label)
-                            .xsmall()
-                            .outline()
-                            .on_click(cx.listener(move |this, _, _, cx| {
-                                if let Some((_, q)) = this.selection_query() {
-                                    let mut a = args.clone();
-                                    a.extend(q);
-                                    this.start_background(runner::shell_join(&a), a, true, cx);
-                                }
-                            }))
-                    },
-                )))
-            })
-            .child(Input::new(&self.plugin_cmd).small());
+        let plugin_row = self.render_plugin_row(cx);
 
         let body = if let Some(form) = &self.edit {
             self.render_edit_form(form, window, cx)
@@ -2230,6 +2694,72 @@ impl BeetsApp {
             .child(plugin_row)
             .children(tracks)
             .child(body)
+            .into_any_element()
+    }
+
+    fn quick_commands(&self) -> Vec<(&'static str, &'static str, Vec<String>)> {
+        let plugins = self
+            .info
+            .as_ref()
+            .map(|i| i.plugins.clone())
+            .unwrap_or_default();
+        [
+            (
+                "fetchart",
+                "Fetch art",
+                vec!["fetchart".to_string(), "-f".into()],
+            ),
+            (
+                "embedart",
+                "Embed art",
+                vec!["embedart".into(), "-y".into()],
+            ),
+            ("lyrics", "Fetch lyrics", vec!["lyrics".into(), "-f".into()]),
+            ("lastgenre", "Last.fm genre", vec!["lastgenre".into()]),
+            ("replaygain", "ReplayGain", vec!["replaygain".into()]),
+            ("chroma", "Fingerprint", vec!["fingerprint".into()]),
+            ("mbsync", "MusicBrainz sync", vec!["mbsync".into()]),
+            ("scrub", "Scrub tags", vec!["scrub".into()]),
+            ("badfiles", "Check files", vec!["bad".into()]),
+            ("autobpm", "Detect BPM", vec!["autobpm".into()]),
+            ("keyfinder", "Find key", vec!["keyfinder".into()]),
+            (
+                "acousticbrainz",
+                "AcousticBrainz",
+                vec!["acousticbrainz".into()],
+            ),
+            ("parentwork", "Parent work", vec!["parentwork".into()]),
+            ("ftintitle", "Feat. to title", vec!["ftintitle".into()]),
+            ("titlecase", "Title case", vec!["titlecase".into()]),
+            ("zero", "Zero fields", vec!["zero".into()]),
+            ("thumbnails", "Thumbnails", vec!["thumbnails".into()]),
+            ("spotify", "Spotify sync", vec!["spotifysync".into()]),
+            ("deezer", "Deezer sync", vec!["deezerupdate".into()]),
+            ("tidal", "Tidal sync", vec!["tidalsync".into()]),
+            ("bpsync", "Beatport sync", vec!["bpsync".into()]),
+        ]
+        .into_iter()
+        .filter(|(p, _, _)| plugins.iter().any(|x| x == p))
+        .collect()
+    }
+
+    fn render_plugin_row(&self, cx: &mut Context<Self>) -> AnyElement {
+        let quick = self.quick_commands();
+        v_flex()
+            .gap_1()
+            .child(section_title("Run on this selection", cx))
+            .when(!quick.is_empty(), |d| {
+                d.child(h_flex().flex_wrap().gap_1().children(quick.into_iter().map(
+                    |(id, label, args)| {
+                        Button::new(SharedString::from(format!("quick-{id}")))
+                            .label(label)
+                            .xsmall()
+                            .outline()
+                            .on_click(cx.listener(move |this, _, _, cx| this.run_quick(&args, cx)))
+                    },
+                )))
+            })
+            .child(Input::new(&self.plugin_cmd).small())
             .into_any_element()
     }
 
@@ -2464,7 +2994,250 @@ impl BeetsApp {
                         .child(format!("beet modify … {}", runner::shell_join(&changed))),
                 )
             })
+            .key_context("EditForm")
+            .on_action(cx.listener(|this, _: &SaveEdit, window, cx| {
+                this.save_edit(cx);
+                this.focus_list(window, cx);
+            }))
+            .on_action(cx.listener(|this, _: &CancelEdit, window, cx| {
+                this.edit = None;
+                this.focus_list(window, cx);
+                cx.notify();
+            }))
             .into_any_element()
+    }
+
+    /// Put the keyboard in the edit form's first field.
+    fn focus_edit_form(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some((_, input)) = self.edit.as_ref().and_then(|f| f.fields.first()) {
+            input.update(cx, |s, cx| s.focus(window, cx));
+        }
+    }
+
+    /// The detail pane for several selected albums or tracks.
+    fn render_bulk(&mut self, cx: &mut Context<Self>) -> AnyElement {
+        let theme = cx.theme().clone();
+        let Some((kind, ids)) = self.selected_ids(cx) else {
+            return div().into_any_element();
+        };
+        let is_album = kind == Kind::Album;
+        let what = if is_album { "albums" } else { "tracks" };
+        let rows: std::collections::HashMap<i64, Row> = match kind {
+            Kind::Album => self.albums.iter().map(|r| (r.id, r.clone())).collect(),
+            Kind::Item => self
+                .tracks
+                .read(cx)
+                .delegate()
+                .rows
+                .iter()
+                .map(|r| (r.id, r.clone()))
+                .collect(),
+        };
+        let summary = if is_album {
+            let tracks: i64 = ids
+                .iter()
+                .filter_map(|id| rows.get(id))
+                .map(|r| r.count)
+                .sum();
+            format!("{tracks} tracks in all")
+        } else {
+            let secs: i64 = ids
+                .iter()
+                .filter_map(|id| rows.get(id))
+                .map(|r| duration_secs(&r.length))
+                .sum();
+            format!(
+                "{}:{:02}:{:02} in all",
+                secs / 3600,
+                secs / 60 % 60,
+                secs % 60
+            )
+        };
+        let plugin_row = self.render_plugin_row(cx);
+        let too_long = self
+            .selection_target(cx)
+            .is_some_and(|(_, q)| q.iter().map(String::len).sum::<usize>() > MAX_QUERY_ARG);
+
+        let button = |id: &'static str, label: &'static str, keys: &'static str, action: Action| {
+            Button::new(id)
+                .label(label)
+                .small()
+                .tooltip(keys)
+                .map(|b| match action {
+                    Action::Remove => b.danger(),
+                    Action::Modify => b.primary(),
+                    _ => b,
+                })
+                .on_click(cx.listener(move |this, _, window, cx| {
+                    this.open_action(action, true, window, cx)
+                }))
+        };
+        let toolbar = h_flex()
+            .flex_wrap()
+            .gap_1()
+            .child(button(
+                "bulk-modify",
+                "Modify all…",
+                "Set fields on every selected one (F2)",
+                Action::Modify,
+            ))
+            .when(self.has_plugin("play"), |d| {
+                d.child(
+                    Button::new("bulk-play")
+                        .label("Play")
+                        .small()
+                        .tooltip("Space")
+                        .on_click(cx.listener(|this, _, _, cx| this.play_selection(cx))),
+                )
+            })
+            .child(button(
+                "bulk-update",
+                "Update",
+                "Re-read the tags from the files (Ctrl+U)",
+                Action::Update,
+            ))
+            .child(button("bulk-write", "Write tags", "Ctrl+T", Action::Write))
+            .child(button("bulk-move", "Move…", "Ctrl+M", Action::Move))
+            .child(button("bulk-remove", "Remove…", "Delete", Action::Remove))
+            .child(
+                Button::new("bulk-none")
+                    .label("Select one")
+                    .small()
+                    .ghost()
+                    .tooltip("Keep only the current row (Esc)")
+                    .on_click(cx.listener(|this, _, _, cx| this.clear_selection(cx))),
+            );
+
+        const SHOWN: usize = 300;
+        let current = self.selected.map(|(_, id)| id);
+        let list = ids
+            .iter()
+            .take(SHOWN)
+            .filter_map(|id| rows.get(id))
+            .map(|r| {
+                let id = r.id;
+                h_flex()
+                    .id(("bulk-row", id as usize))
+                    .gap_2()
+                    .px_2()
+                    .py_0p5()
+                    .rounded_sm()
+                    .cursor_pointer()
+                    .when(current == Some(id), |d| d.bg(theme.list_active))
+                    .hover(|d| d.bg(theme.list_hover))
+                    .child(
+                        div()
+                            .flex_1()
+                            .overflow_hidden()
+                            .whitespace_nowrap()
+                            .text_ellipsis()
+                            .text_sm()
+                            .child(if r.title.is_empty() {
+                                "(untitled)".to_string()
+                            } else {
+                                r.title.clone()
+                            }),
+                    )
+                    .child(
+                        div()
+                            .max_w(px(180.))
+                            .overflow_hidden()
+                            .whitespace_nowrap()
+                            .text_ellipsis()
+                            .text_sm()
+                            .text_color(theme.muted_foreground)
+                            .child(r.artist.clone()),
+                    )
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        let ix = this.list_ids(kind, cx).iter().position(|&x| x == id);
+                        this.select_only(kind, id, ix, cx);
+                        if let Some(ix) = ix {
+                            this.reveal_row(kind, ix, cx);
+                        }
+                    }))
+            });
+
+        v_flex()
+            .id("bulk")
+            .size_full()
+            .overflow_y_scroll()
+            .p_4()
+            .gap_4()
+            .child(
+                v_flex()
+                    .gap_1()
+                    .child(div().text_xs().text_color(theme.muted_foreground).child("SELECTION"))
+                    .child(
+                        div()
+                            .text_xl()
+                            .font_weight(FontWeight::BOLD)
+                            .child(format!("{} {what} selected", ids.len())),
+                    )
+                    .child(div().text_color(theme.muted_foreground).child(summary))
+                    .child(
+                        div()
+                            .text_xs()
+                            .text_color(theme.muted_foreground)
+                            .child("Ctrl+Click adds or removes · Shift+Click selects a range · Ctrl+A selects all · Esc keeps one"),
+                    ),
+            )
+            .when(too_long, |d| {
+                d.child(div().text_sm().text_color(theme.danger).child(
+                    "Too many selected to pass as ids: select all with Ctrl+A to run on the search instead.",
+                ))
+            })
+            .child(toolbar)
+            .child(plugin_row)
+            .child(
+                v_flex()
+                    .gap_0p5()
+                    .child(section_title(
+                        if ids.len() > SHOWN {
+                            format!("First {SHOWN} of {}", ids.len())
+                        } else {
+                            "Selected".to_string()
+                        },
+                        cx,
+                    ))
+                    .children(list),
+            )
+            .into_any_element()
+    }
+
+    fn show_shortcuts(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        window.open_dialog(cx, move |dialog, _, cx| {
+            let theme = cx.theme().clone();
+            let mut body = v_flex().gap_1();
+            let mut last = "";
+            for &(keys, what, area) in SHORTCUTS {
+                if area != last {
+                    body = body.child(
+                        div()
+                            .pt_2()
+                            .text_xs()
+                            .font_weight(FontWeight::SEMIBOLD)
+                            .text_color(theme.muted_foreground)
+                            .child(area.to_uppercase()),
+                    );
+                    last = area;
+                }
+                body = body.child(
+                    h_flex()
+                        .gap_3()
+                        .child(
+                            div()
+                                .w(px(240.))
+                                .flex_none()
+                                .text_sm()
+                                .whitespace_nowrap()
+                                .font_family(theme.mono_font_family.clone())
+                                .child(keys),
+                        )
+                        .child(div().flex_1().text_sm().child(what)),
+                );
+            }
+            dialog.title("Keyboard shortcuts").w(px(700.)).child(body)
+        });
     }
 
     fn render_library(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
@@ -2480,7 +3253,76 @@ impl BeetsApp {
                     .h_full()
                     .min_w(px(380.))
                     .child(self.render_search_bar(cx))
-                    .child(div().flex_1().min_h_0().child(list)),
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_h_0()
+                            .key_context("Library")
+                            .on_action(
+                                cx.listener(|this, _: &SelectAll, _, cx| this.select_all(cx)),
+                            )
+                            .on_action(cx.listener(|this, _: &ClearSelection, _, cx| {
+                                this.clear_selection(cx)
+                            }))
+                            .on_action(cx.listener(|this, _: &CursorUp, _, cx| {
+                                this.move_cursor(MoveTo::By(-1), false, cx)
+                            }))
+                            .on_action(cx.listener(|this, _: &CursorDown, _, cx| {
+                                this.move_cursor(MoveTo::By(1), false, cx)
+                            }))
+                            .on_action(cx.listener(|this, _: &CursorFirst, _, cx| {
+                                this.move_cursor(MoveTo::First, false, cx)
+                            }))
+                            .on_action(cx.listener(|this, _: &CursorLast, _, cx| {
+                                this.move_cursor(MoveTo::Last, false, cx)
+                            }))
+                            .on_action(cx.listener(|this, _: &CursorPageUp, _, cx| {
+                                this.move_cursor(MoveTo::By(-10), false, cx)
+                            }))
+                            .on_action(cx.listener(|this, _: &CursorPageDown, _, cx| {
+                                this.move_cursor(MoveTo::By(10), false, cx)
+                            }))
+                            .on_action(cx.listener(|this, _: &ExtendUp, _, cx| {
+                                this.move_cursor(MoveTo::By(-1), true, cx)
+                            }))
+                            .on_action(cx.listener(|this, _: &ExtendDown, _, cx| {
+                                this.move_cursor(MoveTo::By(1), true, cx)
+                            }))
+                            .on_action(cx.listener(|this, _: &OpenSelection, window, cx| {
+                                this.open_selection(window, cx)
+                            }))
+                            .on_action(
+                                cx.listener(|this, _: &PlaySelection, _, cx| {
+                                    this.play_selection(cx)
+                                }),
+                            )
+                            .on_action(cx.listener(|this, _: &EditSelection, window, cx| {
+                                if this.marked.len() > 1 {
+                                    this.open_action(Action::Modify, true, window, cx);
+                                } else if this.edit.is_none() {
+                                    this.toggle_edit(window, cx);
+                                    this.focus_edit_form(window, cx);
+                                }
+                            }))
+                            .on_action(cx.listener(|this, _: &RemoveSelection, window, cx| {
+                                this.open_action(Action::Remove, true, window, cx)
+                            }))
+                            .on_action(cx.listener(|this, _: &UpdateSelection, window, cx| {
+                                this.open_action(Action::Update, true, window, cx)
+                            }))
+                            .on_action(cx.listener(|this, _: &WriteSelection, window, cx| {
+                                this.open_action(Action::Write, true, window, cx)
+                            }))
+                            .on_action(cx.listener(|this, _: &MoveSelection, window, cx| {
+                                this.open_action(Action::Move, true, window, cx)
+                            }))
+                            .on_action(cx.listener(|this, _: &RevealSelection, _, cx| {
+                                if let Some(p) = this.detail.as_ref().and_then(|d| d.path.clone()) {
+                                    this.reveal(&p, cx);
+                                }
+                            }))
+                            .child(list),
+                    ),
             )
             .child(
                 div()
@@ -2992,6 +3834,8 @@ impl BeetsApp {
             .unwrap_or_default();
         v_flex()
             .size_full()
+            .key_context("ConfigPage")
+            .on_action(cx.listener(|this, _: &SaveConfig, _, cx| this.save_config(cx)))
             .p_4()
             .gap_3()
             .child(
@@ -3090,6 +3934,12 @@ impl BeetsApp {
 /// A command button: element id, label, `beet` arguments.
 type CommandButton = (&'static str, &'static str, Vec<&'static str>);
 
+/// The background of a selected row in a multiple selection: stronger than
+/// the theme's hover so a scattered selection stands out.
+fn selection_bg(cx: &App) -> Hsla {
+    cx.theme().primary.opacity(0.16)
+}
+
 fn empty_state(text: &str, cx: &App) -> impl IntoElement {
     div()
         .p_8()
@@ -3118,11 +3968,25 @@ impl Render for BeetsApp {
                 this.search.update(cx, |s, cx| s.focus(window, cx));
             }))
             .on_action(cx.listener(|this, _: &Reload, _, cx| this.reload(cx)))
+            .on_action(cx.listener(|this, _: &ShowAlbums, window, cx| {
+                this.show(Page::Albums, window, cx);
+                this.focus_list(window, cx);
+            }))
+            .on_action(cx.listener(|this, _: &ShowTracks, window, cx| {
+                this.show(Page::Tracks, window, cx);
+                this.focus_list(window, cx);
+            }))
             .on_action(
-                cx.listener(|this, _: &ShowAlbums, window, cx| this.show(Page::Albums, window, cx)),
+                cx.listener(|this, _: &ShowImport, window, cx| this.show(Page::Import, window, cx)),
+            )
+            .on_action(cx.listener(|this, _: &ShowCommands, window, cx| {
+                this.show(Page::Commands, window, cx)
+            }))
+            .on_action(
+                cx.listener(|this, _: &ShowConfig, window, cx| this.show(Page::Config, window, cx)),
             )
             .on_action(
-                cx.listener(|this, _: &ShowTracks, window, cx| this.show(Page::Tracks, window, cx)),
+                cx.listener(|this, _: &ShowShortcuts, window, cx| this.show_shortcuts(window, cx)),
             )
             .on_action(
                 cx.listener(|this, _: &ShowConsole, window, cx| {
@@ -3131,5 +3995,27 @@ impl Render for BeetsApp {
             )
             .child(self.render_sidebar(cx))
             .child(div().flex_1().h_full().min_w_0().child(page))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    // Not `super::*`: GPUI's prelude has its own `test` attribute.
+    use super::{ids_query, runner};
+
+    #[test]
+    fn selection_queries_are_one_argument() {
+        assert_eq!(ids_query("id", &[7]), "id:7");
+        assert_eq!(ids_query("album_id", &[1, 3, 12]), "album_id::^(1|3|12)$");
+    }
+
+    #[test]
+    fn long_commands_are_shortened_for_display() {
+        let ids: Vec<i64> = (1..2000).collect();
+        let args = vec!["modify".to_string(), ids_query("id", &ids)];
+        let short = runner::shell_join_short(&args);
+        assert!(short.chars().count() <= 301);
+        assert!(short.ends_with('…'));
+        assert_eq!(runner::shell_join_short(&["ls".into()]), "ls");
     }
 }

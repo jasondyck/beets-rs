@@ -464,7 +464,7 @@ impl Runner {
             pending: vec![],
         };
         session.push_line(Line {
-            text: format!("$ beet {}", shell_join(&args)),
+            text: format!("$ beet {}", shell_join_short(&args)),
             styles: vec![(
                 0..2,
                 Style {
@@ -585,6 +585,17 @@ fn pump(session: usize, mut stream: Box<dyn Read + Send>, tx: flume::Sender<Even
 }
 
 /// Quote arguments for display, as a shell would need them.
+/// [`shell_join`] cut to a readable length (a selection's query can run
+/// to thousands of ids).
+pub fn shell_join_short(args: &[String]) -> String {
+    const MAX: usize = 300;
+    let full = shell_join(args);
+    match full.char_indices().nth(MAX) {
+        Some((i, _)) => format!("{}…", &full[..i]),
+        None => full,
+    }
+}
+
 pub fn shell_join(args: &[String]) -> String {
     args.iter()
         .map(|a| {

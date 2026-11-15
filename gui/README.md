@@ -20,6 +20,15 @@ beet-gui [-c CONFIG]… [-l LIBRARY] [-d DIRECTORY]   # BEETSRSDIR works as for 
   lyrics, autobpm, keyfinder, parentwork, ftintitle, spotifysync, …) and any command on the
   selection.
   "All matching" runs modify / update / write / move / remove over the whole query.
+- **Selecting several**: Ctrl+Click adds or removes, Shift+Click (or Shift+↑/↓) selects a range,
+  Ctrl+A selects the whole list, Esc keeps just the current row. With several selected the detail
+  pane becomes a bulk panel: modify all, play, update, write tags, move, remove, plugin commands.
+  The selection is passed to `beet` as one `id::^(1|2|…)$` query (an OR of thousands of terms is
+  deeper than SQLite allows); with everything selected the search query is used instead.
+- **Keyboard**: F1 lists every shortcut. Ctrl+1…6 switch pages, Ctrl+F or `/` searches (Enter
+  moves to the list), ↑/↓/Home/End/PgUp/PgDn move, Enter opens an album's tracks or plays a track,
+  Space plays, F2 edits (Ctrl+S saves, Esc cancels), Delete removes, Ctrl+U/T/M update, write
+  tags and move, Ctrl+O shows the folder.
 - **Import**: every `beet import` option as a form; the run happens in the console.
 - **Console**: runs any `beet` command (plugin commands too). Output keeps its colours, and prompts
   (import candidates, `(Yes/no/select)` questions, numbered menus, …) get answer buttons; free-text
@@ -39,7 +48,7 @@ beet-gui [-c CONFIG]… [-l LIBRARY] [-d DIRECTORY]   # BEETSRSDIR works as for 
 
 Starting state can be set from the environment (for scripts, or to drive the GUI with no input
 devices): `BEET_GUI_PAGE=albums|tracks|import|console|commands|config`, `BEET_GUI_QUERY=…`,
-`BEET_GUI_SELECT=album:ID|item:ID`, `BEET_GUI_EDIT=1`, `BEET_GUI_ACTION=modify|update|write|move|remove`,
+`BEET_GUI_SELECT=album:ID|item:ID[,ID…]`, `BEET_GUI_EDIT=1`, `BEET_GUI_SHORTCUTS=1`, `BEET_GUI_ACTION=modify|update|write|move|remove`,
 `BEET_GUI_RUN='stats -e'`, `BEET_GUI_THEME=dark|light`.
 
 ## Notes
