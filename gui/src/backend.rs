@@ -95,7 +95,11 @@ pub struct LibInfo {
     pub albums: i64,
     pub user_config: PathBuf,
     pub config_sources: Vec<PathBuf>,
+    /// The loaded plugin instances' names.
     pub plugins: Vec<String>,
+    /// The `plugins:` setting in effect (`musicbrainz` by default), minus
+    /// `disabled_plugins`: what the toolbox shows as enabled.
+    pub enabled: Vec<String>,
 }
 
 /// One line of the album or track list.
@@ -236,6 +240,7 @@ fn open(opts: &Opts) -> Result<(Library, LibInfo)> {
         user_config: cfg.config_dir.join("config.yaml"),
         config_sources: cfg.source_paths(),
         plugins: plugins.iter().map(|p| p.name().to_string()).collect(),
+        enabled: beets_rs::plugins::names(&cfg),
     };
     Ok((lib, info))
 }

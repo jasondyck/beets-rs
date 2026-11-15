@@ -23,6 +23,7 @@ use gpui_kit::*;
 use crate::backend::{
     self, Detail, Field, LibInfo, Opts, Req, Resp, Row, TOTALS_ONLY, split_words,
 };
+use crate::catalog;
 use crate::runner::{self, Color as AnsiColor, Runner, Session};
 
 actions!(
@@ -33,6 +34,7 @@ actions!(
         ShowAlbums,
         ShowTracks,
         ShowImport,
+        ShowPlugins,
         ShowConsole,
         ShowCommands,
         ShowConfig,
@@ -68,8 +70,8 @@ actions!(
 const SHORTCUTS: &[(&str, &str, &str)] = &[
     ("Ctrl+F  /  Ctrl+L  /  /", "Search", "Anywhere"),
     (
-        "Ctrl+1 … Ctrl+6",
-        "Albums, Tracks, Import, Console, Commands, Config",
+        "Ctrl+1 … Ctrl+7",
+        "Albums, Tracks, Import, Plugins, Console, Commands, Config",
         "Anywhere",
     ),
     ("F5", "Reload the library", "Anywhere"),
@@ -111,10 +113,11 @@ pub fn bind_keys(cx: &mut App) {
         KeyBinding::new("ctrl-1", ShowAlbums, None),
         KeyBinding::new("ctrl-2", ShowTracks, None),
         KeyBinding::new("ctrl-3", ShowImport, None),
-        KeyBinding::new("ctrl-4", ShowConsole, None),
+        KeyBinding::new("ctrl-4", ShowPlugins, None),
+        KeyBinding::new("ctrl-5", ShowConsole, None),
         KeyBinding::new("ctrl-`", ShowConsole, None),
-        KeyBinding::new("ctrl-5", ShowCommands, None),
-        KeyBinding::new("ctrl-6", ShowConfig, None),
+        KeyBinding::new("ctrl-6", ShowCommands, None),
+        KeyBinding::new("ctrl-7", ShowConfig, None),
         KeyBinding::new("f1", ShowShortcuts, None),
         KeyBinding::new("ctrl-/", ShowShortcuts, None),
         KeyBinding::new("/", FocusSearch, LIST),
@@ -167,6 +170,15 @@ const SEARCH_DEBOUNCE: Duration = Duration::from_millis(220);
 /// How often the list is re-read while a command changes the library.
 const LIVE_REFRESH: Duration = Duration::from_secs(2);
 
+/// What a plugin command from the toolbox runs on.
+#[derive(Clone, Copy, Debug)]
+enum CommandTarget {
+    Selection,
+    Everything,
+    Help,
+    Console,
+}
+
 /// Where a keyboard move goes.
 #[derive(Clone, Copy, Debug)]
 enum MoveTo {
@@ -180,16 +192,18 @@ enum Page {
     Albums,
     Tracks,
     Import,
+    Plugins,
     Console,
     Commands,
     Config,
 }
 
 impl Page {
-    const ALL: [Page; 6] = [
+    const ALL: [Page; 7] = [
         Page::Albums,
         Page::Tracks,
         Page::Import,
+        Page::Plugins,
         Page::Console,
         Page::Commands,
         Page::Config,
@@ -200,6 +214,7 @@ impl Page {
             Page::Albums => "Albums",
             Page::Tracks => "Tracks",
             Page::Import => "Import",
+            Page::Plugins => "Plugins",
             Page::Console => "Console",
             Page::Commands => "Commands",
             Page::Config => "Configuration",
@@ -211,6 +226,7 @@ impl Page {
             Page::Albums => IconName::BookOpen,
             Page::Tracks => IconName::Inbox,
             Page::Import => IconName::Plus,
+            Page::Plugins => IconName::LayoutDashboard,
             Page::Console => IconName::PanelBottom,
             Page::Commands => IconName::Ellipsis,
             Page::Config => IconName::Asterisk,
@@ -781,6 +797,7 @@ struct Startup {
     action: Option<Action>,
     dark: Option<bool>,
     shortcuts: bool,
+    plugin: Option<String>,
 }
 
 impl Startup {
@@ -817,6 +834,7 @@ impl Startup {
             }),
             dark: var("BEET_GUI_THEME").map(|t| t == "dark"),
             shortcuts: var("BEET_GUI_SHORTCUTS").is_some(),
+            plugin: var("BEET_GUI_PLUGIN"),
         };
         let any = s.page.is_some()
             || s.query.is_some()
@@ -825,7 +843,8 @@ impl Startup {
             || s.edit
             || s.action.is_some()
             || s.dark.is_some()
-            || s.shortcuts;
+            || s.shortcuts
+            || s.plugin.is_some();
         any.then_some(s)
     }
 }
@@ -883,6 +902,14 @@ pub struct BeetsApp {
 
     import: ImportForm,
 
+    /// The plugin toolbox.
+    catalog: Vec<catalog::PluginInfo>,
+    plugin_search: Entity<InputState>,
+    /// A category chip, "Enabled", or None for everything.
+    plugin_filter: Option<&'static str>,
+    plugin_selected: Option<&'static str>,
+    plugin_message: Option<(bool, String)>,
+
     config_editor: Entity<EditorState>,
     config_path: Option<PathBuf>,
     config_saved: String,
@@ -939,6 +966,10 @@ impl BeetsApp {
             from_scratch: false,
         };
         let config_editor = cx.new(|cx| EditorState::new(window, cx).language("yaml"));
+        let plugin_search = cx.new(|cx| {
+            InputState::new(window, cx)
+                .placeholder("Search plugins: cover art, genre, lyrics, convert, playlist…")
+        });
         let tracks = cx.new(|cx| {
             TableState::new(
                 TrackTable {
@@ -1044,6 +1075,19 @@ impl BeetsApp {
             }
         }));
         subs.push(cx.observe(&field_filter, |_, _, cx| cx.notify()));
+        subs.push(cx.subscribe_in(
+            &plugin_search,
+            window,
+            |this, _, ev: &InputEvent, _, cx| match ev {
+                InputEvent::Change => cx.notify(),
+                // Enter picks the first match.
+                InputEvent::PressEnter { .. } => {
+                    this.plugin_selected = this.shown_plugins(cx).first().map(|p| p.name);
+                    cx.notify();
+                }
+                _ => {}
+            },
+        ));
         subs.push(cx.observe(&config_editor, |_, _, cx| cx.notify()));
 
         // The library worker's answers.
@@ -1142,6 +1186,11 @@ impl BeetsApp {
             console_scroll: ScrollHandle::new(),
             follow_output: true,
             import,
+            catalog: catalog::plugins(),
+            plugin_search,
+            plugin_filter: None,
+            plugin_selected: None,
+            plugin_message: None,
             config_editor,
             config_path: None,
             config_saved: String::new(),
@@ -1586,6 +1635,9 @@ impl BeetsApp {
     }
 
     fn apply_startup(&mut self, start: Startup, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(name) = &start.plugin {
+            self.plugin_selected = self.catalog.iter().find(|p| p.name == name).map(|p| p.name);
+        }
         if start.shortcuts {
             self.show_shortcuts(window, cx);
         }
@@ -2151,6 +2203,10 @@ impl BeetsApp {
             let badge = match page {
                 Page::Albums => self.info.as_ref().map(|i| i.albums.to_string()),
                 Page::Tracks => self.info.as_ref().map(|i| i.items.to_string()),
+                Page::Plugins => self
+                    .info
+                    .as_ref()
+                    .map(|i| format!("{} on", i.enabled.len())),
                 Page::Console if waiting > 0 => Some(format!("{waiting} waiting")),
                 Page::Console if running > 0 => Some(format!("{running} running")),
                 _ => None,
@@ -2759,7 +2815,21 @@ impl BeetsApp {
                     },
                 )))
             })
-            .child(Input::new(&self.plugin_cmd).small())
+            .child(
+                h_flex()
+                    .gap_2()
+                    .child(div().flex_1().child(Input::new(&self.plugin_cmd).small()))
+                    .child(
+                        Button::new("browse-plugins")
+                            .label("More plugins…")
+                            .xsmall()
+                            .ghost()
+                            .tooltip("Browse and enable plugins (Ctrl+4)")
+                            .on_click(cx.listener(|this, _, window, cx| {
+                                this.show(Page::Plugins, window, cx)
+                            })),
+                    ),
+            )
             .into_any_element()
     }
 
@@ -3717,6 +3787,552 @@ impl BeetsApp {
             })
     }
 
+    // -- plugin toolbox ---------------------------------------------------
+
+    fn plugin_enabled(&self, name: &str) -> bool {
+        self.info
+            .as_ref()
+            .is_some_and(|i| i.enabled.iter().any(|p| p == name))
+    }
+
+    /// The plugins the search and the chip let through.
+    fn shown_plugins(&self, cx: &App) -> Vec<&catalog::PluginInfo> {
+        let search = self.plugin_search.read(cx).value().to_string();
+        self.catalog
+            .iter()
+            .filter(|p| match self.plugin_filter {
+                None => true,
+                Some("Enabled") => self.plugin_enabled(p.name),
+                Some(c) => p.category == c,
+            })
+            .filter(|p| catalog::matches(p, &search))
+            .collect()
+    }
+
+    /// Turn a plugin on or off: rewrite the `plugins:` line of the user's
+    /// config and reload.
+    fn set_plugin_enabled(
+        &mut self,
+        name: &str,
+        on: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(info) = &self.info else {
+            return;
+        };
+        let editor_dirty = self.config_path.is_some()
+            && self.config_editor.read(cx).value().as_ref() != self.config_saved.as_str();
+        if editor_dirty {
+            self.plugin_message = Some((
+                false,
+                "The configuration has unsaved edits: save or revert them first.".into(),
+            ));
+            cx.notify();
+            return;
+        }
+        let path = info.user_config.clone();
+        let mut names = info.enabled.clone();
+        if on {
+            if !names.iter().any(|p| p == name) {
+                names.push(name.to_string());
+            }
+        } else {
+            names.retain(|p| p != name);
+        }
+        let text = std::fs::read_to_string(&path).unwrap_or_default();
+        let new = catalog::set_plugins(&text, &names);
+        let written = path
+            .parent()
+            .map_or(Ok(()), std::fs::create_dir_all)
+            .and_then(|()| std::fs::write(&path, new));
+        match written {
+            Ok(()) => {
+                self.plugin_message = Some((
+                    true,
+                    format!(
+                        "{} {name} in {}",
+                        if on { "Enabled" } else { "Disabled" },
+                        path.display()
+                    ),
+                ));
+                if let Some(info) = &mut self.info {
+                    info.enabled = names;
+                }
+                if self.config_path.is_some() {
+                    self.load_config_file(window, cx, true);
+                }
+                self.reload(cx);
+            }
+            Err(e) => self.plugin_message = Some((false, format!("Couldn't save: {e}"))),
+        }
+        cx.notify();
+    }
+
+    /// Put a plugin's default settings at the end of the config editor to
+    /// change and save.
+    fn customize_plugin(&mut self, name: &str, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(defaults) = self
+            .catalog
+            .iter()
+            .find(|p| p.name == name)
+            .map(|p| p.defaults)
+        else {
+            return;
+        };
+        self.show(Page::Config, window, cx);
+        let text = self.config_editor.read(cx).value().to_string();
+        let has_section = text
+            .lines()
+            .any(|l| l.strip_prefix(name).is_some_and(|r| r.starts_with(':')));
+        self.config_message = Some(if has_section {
+            (true, format!("{name} already has settings in this file."))
+        } else {
+            let mut new = text;
+            if !new.is_empty() && !new.ends_with('\n') {
+                new.push('\n');
+            }
+            if !new.is_empty() {
+                new.push('\n');
+            }
+            new.push_str(defaults);
+            new.push('\n');
+            self.config_editor
+                .update(cx, |s, cx| s.set_value(new, window, cx));
+            (
+                true,
+                format!(
+                    "Added {name}'s default settings at the end: change what you need, then Save (Ctrl+S)."
+                ),
+            )
+        });
+        cx.notify();
+    }
+
+    /// A plugin command on the library selection, everything, or in the
+    /// console to add options.
+    fn run_plugin_command(
+        &mut self,
+        cmd: &str,
+        target: CommandTarget,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let base = vec![cmd.to_string()];
+        match target {
+            CommandTarget::Selection => {
+                self.run_quick(&base, cx);
+                self.show(Page::Console, window, cx);
+            }
+            CommandTarget::Everything => {
+                self.start(runner::shell_join(&base), base, true, cx);
+            }
+            CommandTarget::Help => {
+                let args = vec![cmd.to_string(), "-h".into()];
+                self.start(runner::shell_join(&args), args, false, cx);
+            }
+            CommandTarget::Console => {
+                self.show(Page::Console, window, cx);
+                self.command_input.update(cx, |s, cx| {
+                    s.set_value(format!("{cmd} "), window, cx);
+                    s.focus(window, cx);
+                });
+            }
+        }
+    }
+
+    fn render_plugins(&mut self, cx: &mut Context<Self>) -> impl IntoElement {
+        let theme = cx.theme().clone();
+        let shown: Vec<catalog::PluginInfo> = self.shown_plugins(cx).into_iter().cloned().collect();
+        let enabled_count = self.info.as_ref().map_or(0, |i| i.enabled.len());
+        let app = cx.entity().downgrade();
+
+        let chip = |id: SharedString,
+                    label: String,
+                    value: Option<&'static str>,
+                    on: bool,
+                    cx: &mut Context<Self>| {
+            Button::new(id)
+                .label(label)
+                .xsmall()
+                .when(on, |b| b.primary())
+                .when(!on, |b| b.ghost())
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    this.plugin_filter = value;
+                    cx.notify();
+                }))
+        };
+        let mut chips = vec![
+            chip(
+                "chip-all".into(),
+                format!("All {}", self.catalog.len()),
+                None,
+                self.plugin_filter.is_none(),
+                cx,
+            ),
+            chip(
+                "chip-enabled".into(),
+                format!("Enabled {enabled_count}"),
+                Some("Enabled"),
+                self.plugin_filter == Some("Enabled"),
+                cx,
+            ),
+        ];
+        for &c in catalog::CATEGORIES {
+            let n = self.catalog.iter().filter(|p| p.category == c).count();
+            chips.push(chip(
+                SharedString::from(format!("chip-{c}")),
+                format!("{c} {n}"),
+                Some(c),
+                self.plugin_filter == Some(c),
+                cx,
+            ));
+        }
+
+        let selected = self.plugin_selected;
+        let rows = shown.iter().map(|p| {
+            let name = p.name;
+            let on = self.plugin_enabled(name);
+            let app = app.clone();
+            h_flex()
+                .id(SharedString::from(format!("plugin-{name}")))
+                .w_full()
+                .px_3()
+                .py_2()
+                .gap_3()
+                .border_b_1()
+                .border_color(theme.border)
+                .cursor_pointer()
+                .when(selected == Some(name), |d| d.bg(theme.list_active))
+                .hover(|d| d.bg(theme.list_hover))
+                .child(
+                    v_flex()
+                        .flex_1()
+                        .min_w_0()
+                        .child(
+                            h_flex()
+                                .gap_2()
+                                .child(div().font_weight(FontWeight::MEDIUM).child(name))
+                                .child(
+                                    div()
+                                        .text_xs()
+                                        .text_color(theme.muted_foreground)
+                                        .child(p.category),
+                                ),
+                        )
+                        .child(
+                            div()
+                                .text_sm()
+                                .text_color(theme.muted_foreground)
+                                .whitespace_nowrap()
+                                .overflow_hidden()
+                                .text_ellipsis()
+                                .child(p.about),
+                        ),
+                )
+                .child(
+                    gpui_kit::component::switch::Switch::new(SharedString::from(format!(
+                        "switch-{name}"
+                    )))
+                    .checked(on)
+                    .on_click(move |v: &bool, window, cx| {
+                        let v = *v;
+                        app.update(cx, |this, cx| this.set_plugin_enabled(name, v, window, cx))
+                            .ok();
+                    }),
+                )
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    this.plugin_selected = Some(name);
+                    cx.notify();
+                }))
+        });
+
+        let list = v_flex()
+            .flex_1()
+            .h_full()
+            .min_w(px(380.))
+            .child(
+                v_flex()
+                    .gap_2()
+                    .p_3()
+                    .border_b_1()
+                    .border_color(theme.border)
+                    .child(
+                        h_flex()
+                            .gap_2()
+                            .child(
+                                div().flex_1().child(
+                                    Input::new(&self.plugin_search)
+                                        .prefix(Icon::new(IconName::Search).small())
+                                        .cleanable(true),
+                                ),
+                            )
+                            .child(
+                                div()
+                                    .text_sm()
+                                    .text_color(theme.muted_foreground)
+                                    .child(format!("{} shown", shown.len())),
+                            ),
+                    )
+                    .child(h_flex().flex_wrap().gap_1().children(chips))
+                    .children(self.plugin_message.clone().map(|(ok, m)| {
+                        div()
+                            .text_sm()
+                            .text_color(if ok { theme.success } else { theme.danger })
+                            .child(m)
+                    })),
+            )
+            .child(
+                v_flex()
+                    .id("plugin-list")
+                    .flex_1()
+                    .min_h_0()
+                    .overflow_y_scroll()
+                    .children(rows)
+                    .when(shown.is_empty(), |d| {
+                        d.child(empty_state(
+                            "No plugin matches. Try other words, or the All chip.",
+                            cx,
+                        ))
+                    }),
+            );
+
+        h_flex().size_full().child(list).child(
+            div()
+                .w(px(480.))
+                .flex_none()
+                .h_full()
+                .border_l_1()
+                .border_color(theme.border)
+                .child(self.render_plugin_detail(cx)),
+        )
+    }
+
+    fn render_plugin_detail(&mut self, cx: &mut Context<Self>) -> AnyElement {
+        let theme = cx.theme().clone();
+        let Some(p) = self
+            .plugin_selected
+            .and_then(|n| self.catalog.iter().find(|p| p.name == n))
+            .cloned()
+        else {
+            return v_flex()
+                .size_full()
+                .items_center()
+                .justify_center()
+                .p_6()
+                .gap_2()
+                .text_color(theme.muted_foreground)
+                .child("Pick a plugin to see what it does and its commands.")
+                .child(
+                    div()
+                        .text_sm()
+                        .child("Switches turn plugins on and off in your config.yaml."),
+                )
+                .into_any_element();
+        };
+        let name = p.name;
+        let on = self.plugin_enabled(name);
+        let loaded = self
+            .info
+            .as_ref()
+            .is_some_and(|i| i.plugins.iter().any(|x| x == name));
+        let failed = on && !loaded && name != "musicbrainz" && self.info.is_some();
+        let selection = self.marked.len().max(usize::from(self.selected.is_some()));
+        let what = match self.selected {
+            Some((Kind::Album, _)) => "albums",
+            _ => "tracks",
+        };
+
+        let commands = p.commands.iter().map(|c| {
+            let cmd = c.name.clone();
+            let (c1, c2, c3, c4) = (cmd.clone(), cmd.clone(), cmd.clone(), cmd.clone());
+            v_flex()
+                .gap_1()
+                .p_2()
+                .rounded_md()
+                .border_1()
+                .border_color(theme.border)
+                .child(
+                    h_flex().gap_2().child(
+                        div()
+                            .font_family(theme.mono_font_family.clone())
+                            .font_weight(FontWeight::MEDIUM)
+                            .child(format!("beet {cmd}")),
+                    ),
+                )
+                .when(!c.about.is_empty(), |d| {
+                    d.child(
+                        div()
+                            .text_sm()
+                            .text_color(theme.muted_foreground)
+                            .child(c.about.clone()),
+                    )
+                })
+                .child(
+                    h_flex()
+                        .flex_wrap()
+                        .gap_1()
+                        .when(c.takes_query, |d| {
+                            d.child(
+                                Button::new(SharedString::from(format!("run-sel-{cmd}")))
+                                    .label(if selection > 0 {
+                                        format!("Run on selection ({selection} {what})")
+                                    } else {
+                                        "Run on selection".to_string()
+                                    })
+                                    .xsmall()
+                                    .primary()
+                                    .disabled(!on || selection == 0)
+                                    .tooltip("Select albums or tracks in the library first")
+                                    .on_click(cx.listener(move |this, _, window, cx| {
+                                        this.run_plugin_command(
+                                            &c1,
+                                            CommandTarget::Selection,
+                                            window,
+                                            cx,
+                                        )
+                                    })),
+                            )
+                        })
+                        .child(
+                            Button::new(SharedString::from(format!("run-all-{cmd}")))
+                                .label(if c.takes_query {
+                                    "Run on everything"
+                                } else {
+                                    "Run"
+                                })
+                                .xsmall()
+                                .outline()
+                                .disabled(!on)
+                                .on_click(cx.listener(move |this, _, window, cx| {
+                                    this.run_plugin_command(
+                                        &c2,
+                                        CommandTarget::Everything,
+                                        window,
+                                        cx,
+                                    )
+                                })),
+                        )
+                        .child(
+                            Button::new(SharedString::from(format!("run-con-{cmd}")))
+                                .label("With options…")
+                                .xsmall()
+                                .ghost()
+                                .disabled(!on)
+                                .tooltip("Type the command with options in the console")
+                                .on_click(cx.listener(move |this, _, window, cx| {
+                                    this.run_plugin_command(&c3, CommandTarget::Console, window, cx)
+                                })),
+                        )
+                        .child(
+                            Button::new(SharedString::from(format!("run-help-{cmd}")))
+                                .label("Options")
+                                .xsmall()
+                                .ghost()
+                                .disabled(!on)
+                                .tooltip("Show the command's options (-h)")
+                                .on_click(cx.listener(move |this, _, window, cx| {
+                                    this.run_plugin_command(&c4, CommandTarget::Help, window, cx)
+                                })),
+                        ),
+                )
+        });
+
+        v_flex()
+            .id("plugin-detail")
+            .size_full()
+            .overflow_y_scroll()
+            .p_4()
+            .gap_4()
+            .child(
+                v_flex()
+                    .gap_1()
+                    .child(div().text_xs().text_color(theme.muted_foreground).child(p.category.to_uppercase()))
+                    .child(
+                        h_flex()
+                            .gap_3()
+                            .child(div().flex_1().text_xl().font_weight(FontWeight::BOLD).child(name))
+                            .child(
+                                Button::new("plugin-toggle")
+                                    .label(if on { "Disable" } else { "Enable" })
+                                    .small()
+                                    .when(!on, |b| b.primary())
+                                    .on_click(cx.listener(move |this, _, window, cx| {
+                                        this.set_plugin_enabled(name, !on, window, cx)
+                                    })),
+                            ),
+                    )
+                    .child(
+                        div()
+                            .text_sm()
+                            .text_color(if on { theme.success } else { theme.muted_foreground })
+                            .child(if on { "Enabled" } else { "Not enabled" }),
+                    )
+                    .when(failed, |d| {
+                        d.child(div().text_sm().text_color(theme.warning).child(
+                            "Enabled, but it didn't load: it may need settings (an API key) or a program. Run a command to see the error.",
+                        ))
+                    }),
+            )
+            .child(div().child(if p.about.is_empty() { "No description." } else { p.about }))
+            .child(
+                v_flex()
+                    .gap_2()
+                    .child(section_title(
+                        if p.commands.is_empty() {
+                            "No commands: it works on its own (on import, or as a query or path feature)".to_string()
+                        } else {
+                            "Commands".to_string()
+                        },
+                        cx,
+                    ))
+                    .when(!on && !p.commands.is_empty(), |d| {
+                        d.child(div().text_sm().text_color(theme.muted_foreground).child("Enable the plugin to use its commands."))
+                    })
+                    .children(commands),
+            )
+            .child(
+                v_flex()
+                    .gap_2()
+                    .child(
+                        h_flex()
+                            .gap_2()
+                            .child(div().flex_1().child(section_title("Settings", cx)))
+                            .when(!p.defaults.is_empty(), |d| {
+                                d.child(
+                                    Button::new("plugin-customize")
+                                        .label("Customize…")
+                                        .xsmall()
+                                        .outline()
+                                        .tooltip("Copy these defaults into config.yaml to change them")
+                                        .on_click(cx.listener(move |this, _, window, cx| {
+                                            this.customize_plugin(name, window, cx)
+                                        })),
+                                )
+                            }),
+                    )
+                    .child(if p.defaults.is_empty() {
+                        div().text_sm().text_color(theme.muted_foreground).child("No settings.")
+                    } else {
+                        div()
+                            .p_2()
+                            .rounded_md()
+                            .bg(theme.secondary)
+                            .text_xs()
+                            .font_family(theme.mono_font_family.clone())
+                            .overflow_hidden()
+                            .children(p.defaults.lines().map(|l| {
+                                div()
+                                    .whitespace_nowrap()
+                                    .overflow_hidden()
+                                    .text_ellipsis()
+                                    .child(l.to_string())
+                            }))
+                    }),
+            )
+            .into_any_element()
+    }
+
     fn render_commands(&mut self, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = cx.theme().clone();
         let groups: [(&str, Vec<CommandButton>); 3] = [
@@ -3955,6 +4571,7 @@ impl Render for BeetsApp {
             Page::Import => self.render_import(cx).into_any_element(),
             Page::Console => self.render_console(cx).into_any_element(),
             Page::Commands => self.render_commands(cx).into_any_element(),
+            Page::Plugins => self.render_plugins(cx).into_any_element(),
             Page::Config => self.render_config(window, cx).into_any_element(),
         };
         h_flex()
@@ -3979,6 +4596,10 @@ impl Render for BeetsApp {
             .on_action(
                 cx.listener(|this, _: &ShowImport, window, cx| this.show(Page::Import, window, cx)),
             )
+            .on_action(cx.listener(|this, _: &ShowPlugins, window, cx| {
+                this.show(Page::Plugins, window, cx);
+                this.plugin_search.update(cx, |s, cx| s.focus(window, cx));
+            }))
             .on_action(cx.listener(|this, _: &ShowCommands, window, cx| {
                 this.show(Page::Commands, window, cx)
             }))

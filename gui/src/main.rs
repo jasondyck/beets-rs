@@ -11,6 +11,7 @@
 
 mod app;
 mod backend;
+mod catalog;
 mod runner;
 
 use std::path::PathBuf;
