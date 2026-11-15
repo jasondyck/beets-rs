@@ -78,6 +78,8 @@ pub enum Resp {
         generation: u64,
         kind: Kind,
         rows: Result<Vec<Row>, String>,
+        /// The library's (items, albums) totals at the same moment.
+        counts: Option<(i64, i64)>,
     },
     Detail {
         generation: u64,
@@ -154,6 +156,10 @@ pub fn spawn(opts: Opts) -> Backend {
     }
 }
 
+/// The generation of a list request made only for the totals that come
+/// with every list response.
+pub const TOTALS_ONLY: u64 = u64::MAX;
+
 fn worker(opts: Opts, rx: flume::Receiver<Req>, tx: flume::Sender<Resp>) {
     let mut lib: Option<Library> = None;
     while let Ok(mut req) = rx.recv() {
@@ -162,6 +168,12 @@ fn worker(opts: Opts, rx: flume::Receiver<Req>, tx: flume::Sender<Resp>) {
         if matches!(req, Req::List { .. }) {
             while let Ok(next) = rx.try_recv() {
                 match next {
+                    // Any list response carries the totals: drop a
+                    // totals-only request rather than a real one.
+                    Req::List {
+                        generation: TOTALS_ONLY,
+                        ..
+                    } => {}
                     Req::List { .. } => req = next,
                     other => {
                         handle(&opts, &mut lib, req, &tx);
@@ -195,6 +207,7 @@ fn handle(opts: &Opts, lib: &mut Option<Library>, req: Req, tx: &flume::Sender<R
                 Some(lib) => list(lib, kind, &query).map_err(|e| format!("{e:#}")),
                 None => Err("the library is not open".into()),
             },
+            counts: lib.as_ref().and_then(|l| l.counts().ok()),
         },
         Req::Detail {
             generation,

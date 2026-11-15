@@ -19,7 +19,9 @@ use gpui_kit::component::{
 use gpui_kit::prelude::*;
 use gpui_kit::*;
 
-use crate::backend::{self, Detail, Field, LibInfo, Opts, Req, Resp, Row, split_words};
+use crate::backend::{
+    self, Detail, Field, LibInfo, Opts, Req, Resp, Row, TOTALS_ONLY, split_words,
+};
 use crate::runner::{self, Color as AnsiColor, Runner, Session};
 
 actions!(
@@ -40,6 +42,8 @@ pub fn bind_keys(cx: &mut App) {
 
 /// Wait this long after the last keystroke before running a search.
 const SEARCH_DEBOUNCE: Duration = Duration::from_millis(220);
+/// How often the list is re-read while a command changes the library.
+const LIVE_REFRESH: Duration = Duration::from_secs(2);
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum Page {
@@ -869,6 +873,23 @@ impl BeetsApp {
         })
         .detach();
 
+        // Keep the list current while a command changes the library.
+        cx.spawn_in(window, async move |this, cx| {
+            loop {
+                cx.background_executor().timer(LIVE_REFRESH).await;
+                if this
+                    .update_in(cx, |this, window, cx| {
+                        this.live_refresh(cx);
+                        window.refresh();
+                    })
+                    .is_err()
+                {
+                    break;
+                }
+            }
+        })
+        .detach();
+
         // Output from `beet` runs.
         let events = runner.rx.clone();
         cx.spawn_in(window, async move |this, cx| {
@@ -974,8 +995,40 @@ impl BeetsApp {
     }
 
     fn load(&mut self, kind: Kind, query: String, cx: &mut Context<Self>) {
-        self.list_gen += 1;
         self.loading = true;
+        self.send_list(kind, query, cx);
+    }
+
+    /// While a command that changes the library runs (an import adds
+    /// albums one by one), re-read the shown list and the totals.
+    fn live_refresh(&mut self, cx: &mut Context<Self>) {
+        if !self
+            .runner
+            .sessions
+            .iter()
+            .any(|s| s.mutates && s.running())
+            || self.loading
+        {
+            return;
+        }
+        if let Some(kind) = self.page.kind() {
+            let query = self.query_text(cx);
+            self.send_list(kind, query, cx);
+        } else {
+            // No list shown: the totals come with any list, so ask for an
+            // empty one under a generation that is never current.
+            self.backend
+                .send(Req::List {
+                    generation: TOTALS_ONLY,
+                    kind: Kind::Album,
+                    query: "id:0".into(),
+                })
+                .ok();
+        }
+    }
+
+    fn send_list(&mut self, kind: Kind, query: String, cx: &mut Context<Self>) {
+        self.list_gen += 1;
         match kind {
             Kind::Album => self.albums_query = Some(query.clone()),
             Kind::Item => self.tracks_query = Some(query.clone()),
@@ -1074,7 +1127,12 @@ impl BeetsApp {
                 generation,
                 kind,
                 rows,
+                counts,
             } => {
+                if let (Some(info), Some((items, albums))) = (self.info.as_mut(), counts) {
+                    info.items = items;
+                    info.albums = albums;
+                }
                 if generation != self.list_gen {
                     return;
                 }
