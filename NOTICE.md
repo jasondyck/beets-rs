@@ -856,6 +856,12 @@ link it. The non-permissive ones are weak/file-level copyleft, unmodified:
 - `deunicode` — BSD-3-Clause (transliteration, used instead of Unidecode).
 - `r-efi` — MIT OR Apache-2.0 OR LGPL-2.1-or-later (UEFI target support,
   not used on Linux); the MIT option applies.
+- `dwrote` — **MPL-2.0** (DirectWrite fonts for `beet-gui` on Windows).
+- `cbindgen` — **MPL-2.0** (a build-time tool in `beet-gui`'s dependency
+  tree; nothing of it is linked).
+- `self_cell` — Apache-2.0 OR GPL-2.0-only (via `beet-gui`'s GPUI); the
+  Apache-2.0 option applies.
+- `beet-gui` is built on GPUI through `gpui-kit` (Apache-2.0).
 
 MPL-2.0 is file-level: since we do not modify those crates, distributing
 beets-rs (source or binary) only requires that their source remain available

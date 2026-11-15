@@ -12,6 +12,8 @@ manager and MusicBrainz tagger.
   4,000 cases through both beets and beets-rs and compares the results.
 - **6–22x faster** than beets on a 10,000-track library (see
   [Performance](#performance)).
+- **A desktop app, `beet-gui`,** for browsing, editing and importing (see
+  [Desktop app](#desktop-app)).
 - **Safe to try alongside beets.** beets-rs keeps its own config and library
   in `~/.config/beets-rs/`, and `beet migrate-beets` copies an existing beets
   library in without touching it.
@@ -21,13 +23,19 @@ manager and MusicBrainz tagger.
 Download the archive for your system from the
 [latest release](https://github.com/jasondyck/beets-rs/releases/latest)
 (Linux x86_64/ARM, macOS Apple silicon/Intel, Windows x86_64), unpack it,
-and put `beet` (`beet.exe` on Windows) on your `PATH`.
+and put `beet` (`beet.exe` on Windows) on your `PATH`. The archive also
+holds the desktop app, `beet-gui`.
 
 Or build from source with a recent Rust toolchain:
 
 ```sh
-cargo build --release      # the binary is target/release/beet
+cargo build --release              # the binary is target/release/beet
+cargo build --release -p beet-gui  # the desktop app, target/release/beet-gui
 ```
+
+Building `beet-gui` on Linux needs the desktop development packages (on
+Debian/Ubuntu: `libxkbcommon-dev libxkbcommon-x11-dev libwayland-dev
+libxcb1-dev libx11-xcb-dev libfontconfig1-dev libfreetype-dev`).
 
 ## Quick start
 
@@ -53,6 +61,23 @@ match:
 fetchart:
     maxwidth: 1200
 ```
+
+## Desktop app
+
+`beet-gui` is a desktop front end built with [GPUI](https://gpui.rs). It
+uses the same config and library as `beet`.
+
+- **Albums and Tracks pages:** browse with beets queries, with cover art and
+  a sortable track table. Edit fields, play, move, write tags, remove, and run
+  the loaded plugins' commands on one item or a selection.
+- **Import page:** every `beet import` option as a form.
+- **Console:** runs any `beet` command, with buttons to answer its prompts.
+- **Configuration page:** edits `config.yaml`.
+- **Keyboard:** press F1 to list the shortcuts.
+
+Anything that changes the library runs the real `beet` command line, so the
+app behaves exactly like `beet`. See [gui/README.md](gui/README.md) (`GUI.md`
+in the release archives).
 
 ## Coming from beets
 

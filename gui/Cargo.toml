@@ -1,6 +1,6 @@
 [package]
 name = "beet-gui"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2024"
 description = "A GPUI desktop front end for beets-rs"
 license = "MIT"
