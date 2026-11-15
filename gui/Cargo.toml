@@ -1,0 +1,18 @@
+[package]
+name = "beet-gui"
+version = "0.2.0"
+edition = "2024"
+description = "A GPUI desktop front end for beets-rs"
+license = "MIT"
+
+[[bin]]
+name = "beet-gui"
+path = "src/main.rs"
+
+[dependencies]
+beets-rs = { path = ".." }
+gpui-kit = "=0.9.0"
+flume = "0.12"
+anyhow = "1.0"
+# Same version as beets-rs: names the values `Library::query_column` returns.
+rusqlite = { version = "0.41.1", features = ["bundled"] }

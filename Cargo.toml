@@ -84,3 +84,15 @@ semicolon_if_nothing_returned = "warn"
 doc_markdown = "warn"
 items_after_statements = "warn"
 map_unwrap_or = "warn"
+
+[workspace]
+members = [".", "gui"]
+
+# The GUI's build: `cargo run -p beet-gui --profile gui`. Our code stays
+# incremental while dependencies are optimized (GPUI's text layout is slow
+# unoptimized). The CLI's dev/release profiles are unchanged.
+[profile.gui]
+inherits = "dev"
+
+[profile.gui.package."*"]
+opt-level = 3
