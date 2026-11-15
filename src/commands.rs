@@ -70,7 +70,7 @@ impl Globals {
 
 /// Load and layer the configuration (beets' `config` global before the
 /// command runs), applying the command line's overrides.
-fn load_config(g: &Globals) -> Result<Config> {
+pub fn load_config(g: &Globals) -> Result<Config> {
     crate::logging::set_verbosity(g.verbose);
     let mut cfg = match Config::load(&g.config) {
         Ok(c) => c,
@@ -135,7 +135,7 @@ fn load_config(g: &Globals) -> Result<Config> {
 
 /// Open the library and load the plugins (beets' `_setup`), sending the
 /// `pluginload` and `library_opened` events.
-fn open_library(cfg: &Config) -> Result<(Library, Vec<Box<dyn Plugin>>)> {
+pub fn open_library(cfg: &Config) -> Result<(Library, Vec<Box<dyn Plugin>>)> {
     let lib = Library::open_with(
         &cfg.library_path(),
         Some(&cfg.directory()),

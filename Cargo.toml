@@ -8,9 +8,17 @@ license = "MIT"
 # 1.89 (rusqlite 0.41, lofty 0.25, uuid 1.29 and their dependencies).
 rust-version = "1.89"
 
+autobins = false
+
+# The library keeps the old binary root's path so branches touching
+# src/main.rs still merge; `beet` is a thin wrapper around it.
+[lib]
+name = "beets_rs"
+path = "src/main.rs"
+
 [[bin]]
 name = "beet"
-path = "src/main.rs"
+path = "src/bin/beet.rs"
 
 [features]
 # Audio output for the bpd plugin (rodio/cpal; needs ALSA headers on Linux).

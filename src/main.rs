@@ -1,46 +1,53 @@
-//! The `beet` binary: a Rust port of the beets music library manager.
+//! beets-rs: the library behind the `beet` command line and the GUI.
 //!
-//! This file is the thin entry point: parse the command line (the clap
+//! (Kept at `src/main.rs`, which was the binary's root, so branches that
+//! touch it still merge; the binary itself is `src/bin/beet.rs`.)
+//!
+//! [`run_cli`] is the command line's entry point: parse the command line (the clap
 //! definition, help formatting and precheck live in [`cli`]), load the
 //! plugins and library, and dispatch to [`commands`].
 
-mod artresizer;
-mod asf;
-mod audioprops;
-mod autotag;
-mod cli;
-mod commands;
-mod config;
-mod diff;
-mod display;
-mod duplicates;
-mod events;
-mod fileops;
-mod formatted;
-mod hooks;
-mod importer;
-mod inline;
-mod langdetect;
-mod layout;
-mod library;
-mod logging;
-mod mb;
-mod media;
-mod mediafile;
-mod metadata_plugins;
-mod migrate;
-mod model;
-mod osutil;
-mod paths;
-mod pipeline;
-mod plugin_registry;
-mod plugins;
-mod pyyaml;
-mod query;
-mod state;
-mod subcommand_help;
-mod template;
-mod ui;
+// Every module is public only so the GUI can reach the library; these two
+// lints fire on public items and were not reported while this was a binary.
+#![allow(clippy::new_without_default, clippy::should_implement_trait)]
+
+pub mod artresizer;
+pub mod asf;
+pub mod audioprops;
+pub mod autotag;
+pub mod cli;
+pub mod commands;
+pub mod config;
+pub mod diff;
+pub mod display;
+pub mod duplicates;
+pub mod events;
+pub mod fileops;
+pub mod formatted;
+pub mod hooks;
+pub mod importer;
+pub mod inline;
+pub mod langdetect;
+pub mod layout;
+pub mod library;
+pub mod logging;
+pub mod mb;
+pub mod media;
+pub mod mediafile;
+pub mod metadata_plugins;
+pub mod migrate;
+pub mod model;
+pub mod osutil;
+pub mod paths;
+pub mod pipeline;
+pub mod plugin_registry;
+pub mod plugins;
+pub mod pyyaml;
+pub mod query;
+pub mod state;
+pub mod subcommand_help;
+pub mod template;
+pub mod ui;
 
 use clap::error::ErrorKind;
 
@@ -51,7 +58,18 @@ pub use cli::{
     root_help_text, subcommand_help_text, unknown_command,
 };
 
-fn main() {
+/// Run the `beet` command line with the process's arguments.
+pub fn run_cli() {
+    run_cli_with(std::env::args_os());
+}
+
+/// [`run_cli`] with explicit arguments (the first is the program name), for
+/// front ends that embed the command line, such as the GUI.
+pub fn run_cli_with<I, T>(args: I)
+where
+    I: IntoIterator<Item = T>,
+    T: Into<std::ffi::OsString>,
+{
     // A closed pipe (`beet ls | head`) ends the program quietly, as beets
     // does on EPIPE, instead of panicking in `println!`.
     #[cfg(unix)]
@@ -60,7 +78,7 @@ fn main() {
     unsafe {
         libc::signal(libc::SIGPIPE, libc::SIG_DFL);
     }
-    let raw: Vec<std::ffi::OsString> = std::env::args_os().collect();
+    let raw: Vec<std::ffi::OsString> = args.into_iter().map(Into::into).collect();
     let (args, root_help, enabled, global, command) = precheck(&raw);
     // As beets, the enabled plugins load (and may warn) before help is
     // printed; unlike beets, without opening the library.
